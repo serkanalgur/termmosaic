@@ -33,8 +33,8 @@ const (
 // filler) plus one progress-bar row and three numeric readouts that change per
 // frame.
 type Scene struct {
-	Prev []buffer.Cell
-	Cur  []buffer.Cell
+	Prev *buffer.Buffer
+	Cur  *buffer.Buffer
 	// Rects is the dirty region the renderer would report.
 	Rects []buffer.Rect
 }
@@ -43,7 +43,7 @@ type Scene struct {
 // builder, so the delta between them is exactly what the renderer sees between
 // two consecutive frames -- there is no hand-written "previous" state to get
 // wrong.
-func staticScene(t int) (prev, cur []buffer.Cell, rects []buffer.Rect) {
+func staticScene(t int) (prev, cur *buffer.Buffer, rects []buffer.Rect) {
 	prev = buildFrame(t - 1)
 	cur = buildFrame(t)
 
@@ -70,15 +70,24 @@ const (
 // buildFrame renders frame t: static chrome plus a progress bar and three
 // numeric readouts whose contents depend on t. Everything else is identical in
 // every frame, which is the 99%-static property the benchmark depends on.
-func buildFrame(t int) []buffer.Cell {
+func buildFrame(t int) *buffer.Buffer {
 	w, h := sceneW, sceneH
 	fg := buffer.NewColour(0xd0, 0xd0, 0xd0)
 	panel := buffer.NewColour(0x30, 0x36, 0x40)
 	fill := buffer.NewColour(0x18, 0x1c, 0x24)
 
-	cells := make([]buffer.Cell, w*h)
-	for i := range cells {
-		cells[i] = buffer.NewCell(' ', fill, fill, 0)
+	// A Buffer rather than a raw []buffer.Cell: Frame carries buffers, so the
+	// scene must be built as the same shape the renderer hands the diff
+	// (ADR 0006). Row writes go through Row, which is stride-correct, so the
+	// scene builder is exercising the public bulk accessor too.
+	buf := buffer.NewBuffer(w, h)
+	set := func(x, y int, c buffer.Cell) { buf.SetCell(x, y, c) }
+	rowFill := buffer.NewCell(' ', fill, fill, 0)
+	for y := 0; y < h; y++ {
+		row := buf.Row(y)
+		for x := range row {
+			row[x] = rowFill
+		}
 	}
 
 	// --- static chrome: three panel borders ------------------------------
@@ -88,17 +97,17 @@ func buildFrame(t int) []buffer.Cell {
 		{41, 10, w - 1, h - 2},
 	} {
 		for x := p.x0; x <= p.x1; x++ {
-			cells[p.y0*w+x] = buffer.NewCell('─', panel, fill, 0)
-			cells[p.y1*w+x] = buffer.NewCell('─', panel, fill, 0)
+			set(x, p.y0, buffer.NewCell('─', panel, fill, 0))
+			set(x, p.y1, buffer.NewCell('─', panel, fill, 0))
 		}
 		for y := p.y0; y <= p.y1; y++ {
-			cells[y*w+p.x0] = buffer.NewCell('│', panel, fill, 0)
-			cells[y*w+p.x1] = buffer.NewCell('│', panel, fill, 0)
+			set(p.x0, y, buffer.NewCell('│', panel, fill, 0))
+			set(p.x1, y, buffer.NewCell('│', panel, fill, 0))
 		}
-		cells[p.y0*w+p.x0] = buffer.NewCell('┌', panel, fill, 0)
-		cells[p.y0*w+p.x1] = buffer.NewCell('┐', panel, fill, 0)
-		cells[p.y1*w+p.x0] = buffer.NewCell('└', panel, fill, 0)
-		cells[p.y1*w+p.x1] = buffer.NewCell('┘', panel, fill, 0)
+		set(p.x0, p.y0, buffer.NewCell('┌', panel, fill, 0))
+		set(p.x1, p.y0, buffer.NewCell('┐', panel, fill, 0))
+		set(p.x0, p.y1, buffer.NewCell('└', panel, fill, 0))
+		set(p.x1, p.y1, buffer.NewCell('┘', panel, fill, 0))
 	}
 
 	// --- static sidebar text ----------------------------------------------
@@ -109,7 +118,7 @@ func buildFrame(t int) []buffer.Cell {
 		}
 		label := fmt.Sprintf("  - item %02d static", i)
 		for x := 0; x < len(label) && 1+x < 39; x++ {
-			cells[y*w+1+x] = buffer.NewCell(rune(label[x]), fg, fill, 0)
+			set(1+x, y, buffer.NewCell(rune(label[x]), fg, fill, 0))
 		}
 	}
 
@@ -144,7 +153,7 @@ func buildFrame(t int) []buffer.Cell {
 		default:
 			c = buffer.NewCell(',', fill, fill, 0)
 		}
-		cells[barY*w+barX0+i] = c
+		set(barX0+i, barY, c)
 	}
 
 	// Three numeric readouts, two cells each, both digits changing every
@@ -155,18 +164,21 @@ func buildFrame(t int) []buffer.Cell {
 		y := readoutY0 + i*2
 		d1 := rune('0' + (t+i)%10)
 		d2 := rune('0' + (t*3+i)%10)
-		cells[y*w+readoutX+0] = buffer.NewCell(d1, fg, fill, 0)
-		cells[y*w+readoutX+1] = buffer.NewCell(d2, fg, fill, 0)
+		set(readoutX+0, y, buffer.NewCell(d1, fg, fill, 0))
+		set(readoutX+1, y, buffer.NewCell(d2, fg, fill, 0))
 	}
-	return cells
+	return buf
 }
 
-func changedCells(prev, cur []buffer.Cell) (cells, rows int) {
+func changedCells(prev, cur *buffer.Buffer) (cells, rows int) {
 	rowsTouched := make(map[int]bool)
-	for i := range cur {
-		if cur[i] != prev[i] {
-			cells++
-			rowsTouched[i/sceneW] = true
+	for y := 0; y < sceneH; y++ {
+		curRow, prevRow := cur.Row(y), prev.Row(y)
+		for x := 0; x < sceneW; x++ {
+			if curRow[x] != prevRow[x] {
+				cells++
+				rowsTouched[y] = true
+			}
 		}
 	}
 	return cells, len(rowsTouched)
@@ -222,11 +234,12 @@ func TestDiffIsMuchSmallerThanFullRepaint(t *testing.T) {
 // property: the two-tier diff never writes more than a full repaint, because
 // tier 1 can only ever save bytes.
 func TestDiffNeverCostsMoreThanFullRepaint(t *testing.T) {
-	prev := make([]buffer.Cell, sceneW*sceneH)
-	cur := make([]buffer.Cell, sceneW*sceneH)
-	for i := range prev {
-		prev[i] = buffer.NewCell(' ', buffer.DefaultColour, buffer.DefaultColour, 0)
-		cur[i] = buffer.NewCell('x', buffer.NewColour(uint8(i%256), 0, 0), buffer.DefaultColour, buffer.AttrBold)
+	prev := buffer.NewBuffer(sceneW, sceneH)
+	cur := buffer.NewBuffer(sceneW, sceneH)
+	for i := 0; i < sceneW*sceneH; i++ {
+		x, y := i%sceneW, i/sceneW
+		prev.SetCell(x, y, buffer.NewCell(' ', buffer.DefaultColour, buffer.DefaultColour, 0))
+		cur.SetCell(x, y, buffer.NewCell('x', buffer.NewColour(uint8(i%256), 0, 0), buffer.DefaultColour, buffer.AttrBold))
 	}
 	enc := ansi.Encoder{Depth: ansi.DepthTrueColor}
 	rects := []buffer.Rect{{W: sceneW, H: sceneH}}
@@ -263,19 +276,22 @@ func BenchmarkDiffDefaultSceneUnicode(b *testing.B) {
 // blockGlyphs rewrites the scene's dynamic-region ASCII glyphs as the block
 // glyphs a real progress bar would use, so the two benchmarks differ only in
 // encoding width.
-func blockGlyphs(cells []buffer.Cell) []buffer.Cell {
-	out := make([]buffer.Cell, len(cells))
-	copy(out, cells)
-	for i := range out {
-		switch out[i].Ch {
-		case '#':
-			out[i].Ch = '█'
-		case '=':
-			out[i].Ch = '▊'
-		case '.':
-			out[i].Ch = '░'
-		case ',':
-			out[i].Ch = '·'
+func blockGlyphs(src *buffer.Buffer) *buffer.Buffer {
+	out := buffer.NewBuffer(sceneW, sceneH)
+	for y := 0; y < sceneH; y++ {
+		srcRow, dstRow := src.Row(y), out.Row(y)
+		copy(dstRow, srcRow)
+		for i := range dstRow {
+			switch dstRow[i].Ch {
+			case '#':
+				dstRow[i].Ch = '█'
+			case '=':
+				dstRow[i].Ch = '▊'
+			case '.':
+				dstRow[i].Ch = '░'
+			case ',':
+				dstRow[i].Ch = '·'
+			}
 		}
 	}
 	return out
@@ -285,7 +301,7 @@ func blockGlyphs(cells []buffer.Cell) []buffer.Cell {
 // it is a recorded fact rather than a comment that drifts.
 func TestUnicodeGlyphSceneCostsMoreBytes(t *testing.T) {
 	enc := ansi.Encoder{Depth: ansi.DepthTrueColor}
-	measure := func(prev, cur []buffer.Cell, rects []buffer.Rect) int {
+	measure := func(prev, cur *buffer.Buffer, rects []buffer.Rect) int {
 		d := NewDiffer(64 * 1024)
 		d.Diff(Frame{Cur: prev, Prev: prev, Width: sceneW, Height: sceneH, ForceFull: true, Encoder: enc})
 		return len(d.Diff(Frame{Cur: cur, Prev: prev, Width: sceneW, Height: sceneH, Rects: rects, Encoder: enc}))
@@ -336,20 +352,21 @@ func BenchmarkDiffDefaultScene(b *testing.B) {
 
 // BenchmarkRowSkipAllRows isolates tier 1: every row compared, none skipped.
 func BenchmarkRowSkipAllRows(b *testing.B) {
-	prev := make([]buffer.Cell, sceneW*sceneH)
-	cur := make([]buffer.Cell, sceneW*sceneH)
-	for i := range prev {
-		prev[i] = buffer.NewCell(' ', buffer.DefaultColour, buffer.DefaultColour, 0)
-		cur[i] = buffer.NewCell('x', buffer.DefaultColour, buffer.DefaultColour, 0)
+	prev := buffer.NewBuffer(sceneW, sceneH)
+	cur := buffer.NewBuffer(sceneW, sceneH)
+	for y := 0; y < sceneH; y++ {
+		for x := 0; x < sceneW; x++ {
+			prev.SetCell(x, y, buffer.NewCell(' ', buffer.DefaultColour, buffer.DefaultColour, 0))
+			cur.SetCell(x, y, buffer.NewCell('x', buffer.DefaultColour, buffer.DefaultColour, 0))
+		}
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for y := 0; y < sceneH; y++ {
-			from := y * sceneW
 			if bytes.Equal(
-				buffer.RowBytes(cur, from, sceneW),
-				buffer.RowBytes(prev, from, sceneW),
+				cur.RowBytes(y, 0, sceneW),
+				prev.RowBytes(y, 0, sceneW),
 			) {
 				continue
 			}
@@ -360,18 +377,19 @@ func BenchmarkRowSkipAllRows(b *testing.B) {
 // BenchmarkRowSkipAllIdentical isolates tier 1 when the skip fires: the
 // static-chrome case that dominates a real frame.
 func BenchmarkRowSkipAllIdentical(b *testing.B) {
-	prev := make([]buffer.Cell, sceneW*sceneH)
-	for i := range prev {
-		prev[i] = buffer.NewCell(' ', buffer.DefaultColour, buffer.DefaultColour, 0)
+	prev := buffer.NewBuffer(sceneW, sceneH)
+	for y := 0; y < sceneH; y++ {
+		for x := 0; x < sceneW; x++ {
+			prev.SetCell(x, y, buffer.NewCell(' ', buffer.DefaultColour, buffer.DefaultColour, 0))
+		}
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for y := 0; y < sceneH; y++ {
-			from := y * sceneW
 			if bytes.Equal(
-				buffer.RowBytes(prev, from, sceneW),
-				buffer.RowBytes(prev, from, sceneW),
+				prev.RowBytes(y, 0, sceneW),
+				prev.RowBytes(y, 0, sceneW),
 			) {
 				continue
 			}
@@ -394,11 +412,12 @@ func BenchmarkFullRepaint(b *testing.B) {
 
 // BenchmarkDiffAllDynamic is ADR 0002's adversarial scene: every cell changes.
 func BenchmarkDiffAllDynamic(b *testing.B) {
-	prev := make([]buffer.Cell, sceneW*sceneH)
-	cur := make([]buffer.Cell, sceneW*sceneH)
-	for i := range prev {
-		prev[i] = buffer.NewCell(' ', buffer.DefaultColour, buffer.DefaultColour, 0)
-		cur[i] = buffer.NewCell('x', buffer.NewColour(uint8(i%256), 0, 0), buffer.DefaultColour, buffer.AttrBold)
+	prev := buffer.NewBuffer(sceneW, sceneH)
+	cur := buffer.NewBuffer(sceneW, sceneH)
+	for i := 0; i < sceneW*sceneH; i++ {
+		x, y := i%sceneW, i/sceneW
+		prev.SetCell(x, y, buffer.NewCell(' ', buffer.DefaultColour, buffer.DefaultColour, 0))
+		cur.SetCell(x, y, buffer.NewCell('x', buffer.NewColour(uint8(i%256), 0, 0), buffer.DefaultColour, buffer.AttrBold))
 	}
 	enc := ansi.Encoder{Depth: ansi.DepthTrueColor}
 	rects := []buffer.Rect{{W: sceneW, H: sceneH}}

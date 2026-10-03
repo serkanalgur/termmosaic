@@ -104,7 +104,7 @@ func BenchmarkBufferFullWrite(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		for y := 0; y < 60; y++ {
-			row := buf.row(y)
+			row := buf.Row(y)
 			for x := range row {
 				row[x] = c
 			}

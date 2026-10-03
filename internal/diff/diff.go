@@ -23,6 +23,7 @@ package diff
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/serkanalgur/termmosaic/buffer"
 	"github.com/serkanalgur/termmosaic/internal/ansi"
@@ -43,12 +44,16 @@ type Cursor struct {
 // Frame is the input to one diff: the freshly drawn cells, the cells currently
 // on screen, and the regions that changed.
 type Frame struct {
-	// Cur and Prev are the new and previously-rendered cell grids, both
-	// len(Width)*Height(Height), row-major. They must be top-level buffers:
-	// sub-buffers are strided and not byte-comparable.
-	Cur  []buffer.Cell
-	Prev []buffer.Cell
-	// Width and Height are the grid dimensions in cells.
+	// Cur and Prev are the new and previously-rendered cell grids. Both must be
+	// top-level buffers (stride == Width) of exactly Width by Height: Diff panics
+	// otherwise, and buffer.RowBytes panics on a view as the backstop. Carrying
+	// the buffers rather than flat []Cell slices is what makes that rule
+	// enforceable — a slice carries no stride to check the flat index against,
+	// which is how ADR 0002's original unsound byte compare shipped (ADR 0006).
+	Cur, Prev *buffer.Buffer
+	// Width and Height are the grid dimensions in cells. They are redundant with
+	// Cur, deliberately: two sources of truth would be its own footgun, so Diff
+	// checks them against both buffers at entry and panics on a mismatch.
 	Width, Height int
 	// Rects are the regions that changed. A nil or empty Rects means nothing
 	// changed and Diff writes nothing.
@@ -98,7 +103,14 @@ func (d *Differ) Scratch() []byte { return d.out }
 // Writing zero bytes is a normal, expected outcome: a frame in which nothing is
 // dirty must not touch the terminal at all, which is the property the frame
 // pacer depends on to stay idle.
+//
+// It panics if the Frame is not internally consistent — a nil Cur or Prev, or a
+// Width or Height that disagrees with either buffer. This is framework-internal
+// wiring, so a mismatch means the renderer handed the diff two different grids,
+// which is a bug worth failing loudly rather than silently mis-indexing. The
+// check runs once per call, not per cell or per row.
 func (d *Differ) Diff(f Frame) []byte {
+	checkFrame(f)
 	d.out = d.out[:0]
 
 	rects := f.Rects
@@ -124,7 +136,7 @@ func (d *Differ) Diff(f Frame) []byte {
 	// terminal's state, since the previous frame ended by positioning the
 	// cursor. On the first frame, or after a resize, we know nothing and the
 	// first written cell must restate its style absolutely.
-	if !f.ForceFull && f.PrevCursor.Valid && len(f.Prev) == len(f.Cur) {
+	if !f.ForceFull && f.PrevCursor.Valid {
 		d.style = f.PrevCursor.Style
 		d.haveStyle = true
 	} else {
@@ -143,27 +155,26 @@ func (d *Differ) Diff(f Frame) []byte {
 		for y := r.Y; y < r.Bottom(); y++ {
 			// ---- Tier 1: per-row skip -------------------------------------
 			// One bytes.Equal over the row's contiguous memory. This is the
-			// whole reason Cell is padding-free.
-			if !f.ForceFull && len(f.Prev) >= (y+1)*f.Width && f.Width > 0 {
-				from := y * f.Width
-				if bytes.Equal(
-					buffer.RowBytes(f.Cur, from, f.Width),
-					buffer.RowBytes(f.Prev, from, f.Width),
-				) {
-					continue
-				}
+			// whole reason Cell is padding-free. RowBytes refuses a sub-buffer,
+			// so this is also where "the frame's buffers must be top-level" is
+			// enforced rather than assumed.
+			if !f.ForceFull && bytes.Equal(
+				f.Cur.RowBytes(y, 0, f.Width),
+				f.Prev.RowBytes(y, 0, f.Width),
+			) {
+				continue
 			}
 
 			// ---- Tier 2: per-cell -----------------------------------------
-			rowStart := y * f.Width
+			// The rows are hoisted out of the inner loop: one slice expression
+			// per row instead of a multiply-add and a bounds check per cell
+			// (ADR 0006).
+			curRow, prevRow := f.Cur.Row(y), f.Prev.Row(y)
 			for x := r.X; x < r.Right(); x++ {
-				cur := f.Cur[rowStart+x]
+				cur := curRow[x]
 
-				if !f.ForceFull && len(f.Prev) >= (y+1)*f.Width {
-					prev := f.Prev[rowStart+x]
-					if cur == prev {
-						continue
-					}
+				if !f.ForceFull && cur == prevRow[x] {
+					continue
 				}
 
 				// A continuation cell is written as part of its wide glyph.
@@ -205,6 +216,24 @@ func (d *Differ) Diff(f Frame) []byte {
 	}
 
 	return d.diffCursor(f, cellsChanged)
+}
+
+// checkFrame panics unless f's two buffers are non-nil and both agree with
+// f.Width and f.Height. It exists so the diff's precondition is checked once per
+// call rather than assumed: a mismatch is a renderer bug, and a renderer bug that
+// mis-indexes two different grids produces wrong pixels rather than a crash.
+func checkFrame(f Frame) {
+	if f.Cur == nil || f.Prev == nil {
+		panic("diff: Frame.Cur and Frame.Prev must both be non-nil buffers")
+	}
+	if f.Cur.Width() != f.Width || f.Cur.Height() != f.Height {
+		panic(fmt.Sprintf("diff: Frame is %dx%d but Cur is %dx%d",
+			f.Width, f.Height, f.Cur.Width(), f.Cur.Height()))
+	}
+	if f.Prev.Width() != f.Width || f.Prev.Height() != f.Height {
+		panic(fmt.Sprintf("diff: Frame is %dx%d but Prev is %dx%d",
+			f.Width, f.Height, f.Prev.Width(), f.Prev.Height()))
+	}
 }
 
 // diffCursor appends the cursor change, if any, and returns the result. It runs

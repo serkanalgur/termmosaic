@@ -383,8 +383,8 @@ func (r *Renderer) Render() (int, error) {
 	}
 
 	out := r.differ.Diff(diff.Frame{
-		Cur:        r.back.Cells(),
-		Prev:       r.front.Cells(),
+		Cur:        r.back,
+		Prev:       r.front,
 		Width:      r.w,
 		Height:     r.h,
 		Rects:      r.dirty,

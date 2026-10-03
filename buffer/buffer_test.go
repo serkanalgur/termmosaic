@@ -236,12 +236,100 @@ func TestSubBufferRowsAreStrided(t *testing.T) {
 	if got := parent.CellAt(2, 4).Rune(); got != 'z' {
 		t.Errorf("parent cell (2,4) = %q, want 'z'; the view is not strided as documented", got)
 	}
+
+	// The same property asserted through the PUBLIC accessor callers actually
+	// hold. Row is the surface that replaced the removed flat Cells(), so this
+	// is the assertion that pins the invariant where it can be violated again.
+	for y := 0; y < sub.Height(); y++ {
+		if got := len(sub.Row(y)); got != sub.Width() {
+			t.Errorf("sub.Row(%d) has length %d, want Width() = %d", y, got, sub.Width())
+		}
+	}
+	if got, want := rowGap(sub, 0, 1), cellSize*parent.Width(); got != want {
+		t.Errorf("public Row gap = %d bytes, want %d (the parent's stride)", got, want)
+	}
+}
+
+// TestRowIsStrideCorrectOnSubBuffer is the correctness half of ADR 0006: Row is
+// the only bulk accessor, so it must be right on a view. Reading sub.Row(y)[x]
+// must give the parent's cell at (x0+x, y0+y) — not the cell a flat y*w+x index
+// would reach, which is the bug the removed Cells() invited.
+func TestRowIsStrideCorrectOnSubBuffer(t *testing.T) {
+	const parentW, parentH = 11, 7
+	parent := NewBuffer(parentW, parentH)
+	for y := 0; y < parentH; y++ {
+		for x := 0; x < parentW; x++ {
+			parent.Set(x, y, rune('a'+x), DefaultColour, DefaultColour, 0)
+		}
+	}
+
+	const x0, y0, w, h = 3, 2, 5, 4
+	sub := parent.SubBuffer(x0, y0, w, h)
+
+	for y := 0; y < h; y++ {
+		row := sub.Row(y)
+		for x := 0; x < w; x++ {
+			want := parent.CellAt(x0+x, y0+y)
+			if got := row[x]; got != want {
+				t.Fatalf("sub.Row(%d)[%d] = %+v, want the parent's (%d,%d) cell %+v",
+					y, x, got, x0+x, y0+y, want)
+			}
+		}
+	}
+
+	// And a write through Row lands in the parent, which is the other half of
+	// "a view shares storage rather than copying it".
+	sub.Row(1)[2] = NewCell('Z', NewColour(0xff, 0, 0), DefaultColour, AttrBold)
+	if got := parent.CellAt(x0+2, y0+1).Rune(); got != 'Z' {
+		t.Errorf("write through sub.Row(1)[2] landed at rune %q, want 'Z'", got)
+	}
+}
+
+// TestRowOnSubBufferReturnsNonAdjacentSlices pins the residual hole ADR 0006
+// records as risk 2: Row is correct per row, and there is no type-level canary
+// for a caller that concatenates a view's rows as though they were adjacent.
+// This is the bug that already shipped once (SubBuffer's original contiguous
+// slice), so the property is asserted rather than left to a doc comment.
+func TestRowOnSubBufferReturnsNonAdjacentSlices(t *testing.T) {
+	const cellSize = int(unsafe.Sizeof(Cell{}))
+	parent := NewBuffer(10, 6)
+	sub := parent.SubBuffer(1, 1, 4, 3)
+
+	gap := int(uintptr(unsafe.Pointer(&sub.Row(1)[0])) - uintptr(unsafe.Pointer(&sub.Row(0)[0])))
+	if want := cellSize * parent.Width(); gap != want {
+		t.Errorf("consecutive view rows are %d bytes apart, want %d: they must not be adjacent", gap, want)
+	}
+	// The distance a caller would wrongly assume: back-to-back cells.
+	if gap == cellSize*sub.Width() {
+		t.Error("a view's rows are contiguous; the striding that RowBytes refuses no longer exists")
+	}
+
+	// On a top-level buffer the same two rows ARE adjacent, which is what makes
+	// the byte-wise row compare sound there.
+	top := NewBuffer(10, 6)
+	if gap := int(uintptr(unsafe.Pointer(&top.Row(1)[0])) - uintptr(unsafe.Pointer(&top.Row(0)[0]))); gap != cellSize*top.Width() {
+		t.Errorf("top-level row gap = %d, want %d", gap, cellSize*top.Width())
+	}
+}
+
+// TestRowOutOfRangeIsNil pins the property Row's doc comment promises, because
+// it is what makes `for _, c := range buf.Row(y)` safe for any y.
+func TestRowOutOfRangeIsNil(t *testing.T) {
+	b := NewBuffer(4, 3)
+	for _, y := range []int{-1, -100, 3, 4, 1 << 30} {
+		if got := b.Row(y); got != nil {
+			t.Errorf("Row(%d) = %v, want nil for an out-of-range row", y, got)
+		}
+	}
+	if got := b.Row(2); got == nil || len(got) != b.Width() {
+		t.Errorf("Row(Height()-1) = %v, want a full row of %d cells", got, b.Width())
+	}
 }
 
 // rowGap returns the byte distance between the first cell of row a and the
 // first cell of row b.
 func rowGap(b *Buffer, a, c int) int {
-	return int(uintptr(unsafe.Pointer(&b.row(c)[0])) - uintptr(unsafe.Pointer(&b.row(a)[0])))
+	return int(uintptr(unsafe.Pointer(&b.Row(c)[0])) - uintptr(unsafe.Pointer(&b.Row(a)[0])))
 }
 
 func TestClipIsDetached(t *testing.T) {

@@ -141,13 +141,22 @@ func (s *MemorySink) Flush() error { return nil }
 // Assertion surface: cells
 // ---------------------------------------------------------------------------
 
-// Cells returns the screen's backing cell slice, row-major. It is a copy, so a
-// test may hold it across further writes.
+// Cells returns the screen as a flat, row-major slice of cells. It is a
+// detached dense copy, so a test may hold it across further writes.
+//
+// The copy is built row by row with Row rather than from a flat slice: the
+// screen is always a top-level buffer, so this is the one place a flat grid is
+// the right shape — a caller holding the result has the whole grid, detached,
+// and cannot accidentally compute a stride-sensitive index against a view
+// (ADR 0006).
 func (s *MemorySink) Cells() []buffer.Cell {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]buffer.Cell, len(s.screen.Cells()))
-	copy(out, s.screen.Cells())
+	w, h := s.screen.Width(), s.screen.Height()
+	out := make([]buffer.Cell, 0, w*h)
+	for y := 0; y < h; y++ {
+		out = append(out, s.screen.Row(y)...)
+	}
 	return out
 }
 

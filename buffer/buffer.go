@@ -62,10 +62,6 @@ func (b *Buffer) Width() int { return b.w }
 // Height returns the buffer's height in cells.
 func (b *Buffer) Height() int { return b.h }
 
-// Cells returns the backing cell slice, row-major. It is exposed for the diff
-// and for tests; callers must not resize the buffer while holding it.
-func (b *Buffer) Cells() []Cell { return b.cx }
-
 // Clear resets every cell to DefaultCell without marking anything dirty. It is
 // the buffer-level reset; use ClearRect for a region.
 func (b *Buffer) Clear() {
@@ -78,7 +74,7 @@ func (b *Buffer) Clear() {
 func (b *Buffer) ClearRect(r Rect) {
 	r = r.Clip(b.w, b.h)
 	for y := r.Y; y < r.Bottom(); y++ {
-		row := b.row(y)
+		row := b.Row(y)
 		for x := r.X; x < r.Right(); x++ {
 			row[x] = DefaultCell
 		}
@@ -106,10 +102,25 @@ func (b *Buffer) Resize(w, h int) {
 	b.MarkAllDirty()
 }
 
-// row returns the y-th row as a slice aliasing the backing store. For a
-// sub-buffer the returned slice has length w but consecutive rows are stride
-// apart in memory.
-func (b *Buffer) row(y int) []Cell {
+// Row returns row y as a slice aliasing the buffer's storage, of length
+// Width(). It is the bulk cell accessor: correct on a top-level buffer and on a
+// sub-buffer alike, because the stride is applied here rather than being left to
+// the caller.
+//
+// An out-of-range y returns nil, so `for _, c := range b.Row(y)` is safe for any
+// y. The returned slice aliases the buffer: do not resize the buffer while
+// holding it.
+//
+// On a sub-buffer consecutive calls are NOT adjacent in memory. A caller that
+// concatenates rows as though they were is re-creating ADR 0002's original
+// unsound byte compare; a dense whole-buffer copy is
+// `for y := range b.Height() { copy(dst[y*b.Width():], b.Row(y)) }`, or Clip.
+// There is no flat index for a view, which is why no flat accessor is exported
+// (ADR 0006).
+func (b *Buffer) Row(y int) []Cell {
+	if y < 0 || y >= b.h {
+		return nil
+	}
 	return b.cx[y*b.stride : y*b.stride+b.w]
 }
 
@@ -212,7 +223,7 @@ func (b *Buffer) Fill(c Cell) {
 func (b *Buffer) FillRect(r Rect, c Cell) {
 	r = r.Clip(b.w, b.h)
 	for y := r.Y; y < r.Bottom(); y++ {
-		row := b.row(y)
+		row := b.Row(y)
 		for x := r.X; x < r.Right(); x++ {
 			row[x] = c
 		}
@@ -257,7 +268,7 @@ func (b *Buffer) Clip(r Rect) *Buffer {
 	r = r.Clip(b.w, b.h)
 	out := NewBuffer(r.W, r.H)
 	for y := 0; y < r.H; y++ {
-		copy(out.row(y), b.row(r.Y + y)[r.X:r.Right()])
+		copy(out.Row(y), b.Row(r.Y + y)[r.X:r.Right()])
 	}
 	out.dirty.reset()
 	return out

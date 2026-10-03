@@ -14,17 +14,15 @@ var (
 	white = buffer.NewColour(0xff, 0xff, 0xff)
 )
 
-// grid builds a w-by-h grid of spaces.
-func grid(w, h int) []buffer.Cell {
-	cells := make([]buffer.Cell, w*h)
-	for i := range cells {
-		cells[i] = buffer.DefaultCell
-	}
-	return cells
+// grid builds a w-by-h top-level buffer of spaces. It is a Buffer rather than a
+// flat []buffer.Cell because Frame carries buffers (ADR 0006), so the fixtures
+// build the same shape the renderer hands the diff.
+func grid(w, h int) *buffer.Buffer {
+	return buffer.NewBuffer(w, h)
 }
 
-func setCell(cells []buffer.Cell, w, x, y int, c buffer.Cell) {
-	cells[y*w+x] = c
+func setCell(b *buffer.Buffer, x, y int, c buffer.Cell) {
+	b.SetCell(x, y, c)
 }
 
 func TestDiffWritesNothingWhenNothingChanged(t *testing.T) {
@@ -61,7 +59,7 @@ func TestRowSkipEmitsOnlyDirtyRows(t *testing.T) {
 	prev := grid(w, h)
 	cur := grid(w, h)
 	// One changed cell on row 2 only.
-	setCell(cur, w, 3, 2, buffer.NewCell('X', red, buffer.DefaultColour, 0))
+	setCell(cur, 3, 2, buffer.NewCell('X', red, buffer.DefaultColour, 0))
 
 	d := NewDiffer(1024)
 	out := string(d.Diff(Frame{
@@ -82,10 +80,10 @@ func TestEmitsSGROnColourChange(t *testing.T) {
 	prev := grid(w, h)
 	cur := grid(w, h)
 	for x := 0; x < 6; x++ {
-		setCell(prev, w, x, 0, buffer.NewCell('a', buffer.DefaultColour, buffer.DefaultColour, 0))
-		setCell(cur, w, x, 0, buffer.NewCell('a', buffer.DefaultColour, buffer.DefaultColour, 0))
+		setCell(prev, x, 0, buffer.NewCell('a', buffer.DefaultColour, buffer.DefaultColour, 0))
+		setCell(cur, x, 0, buffer.NewCell('a', buffer.DefaultColour, buffer.DefaultColour, 0))
 	}
-	setCell(cur, w, 2, 0, buffer.NewCell('a', red, buffer.DefaultColour, 0))
+	setCell(cur, 2, 0, buffer.NewCell('a', red, buffer.DefaultColour, 0))
 
 	d := NewDiffer(1024)
 	out := string(d.Diff(Frame{
@@ -106,10 +104,10 @@ func TestNoSGRWhenOnlyTheRuneChanges(t *testing.T) {
 	prev := grid(w, h)
 	cur := grid(w, h)
 	for x := 0; x < w; x++ {
-		setCell(prev, w, x, 0, buffer.NewCell('a', white, white, 0))
-		setCell(cur, w, x, 0, buffer.NewCell('a', white, white, 0))
+		setCell(prev, x, 0, buffer.NewCell('a', white, white, 0))
+		setCell(cur, x, 0, buffer.NewCell('a', white, white, 0))
 	}
-	setCell(cur, w, 1, 0, buffer.NewCell('b', white, white, 0))
+	setCell(cur, 1, 0, buffer.NewCell('b', white, white, 0))
 
 	d := NewDiffer(1024)
 	// Seed the tracked style from a previous frame that left the cursor with
@@ -130,10 +128,10 @@ func TestSGRIsEmittedForEveryStyleChangeNotEveryCell(t *testing.T) {
 	prev := grid(w, h)
 	cur := grid(w, h)
 	// Four adjacent cells, all changed, two sharing a style.
-	setCell(cur, w, 0, 0, buffer.NewCell('a', red, blue, buffer.AttrBold))
-	setCell(cur, w, 1, 0, buffer.NewCell('b', red, blue, buffer.AttrBold))
-	setCell(cur, w, 2, 0, buffer.NewCell('c', white, blue, buffer.AttrBold))
-	setCell(cur, w, 3, 0, buffer.NewCell('d', red, blue, 0))
+	setCell(cur, 0, 0, buffer.NewCell('a', red, blue, buffer.AttrBold))
+	setCell(cur, 1, 0, buffer.NewCell('b', red, blue, buffer.AttrBold))
+	setCell(cur, 2, 0, buffer.NewCell('c', white, blue, buffer.AttrBold))
+	setCell(cur, 3, 0, buffer.NewCell('d', red, blue, 0))
 
 	d := NewDiffer(1024)
 	out := string(d.Diff(Frame{
@@ -159,7 +157,7 @@ func TestColorDepthLadder(t *testing.T) {
 	w, h := 2, 1
 	prev := grid(w, h)
 	cur := grid(w, h)
-	setCell(cur, w, 0, 0, buffer.NewCell('a', red, blue, 0))
+	setCell(cur, 0, 0, buffer.NewCell('a', red, blue, 0))
 
 	cases := []struct {
 		depth ansi.Depth
@@ -190,7 +188,7 @@ func TestNoColorSuppressesColourButKeepsAttributes(t *testing.T) {
 	w, h := 2, 1
 	prev := grid(w, h)
 	cur := grid(w, h)
-	setCell(cur, w, 0, 0, buffer.NewCell('a', red, blue, buffer.AttrUnderline|buffer.AttrBold))
+	setCell(cur, 0, 0, buffer.NewCell('a', red, blue, buffer.AttrUnderline|buffer.AttrBold))
 
 	d := NewDiffer(1024)
 	out := string(d.Diff(Frame{
@@ -210,7 +208,7 @@ func TestDepthNoneEmitsNoColour(t *testing.T) {
 	w, h := 2, 1
 	prev := grid(w, h)
 	cur := grid(w, h)
-	setCell(cur, w, 0, 0, buffer.NewCell('a', red, red, 0))
+	setCell(cur, 0, 0, buffer.NewCell('a', red, red, 0))
 
 	d := NewDiffer(1024)
 	out := string(d.Diff(Frame{
@@ -248,13 +246,14 @@ func TestContinuationCellIsNotWritten(t *testing.T) {
 	prev := grid(w, h)
 	cur := grid(w, h)
 	// A wide glyph at cells 0 and 1, written via SetString semantics.
-	cur[0] = buffer.NewCell('漢', red, buffer.DefaultColour, 0)
-	cur[1] = buffer.NewCell(0, red, buffer.DefaultColour, 0)
+	cur.SetCell(0, 0, buffer.NewCell('漢', red, buffer.DefaultColour, 0))
+	cur.SetCell(1, 0, buffer.NewCell(0, red, buffer.DefaultColour, 0))
 	// Mark cell 1 as the continuation half the way SetString does. The flag is
 	// private, so reach it through a Buffer, which is the only supported path.
 	b := buffer.NewBuffer(w, h)
 	b.SetString(0, 0, "漢", red, buffer.DefaultColour, 0)
-	cur[0], cur[1] = b.CellAt(0, 0), b.CellAt(1, 0)
+	cur.SetCell(0, 0, b.CellAt(0, 0))
+	cur.SetCell(1, 0, b.CellAt(1, 0))
 
 	d := NewDiffer(1024)
 	out := string(d.Diff(Frame{
@@ -269,6 +268,113 @@ func TestContinuationCellIsNotWritten(t *testing.T) {
 	if !strings.Contains(out, "漢") {
 		t.Fatalf("the glyph itself must be emitted: %q", out)
 	}
+}
+
+// TestDiffRejectsMismatchedFrameSize is the guard ADR 0006 adds because Frame
+// carries buffers rather than flat slices: Width and Height are now redundant
+// with Cur, and two sources of truth would be their own footgun. The check runs
+// once per Diff call, not per row, and it fails loudly because a mismatch means
+// the renderer handed the diff two different grids — which mis-indexes into
+// wrong pixels rather than a crash.
+func TestDiffRejectsMismatchedFrameSize(t *testing.T) {
+	d := NewDiffer(1024)
+	enc := ansi.Encoder{Depth: ansi.DepthTrueColor}
+	rects := []buffer.Rect{{W: 4, H: 2}}
+
+	cases := []struct {
+		name        string
+		f           Frame
+		wantInPanic string
+	}{
+		{
+			name: "nil Cur",
+			f:    Frame{Prev: grid(4, 2), Width: 4, Height: 2, Rects: rects, Encoder: enc},
+		},
+		{
+			name: "nil Prev",
+			f:    Frame{Cur: grid(4, 2), Width: 4, Height: 2, Rects: rects, Encoder: enc},
+		},
+		{
+			name:        "Cur wider than the frame",
+			f:           Frame{Cur: grid(6, 2), Prev: grid(4, 2), Width: 4, Height: 2, Rects: rects, Encoder: enc},
+			wantInPanic: "Cur",
+		},
+		{
+			name:        "Cur shorter than the frame",
+			f:           Frame{Cur: grid(4, 1), Prev: grid(4, 2), Width: 4, Height: 2, Rects: rects, Encoder: enc},
+			wantInPanic: "Cur",
+		},
+		{
+			name:        "Prev wider than the frame",
+			f:           Frame{Cur: grid(4, 2), Prev: grid(8, 2), Width: 4, Height: 2, Rects: rects, Encoder: enc},
+			wantInPanic: "Prev",
+		},
+		{
+			name:        "Prev shorter than the frame",
+			f:           Frame{Cur: grid(4, 2), Prev: grid(4, 3), Width: 4, Height: 2, Rects: rects, Encoder: enc},
+			wantInPanic: "Prev",
+		},
+		{
+			name:        "frame larger than both buffers",
+			f:           Frame{Cur: grid(4, 2), Prev: grid(4, 2), Width: 8, Height: 2, Rects: rects, Encoder: enc},
+			wantInPanic: "Cur",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// The guard is unconditional: it fires even for an idle frame with
+			// no rects, because "did anything change" is not what makes a
+			// malformed Frame safe.
+			defer func() {
+				r := recover()
+				if r == nil {
+					t.Fatal("Diff must panic on a frame whose buffers disagree with its size")
+				}
+				msg, ok := r.(string)
+				if !ok {
+					t.Fatalf("panic value is %T, want a string", r)
+				}
+				if tc.wantInPanic != "" && !strings.Contains(msg, tc.wantInPanic) {
+					t.Errorf("panic message %q does not name %s", msg, tc.wantInPanic)
+				}
+				t.Logf("panic: %s", msg)
+			}()
+			d.Diff(tc.f)
+		})
+	}
+}
+
+// TestDiffRejectsSubBuffer pins the second half of the guard: the frame's
+// buffers must be top-level, because RowBytes refuses a view. Before ADR 0006
+// this was undetectable — a bare []Cell carries no stride to check a flat index
+// against, which is how the original unsound byte compare shipped.
+func TestDiffRejectsSubBuffer(t *testing.T) {
+	// The parent is wider than the view, so the view's stride differs from its
+	// width while its cell count still matches the frame's dimensions. Only the
+	// stride can tell the two apart — exactly the case the old flat []Cell API
+	// could not detect, because a slice carries no stride.
+	parent := buffer.NewBuffer(12, 10)
+	sub := parent.SubBuffer(0, 0, 10, 10)
+	if got := sub.Width() * sub.Height(); got != 100 {
+		t.Fatalf("fixture is wrong: the view holds %d cells, want 100", got)
+	}
+
+	d := NewDiffer(1024)
+	f := Frame{
+		Cur: sub, Prev: parent, Width: 10, Height: 10,
+		Rects:   []buffer.Rect{{W: 10, H: 10}},
+		Encoder: ansi.Encoder{Depth: ansi.DepthTrueColor},
+	}
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("Diff must not accept a sub-buffer: its rows are not byte-comparable")
+		}
+		t.Logf("panic: %v", r)
+	}()
+	d.Diff(f)
 }
 
 func TestCursorDiffedSeparately(t *testing.T) {
@@ -323,7 +429,7 @@ func TestWideGlyphOnlyWrittenOnce(t *testing.T) {
 	src.SetString(0, 0, "漢", red, buffer.DefaultColour, 0)
 	cur := grid(w, h)
 	for x := 0; x < w; x++ {
-		cur[x] = src.CellAt(x, 0)
+		cur.SetCell(x, 0, src.CellAt(x, 0))
 	}
 	d := NewDiffer(1024)
 	out := string(d.Diff(Frame{

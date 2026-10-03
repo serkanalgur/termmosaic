@@ -1,6 +1,7 @@
 package buffer
 
 import (
+	"strings"
 	"testing"
 	"unsafe"
 )
@@ -49,12 +50,54 @@ func TestRowBytesAreContiguous(t *testing.T) {
 	b := NewBuffer(4, 1)
 	b.Set(0, 0, 'a', DefaultColour, DefaultColour, 0)
 	b.Set(1, 0, 'b', DefaultColour, DefaultColour, 0)
-	got := RowBytes(b.Cells(), 0, 4)
+	got := b.RowBytes(0, 0, 4)
 	if len(got) != 64 {
 		t.Fatalf("rowBytes len = %d, want 64", len(got))
 	}
 	if unsafe.Sizeof(Cell{}) != 16 {
 		t.Fatal("cell size changed")
+	}
+}
+
+// TestRowBytesPanicsOnSubBuffer is ADR 0006's structural refusal: RowBytes is a
+// method on Buffer so that the old free-function call no longer compiles, and it
+// panics on a view because a strided row has no correct byte range to hand back.
+// A nil return would let bytes.Equal(nil, nil) report two different strided rows
+// as equal.
+func TestRowBytesPanicsOnSubBuffer(t *testing.T) {
+	parent := NewBuffer(10, 10)
+	sub := parent.SubBuffer(2, 3, 4, 5)
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("RowBytes on a sub-buffer must panic: its rows are not contiguous")
+		}
+		msg, ok := r.(string)
+		if !ok {
+			t.Fatalf("panic value is %T, want a string naming the alternative", r)
+		}
+		if !strings.Contains(msg, "Row") || !strings.Contains(msg, "SubBuffer") {
+			t.Errorf("panic message does not name Row/SubBuffer as the alternative: %q", msg)
+		}
+	}()
+	sub.RowBytes(0, 0, sub.Width())
+}
+
+// TestRowBytesOutOfRangeIsNil keeps the panic narrow: only a sub-buffer panics.
+// An empty or out-of-range range on a top-level buffer is a normal answer,
+// because the diff clips its rectangles before asking.
+func TestRowBytesOutOfRangeIsNil(t *testing.T) {
+	b := NewBuffer(4, 2)
+	for _, tc := range []struct{ y, x0, n int }{
+		{-1, 0, 4}, {0, -1, 4}, {2, 0, 4}, {0, 0, 0}, {0, 0, -1}, {0, 3, 2}, {0, 4, 1},
+	} {
+		if got := b.RowBytes(tc.y, tc.x0, tc.n); got != nil {
+			t.Errorf("RowBytes(%d,%d,%d) = %d bytes, want nil", tc.y, tc.x0, tc.n, len(got))
+		}
+	}
+	if got := b.RowBytes(1, 1, 3); len(got) != 48 {
+		t.Errorf("RowBytes(1,1,3) = %d bytes, want 48", len(got))
 	}
 }
 

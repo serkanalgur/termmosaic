@@ -141,28 +141,45 @@ func (c Cell) asContinuation() Cell {
 // displayable glyph, so a stray write of it is visually inert.
 const continuationRune rune = 0
 
-// cellBytes returns the cell's backing memory as bytes for the row-wise
-// comparison in the diff.
+// cellBytes returns n consecutive cells' backing memory, starting at c, as
+// bytes for the row-wise comparison in the diff.
 //
-// This is the only place in the codebase where a []Cell is reinterpreted as
-// []byte, as ADR 0002 requires. It is sound only because TestCellHasNoPadding
-// guarantees there is no undefined padding to compare.
-func cellBytes(c *Cell) []byte {
-	return unsafe.Slice((*byte)(unsafe.Pointer(c)), unsafe.Sizeof(*c))
+// This is the only place in the codebase where cells are reinterpreted as
+// bytes, as ADR 0002 requires. It is sound only because TestCellHasNoPadding
+// guarantees there is no undefined padding to compare; contiguity is the
+// caller's precondition, which is why RowBytes — the only caller — refuses a
+// sub-buffer (ADR 0006).
+func cellBytes(c *Cell, n int) []byte {
+	return unsafe.Slice((*byte)(unsafe.Pointer(c)), n*int(unsafe.Sizeof(Cell{})))
 }
 
-// RowBytes returns n consecutive cells' backing memory, starting at index from.
-// Cells in the buffer's top level are contiguous in a single slice, so a row
-// segment is one contiguous span and a single bytes.Equal covers it.
+// RowBytes returns n consecutive cells' backing memory, starting at (x0, y) in
+// the row y of b, as bytes. It exists for the diff's byte-wise row comparison
+// (ADR 0002) and for nothing else.
 //
-// from is an index into the flat cell slice, i.e. row*stride + x. Only a
-// top-level buffer (stride == Width) has a row as a single contiguous span;
-// sub-buffers carry a stride, so callers must pass already-flattened
-// coordinates and must not use RowBytes for them. The diff only ever runs
-// against top-level buffers.
-func RowBytes(cells []Cell, from, n int) []byte {
-	if n <= 0 || from < 0 || from+n > len(cells) {
+// On a top-level buffer stride == Width, so a row segment is one contiguous
+// span and a single bytes.Equal covers it.
+//
+// It panics if b is a sub-buffer. A view's rows are strided by its parent, so no
+// range of its cells is contiguous and there is nothing correct to hand back.
+// The correct answer is not to diff a view: compose with SubBuffer, diff at the
+// top. This is a TermMosaic bug rather than a user error — the diff is the only
+// caller and it only ever receives the renderer's top-level front and back
+// buffers — which is why it panics instead of returning nil. A nil return would
+// make bytes.Equal(nil, nil) report two different strided rows as equal: a wrong
+// answer behind a safe-looking signature. Note the deliberate contrast with
+// SetCell, which does not panic on an out-of-range write because its coordinates
+// come from widget layout.
+//
+// Returns nil for an out-of-range or empty range.
+func (b *Buffer) RowBytes(y, x0, n int) []byte {
+	if b.stride != b.w {
+		panic("buffer: RowBytes called on a sub-buffer; a view's rows are strided and are not byte-comparable. Diff top-level buffers. To read a view's cells use Row, or Clip for a dense copy; to stop getting one, do not compose with SubBuffer.")
+	}
+	if n <= 0 || x0 < 0 || x0+n > b.w || y < 0 || y >= b.h {
 		return nil
 	}
-	return unsafe.Slice((*byte)(unsafe.Pointer(&cells[from])), n*int(unsafe.Sizeof(Cell{})))
+	// cellBytes is the single place cells are reinterpreted as bytes. The range
+	// is contiguous here precisely because the sub-buffer case panicked above.
+	return cellBytes(&b.cx[y*b.stride+x0], n)
 }
