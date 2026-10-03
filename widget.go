@@ -1,0 +1,43 @@
+package termmosaic
+
+import "github.com/serkanalgur/termmosaic/buffer"
+
+// Widget is a retained node in the UI tree, exactly as ADR 0003 specifies it.
+//
+// The four-method surface is the whole contract, and its smallness is the
+// point: there is no reconciler, no virtual tree, no incremental-draw interface,
+// and no message algebra. ADR 0003 argues each of those away explicitly — most
+// importantly that requiring widget authors to implement correct incremental
+// invalidation is a discipline Go cannot enforce, and that silent invalidation
+// bugs are the worst class of bug a TUI can have.
+//
+// The trade, recorded in ADR 0003 and accepted: Draw runs for every widget every
+// frame, cheap today (~81 µs for 12,000 cells) with no lever to pull if it ever
+// stops being cheap. The dirty-rectangle accumulator is the hook an incremental
+// API would attach to, when that day comes.
+type Widget interface {
+	// Bounds returns the widget's rectangle in screen cells. It must be safe to
+	// call before the widget has ever been drawn.
+	Bounds() Rect
+	// Draw writes the widget's cells into buf, which is clipped to Bounds.
+	// It is called every frame for every widget and is expected to be cheap
+	// and idempotent: writing the same state twice must produce the same cells.
+	Draw(buf *buffer.Buffer)
+	// Invalidate marks Bounds dirty. It must be safe to call from any
+	// goroutine (ADR 0003), which the buffer's dirty accumulator provides.
+	Invalidate()
+	// Handle offers the event to the widget and reports whether it consumed it.
+	// Events are offered to the focused widget first, then to the tree.
+	Handle(Event) bool
+}
+
+// Focusable is an optional interface a Widget implements if it can take focus.
+// The renderer uses it to maintain focus order without requiring every widget to
+// carry a focus method.
+type Focusable interface {
+	Widget
+	// Focused reports whether the widget currently has focus.
+	Focused() bool
+	// SetFocused gives or removes focus. Implementations invalidate themselves.
+	SetFocused(bool)
+}
