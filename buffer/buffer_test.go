@@ -1,6 +1,9 @@
 package buffer
 
-import "testing"
+import (
+	"testing"
+	"unsafe"
+)
 
 func TestBufferBasics(t *testing.T) {
 	b := NewBuffer(3, 2)
@@ -192,6 +195,53 @@ func TestSubBufferIsAViewAndForwardsDirty(t *testing.T) {
 	if edge.Width() != 2 || edge.Height() != 2 {
 		t.Errorf("clipped sub size = %dx%d, want 2x2", edge.Width(), edge.Height())
 	}
+}
+
+// TestSubBufferRowsAreStrided pins the SECOND precondition of ADR 0002's
+// byte-wise row comparison.
+//
+// Padding-free Cell is necessary but not sufficient: the byte range handed to
+// bytes.Equal must also be contiguous, and that is a property of the caller,
+// not of the type. TestCellHasNoPadding cannot cover it, because no type-level
+// test can. This bug shipped once already -- SubBuffer originally returned a
+// naively contiguous slice, which satisfied the padding invariant and was still
+// an unsound byte compare, because a row-major sub-rectangle is strided.
+//
+// The rule the code now enforces: byte-wise row comparison is sound on
+// top-level buffers only. Sub-buffers are strided and must never be
+// byte-compared; the renderer composes with views and diffs at the top.
+func TestSubBufferRowsAreStrided(t *testing.T) {
+	const cellSize = int(unsafe.Sizeof(Cell{}))
+
+	// A top-level buffer's rows ARE contiguous, so the byte compare is sound.
+	top := NewBuffer(8, 4)
+	if got, want := rowGap(top, 0, 1), cellSize*top.Width(); got != want {
+		t.Errorf("top-level row gap = %d bytes, want %d; top-level rows must be contiguous", got, want)
+	}
+
+	// A sub-buffer's rows are NOT contiguous, so the same byte compare would be
+	// reading across the parent's row boundary.
+	parent := NewBuffer(10, 10)
+	sub := parent.SubBuffer(2, 3, 4, 5)
+	if got, want := rowGap(sub, 0, 1), cellSize*sub.Width(); got == want {
+		t.Errorf("a sub-buffer's rows are contiguous (%d bytes); they should be strided by the parent", got)
+	}
+	if got, want := rowGap(sub, 0, 1), cellSize*parent.Width(); got != want {
+		t.Errorf("sub row gap = %d bytes, want %d (the parent's stride)", got, want)
+	}
+
+	// The striding is observable: a cell written at sub-buffer row 1 lands in
+	// parent row 4, not immediately after sub-buffer row 0.
+	sub.Set(0, 1, 'z', DefaultColour, DefaultColour, 0)
+	if got := parent.CellAt(2, 4).Rune(); got != 'z' {
+		t.Errorf("parent cell (2,4) = %q, want 'z'; the view is not strided as documented", got)
+	}
+}
+
+// rowGap returns the byte distance between the first cell of row a and the
+// first cell of row b.
+func rowGap(b *Buffer, a, c int) int {
+	return int(uintptr(unsafe.Pointer(&b.row(c)[0])) - uintptr(unsafe.Pointer(&b.row(a)[0])))
 }
 
 func TestClipIsDetached(t *testing.T) {

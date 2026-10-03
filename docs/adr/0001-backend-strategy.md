@@ -2,6 +2,9 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
+- **Amended:** 2026-10-04 — recorded the `golang.org/x/term` version pin and the
+  verified `CGO_ENABLED=0` cross-compilation status, including the fact that the
+  Windows backend is a loud stub.
 - **Decides:** [STATUS.md](../STATUS.md) — Core architecture / Backend strategy
 - **Supersedes:** the "Option A / B / C" section of the former
   ARCHITECTURE.md "Decision 1".
@@ -114,6 +117,13 @@ frame. Measured changed cells: **42 / 12,000 (0.35%)**, **4 / 60 rows dirty
 four representations — bytes are representation-independent. Only ns/op and
 allocations differ.
 
+> **Amended 2026-10-04.** Re-measured in the committed implementation on the
+> same scene shape, the diff writes **141 bytes** against **19,979** for a full
+> repaint — **~141×**, not 217×. The absolute byte count is dominated by the
+> scene's glyph widths rather than by the algorithm (the same scene costs 206
+> bytes with realistic 3-byte block glyphs), so the durable claim is the ratio.
+> See [ADR 0002](0002-buffer-representation.md) for the correction in full.
+
 ### What could not be measured
 
 - **We did not benchmark tcell's diff quality**, only its draw and flush cost.
@@ -190,6 +200,55 @@ The renderer depends only on `Sink`. The widget/test harness depends only on
   OpenTUI's `BufferedBackend` vs `FeedBackend` split. Not built in v1.
 - Dependency footprint: `golang.org/x/sys` and `golang.org/x/term` (for raw mode
   only). Nothing else. Go 1.23 floor preserved.
+
+### Dependency versions, and one deliberate pin
+
+| Module | Version | Why |
+|---|---|---|
+| `golang.org/x/sys` | v0.28.0 | Current release compatible with the Go 1.23 floor. |
+| `golang.org/x/term` | **v0.27.0 (pinned)** | `@latest` requires **Go 1.26**, which would break the Go 1.23 floor this ADR commits to. |
+
+`x/term` is a direct dependency only because `term/terminal_unix.go` needs its
+raw-mode helper; it is not load-bearing for anything else in the design.
+
+The irony is worth recording rather than hiding: this is the **same
+"pin to an old version" shape we rejected tcell for.** tcell was rejected in
+part because `gdamore/tcell/v2@v2.13.10` declares `go 1.24.0` against our
+1.23 floor — a version floor we did not agree to. Here we meet the identical
+problem from the other side and answer it by pinning rather than by refusing,
+because `x/term` is a two-function dependency we can trivially vendor or
+reimplement and tcell is 18k lines we cannot. **The difference in our
+reasoning is cost, not principle**, and we should say so if this pin is ever
+cited as evidence that version floors are fine.
+
+**This is a real, ongoing maintenance cost, not a one-time note.** The pin has
+to be re-checked every time `x/term` publishes: someone must notice the new
+release, confirm whether it still requires Go 1.26, and decide whether to bump.
+Nothing enforces it. The trigger for unpinning is a Go version-floor increase
+that we have separately agreed to — at which point this becomes a routine
+`go get -u`. Until then, expect this line to need revisiting each quarter.
+
+### Cross-compilation: verified status
+
+`CGO_ENABLED=0` builds are **verified** for `windows/amd64` and `linux/arm64`
+in addition to the native darwin/arm64 target. The no-cgo claim is therefore
+tested rather than asserted, which matters because it was a stated project goal
+and the main reason Yoga was rejected
+([ADR 0004](0004-layout-engine.md)).
+
+**Platform support, qualified.** "It builds for Windows" is *not* "it works on
+Windows." The Windows backend in `term/terminal_windows.go` is deliberately a
+**stub that returns a loud, exported error** (`term.ErrWindowsStub`) from every
+operation that touches the console — raw mode, alt screen, read. `Open` succeeds
+so that a program can start and report a readable failure rather than dying on a
+message the user cannot act on. This is exactly the mitigation ADR 0001's own
+guidance calls for: do not ship a half-working Windows console that passes its own
+tests on a developer's machine. The escape hatch, if Windows is required before
+v1.0, remains a build-tagged tcell backend behind the unchanged
+`Terminal`/`Sink` interfaces.
+
+So the honest platform matrix today is: **Linux and macOS functional; Windows
+compiles and fails loudly at runtime.**
 
 ## Consequences
 

@@ -26,8 +26,13 @@ Yoga layout nodes, and the real `react-reconciler` in its React bindings.
 ## Evidence gathered
 
 From [ADR 0002](0002-buffer-representation.md)'s benchmark: on a 200×60 scene
-that is 99% static chrome, a **two-tier diff costs 7,133 ns/op and writes 107
-bytes, against 23,240 bytes for a full repaint** — a 217× reduction.
+that is 99% static chrome, a **two-tier diff costs ~7,100 ns/op and writes 141
+bytes, against 19,979 bytes for a full repaint** — roughly a 141× reduction.
+
+*Amended 2026-10-04:* the byte figures were originally 107 vs 23,240 (217×).
+The measured ratio depends on glyph width — the same scene costs 141 bytes with
+ASCII dynamic glyphs and 206 with block glyphs — so the ratio, not a
+scene-specific byte count, is the stable claim. See ADR 0002.
 
 That number is the whole argument. Static chrome is cheap **because the diff
 skips it**, not because we chose a renderer mode. The diff makes the
@@ -113,7 +118,7 @@ enforce that user code is single-goroutine-correct.
 
 **Good**
 
-- Static chrome costs nothing per frame (measured 217× byte reduction), and it
+- Static chrome costs nothing per frame (measured ~141× byte reduction), and it
   costs nothing because of the diff, which is under our control.
 - Widget authors write one `Draw` method with no incremental-draw obligation —
   the single biggest ergonomic win for thirty widgets.

@@ -43,8 +43,9 @@ recorded in full, with rejected alternatives, in [docs/adr/](adr/README.md).
 Decisions 1 and 2 were made **empirically** — a scratch benchmark module was
 built outside the repo and measured on darwin/arm64 (Apple M1). The headline
 result: a two-tier diff on a 200×60 scene that is 99% static chrome writes
-**107 bytes against 23,240 for a full repaint** (217× less), at **7,133 ns/op**
-with **0 allocs/op**, comfortably inside a 16 ms frame budget.
+**~141× fewer bytes than a full repaint** (141 vs 19,979 bytes as measured in
+the committed implementation), at **~7,133 ns/op** with **0 allocs/op**,
+comfortably inside a 16 ms frame budget.
 
 Two findings contradict earlier assumptions and are recorded rather than
 quietly dropped: **OpenTUI's struct-of-arrays advantage does not transfer from
@@ -54,6 +55,26 @@ every cell per frame and its headless backend cannot expose the cell buffer.
 Raw benchmark output is quoted inline in ADR 0001 and ADR 0002, including the
 workloads that did not produce a clean result. Decisions 3 and 4 were made on
 API-surface and dependency grounds and involve no measurements.
+
+### Amendments
+
+Three accepted ADRs were amended on 2026-10-04, after the core implementation
+exposed claims that no longer described the code. Each amendment notes the date
+and reason in the ADR's header; the original reasoning is preserved in place
+rather than rewritten.
+
+- **ADR 0002 — the byte-compare soundness condition was half-stated.** Padding
+  is one precondition; contiguity of the compared range is the other, and it is
+  a property of the call site, not of `Cell`. A `SubBuffer` that returned a
+  tightly packed slice violated it while `Cell` was still exactly 16 bytes.
+  Now stated as two preconditions, with `Buffer.stride` as the structural fix.
+- **ADR 0002 — the byte-count figure.** "107 bytes" was an artifact of a
+  single-byte-glyph benchmark scene. The claim is the **ratio (~141×)**, not the
+  absolute number.
+- **ADR 0004 — `Fill` is not order-sensitive.** The original ADR recorded this
+  as its top usability sharp edge; the committed solver resolves all fixed
+  constraints before any `Fill`, and a test pins that as a guarantee. The ADR
+  now documents order-insensitivity as a deliberate divergence from tmux.
 
 ## Widget catalog
 
@@ -107,7 +128,11 @@ Answered questions have been removed; the reasoning is preserved in
   tcell's headless backend cannot do this and widget tests need it.
 - **Windows console support.** ADR 0001 commits to owning the terminal layer,
   which means Windows console mode flags are our problem. Linux and macOS are
-  expected first; Windows is currently an unquantified v1.0 risk.
+  expected first; Windows is currently an unquantified v1.0 risk. **Updated
+  2026-10-04:** `CGO_ENABLED=0` builds are now verified for `windows` and
+  `linux/arm64`, so the packaging half of the risk is closed — but the Windows
+  backend is a **stub that returns a loud error** from every console operation,
+  not a working console. The remaining risk is entirely the runtime half.
 - **Color model and degradation ladder**, and the **theme/styling system** — see
   the OPEN rows above.
 

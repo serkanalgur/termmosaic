@@ -29,8 +29,10 @@ original stays and a new one supersedes it, so the reasoning history survives.
   advantage is a Zig `mem.eql` advantage and does not transfer to Go: the
   packed AoS row skip *ties* with SoA (5,373 vs 5,128 ns/op) and is 4.4×
   *faster* when every row is dirty (147.2 vs 636.7 ns/op), because it is one
-  wide memcmp instead of four. A two-tier diff on a 200×60 scene writes 107
-  bytes against 23,240 for a full repaint.
+  wide memcmp instead of four. A two-tier diff on a 200×60 scene writes ~141×
+  fewer bytes than a full repaint. Byte-wise row comparison additionally
+  requires the compared range to be **contiguous**, not just `Cell` to be
+  padding-free — see the 2026-10-04 amendment.
 
 - **0003 — Renderer: hybrid.** A retained widget tree invalidated by rectangle,
   with widgets describing themselves on demand. No reconciler, no Elm loop.
@@ -38,8 +40,10 @@ original stays and a new one supersedes it, so the reasoning history survives.
 
 - **0004 — Layout: constraint-based, own solver.** `Length`/`Min`/`Max`/
   `Percentage`/`Ratio`/`Fill`, matching what Bubble Tea users already know.
-  Flexbox via Yoga was rejected because **cgo breaks `CGO_ENABLED=0`
-  cross-compilation**, contradicting the single-static-binary goal.
+  `Fill` is **order-insensitive** — a deliberate, tested divergence from tmux's
+  priority-ordered rule. Flexbox via Yoga was rejected because **cgo breaks
+  `CGO_ENABLED=0` cross-compilation**, contradicting the single-static-binary
+  goal.
 
 ## How these were decided
 

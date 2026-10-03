@@ -2,6 +2,9 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
+- **Amended:** 2026-10-04 — the byte-compare soundness condition was stated
+  incompletely (it named padding but not contiguity), and the byte-count figure
+  was an artifact of a single-byte-glyph benchmark scene.
 - **Decides:** [STATUS.md](../STATUS.md) — Core architecture / Cell buffer representation
 - **Depends on:** [ADR 0001](0001-backend-strategy.md)
 - **Supersedes:** the "Option AoS / SoA" section of the former ARCHITECTURE.md
@@ -52,15 +55,40 @@ go test -run '^$' -bench . -benchmem -benchtime=20000x -count=5
 
 ### Bytes written (representation-independent)
 
+As originally measured in the scratch module:
+
 | Pass | Bytes |
 |---|---|
 | Full repaint (AoS) | 23,240 |
 | Full repaint (SoA) | 23,240 |
 | Two-tier diff — **every** variant | **107** |
 
-**217× reduction**, and all four variants emit identical bytes. The test suite
-asserts this equality rather than assuming it. Bytes are decided by the diff
-algorithm, not the memory layout.
+**217× reduction**, and all four variants emit identical bytes — the scratch
+suite asserted that equality rather than assuming it. Bytes are decided by the
+diff algorithm, not the memory layout.
+
+> **Amended 2026-10-04 — read the ratio, not the byte count.** Re-measured in the
+> committed implementation on the same scene shape (200×60, 42/12,000 cells
+> changed, 4/60 rows dirty), the diff writes **141 bytes** against **19,979** for
+> a full repaint: still **~141×**, but not 217× and not 107 bytes. The scene,
+> not the algorithm, owns the absolute number:
+>
+> | Dynamic-region glyphs | Diff bytes |
+> |---|---|
+> | ASCII (`#`, `=`, `.`, `,` — 1 byte each) | **141** |
+> | Block glyphs (`█`, `▊`, `░`, `·` — 3 bytes each in UTF-8) | **206** |
+>
+> The original 107 was an artifact of a scene whose changing glyphs were all
+> single-byte ASCII. Almost every real dynamic cell in a TUI is a block-drawing
+> or box-drawing character, which is 3 bytes in UTF-8, so **byte cost is
+> dominated by glyph width, not by the diff algorithm.** The committed test
+> `TestUnicodeGlyphSceneCostsMoreBytes` pins the observation so it cannot drift
+> back into being folklore.
+>
+> The durable claim is therefore the *ratio* (~141×) plus the structural
+> property that tier 1 can only ever save bytes — asserted by
+> `TestDiffIsMuchSmallerThanFullRepaint` and
+> `TestDiffNeverCostsMoreThanFullRepaint`, not by any absolute byte figure.
 
 ### ns/op, two-tier diff (default scene, median of 5)
 
@@ -70,6 +98,14 @@ algorithm, not the memory layout.
 | SoA_4Planes | 8,003 | 0 |
 | SoA_RunePlanes | 23,643 | 0 |
 | AoS_Natural (padded) | 21,643 | 0 |
+
+**~7,133 ns/op remains the target.** Re-measured in the committed
+implementation, `BenchmarkDiffDefaultSceneAllRows` (which, like the table above,
+compares all 60 rows rather than only the 4 the dirty rectangles name) lands in
+the **6,900–7,100 ns/op median band at 0 allocs/op** on the same machine, so the
+figure above stands as written. The two-tier ratio between packed AoS and SoA is
+what this decision rests on, and it is unaffected by the byte-count correction
+above.
 
 ### ns/op, row-skip in isolation, all 60 rows (median of 5)
 
@@ -142,6 +178,81 @@ entirely and the row skip degrades to a typed loop at **4× the cost** (20,777
 ns/op). OpenTUI's `[]u32` char plane is deliberate; in Go, the equivalent means
 declaring the plane as `[]uint32`, not `[]rune`.
 
+### The second Go-specific hazard: contiguity is a property of the *caller*
+
+> **Added by amendment, 2026-10-04.** Everything above treats padding as *the*
+> soundness condition for byte-wise row comparison. It is only half of it. The
+> original text of this ADR stated one precondition and silently assumed the
+> other, which is how a real unsoundness shipped.
+
+The argument above is:
+
+> If `Cell` is padding-free, then `bytes.Equal` over a row's contiguous byte
+> range correctly determines row equality.
+
+Both clauses are load-bearing, and only the first was written down.
+
+1. **(a) `Cell` is padding-free** — a property of the *type*. Go does not define
+   the contents of tail padding, so comparing it compares noise. Enforced by
+   `TestCellHasNoPadding` and `TestCellHasNoInteriorPadding`.
+2. **(b) The byte range passed to `bytes.Equal` is genuinely contiguous** — a
+   property of the *caller*, not of the type. No type-level test can establish
+   it. `bytes.Equal` has no way to know how the caller chose the two slices it
+   was handed; given two spans of equal length it will happily compare the wrong
+   3,200 bytes.
+
+**The discovery that forced this amendment.** `Buffer.SubBuffer` originally
+returned, for a sub-rectangle of a row-major grid, the naively contiguous slice:
+
+```go
+// WRONG — and wrong while Cell was still exactly 16 padding-free bytes.
+cx: b.cx[r.Y*b.stride+r.X : r.Y*b.stride+r.X+r.W*r.H]
+```
+
+That slice is tightly packed, so `RowBytes(sub.Cells(), y*sub.W, sub.W)` returns
+one contiguous span and every clause of the originally-stated invariant holds.
+It is also *not the row*. For a sub-rectangle of a row-major grid the sub-rows
+are **strided**: row `r.Y+1` of the parent starts at `(r.Y+1)*stride`, not at
+`r.Y*stride + r.W`. The byte compare therefore ran off the end of the sub-row
+and into the parent's next row — reporting rows dirty that had not changed
+(phantom repaints) and, in the mirror case, rows equal that were not.
+
+This is the exact shape of bug the padding argument exists to prevent, and the
+padding argument did not catch it: precondition (a) was satisfied, (b) was
+violated, and the compare was still unsound.
+
+**The fix, and the invariant now enforced in code.** `Buffer` carries an explicit
+`stride` field — equal to `Width` for a top-level buffer, inherited from the
+parent for a sub-buffer. Every row is addressed as `cx[y*stride : y*stride+w]`,
+so the data structure can no longer silently disagree with itself about layout,
+and the invariant is:
+
+> **Byte-wise row comparison is sound on top-level buffers only. Sub-buffers are
+> strided and must never be byte-compared.**
+
+This is not a comment-only rule; it is stated at every layer where a future
+change could break it:
+
+- `buffer.RowBytes` documents that `from` is `row*stride + x`, and that only a
+  top-level buffer (`stride == Width`) has a row as a single contiguous span.
+- `diff.Frame.Cur` and `.Prev` are documented as "must be top-level buffers:
+  sub-buffers are strided and not byte-comparable."
+- `diff` only ever runs against the renderer's top-level front/back buffers.
+  Layout composition uses `SubBuffer` views; the diff happens once, at the top.
+  This matches what `diff.go` actually does.
+- `TestSubBufferRowsAreStrided` (`buffer`) pins the property directly, so a
+  future refactor cannot reintroduce the naive slice without failing a test.
+
+**Test coverage assessment.** `TestCellHasNoPadding` plus
+`TestCellHasNoInteriorPadding` fully cover precondition (a) and were always
+sufficient for it. Neither, nor `TestRowBytesAreContiguous` (which only checks
+that `n` cells yield `n*16` bytes), can cover precondition (b): all three are
+about the type, and (b) is about the call site.
+`TestSubBufferIsAViewAndForwardsDirty` did catch the original naive-slice bug,
+but only *incidentally*, through its view-semantics assertion — stride was never
+named. That is exactly why the invariant is recorded here rather than left to a
+test that happens to trip over it.
+
 ## Options considered
 
 ### SoA with `[]rune` planes
@@ -169,8 +280,13 @@ because a style change alone dirties a row and forces all four compares anyway.
 // Cell is exactly 16 bytes with no interior or tail padding, so a row can be
 // compared with bytes.Equal over its backing memory.
 //
-// INVARIANT: any change to these fields must preserve sizeof(Cell) == 16 and
-// keep every byte meaningful. TestPackedCellHasNoPaddingHazard enforces it.
+// INVARIANT (precondition (a)): any change to these fields must preserve
+// sizeof(Cell) == 16 and keep every byte meaningful. TestCellHasNoPadding
+// enforces it.
+//
+// INVARIANT (precondition (b), added 2026-10-04): padding-free is NOT SUFFICIENT.
+// The byte range compared must also be contiguous, which is a property of the
+// call site. Only top-level buffers satisfy it; see Buffer.stride.
 type Cell struct {
     Ch   rune   // int32
     FG   Colour // uint32, 0x00RRGGBB
@@ -180,13 +296,26 @@ type Cell struct {
 }
 ```
 
+> As implemented, those last two bytes are spent on the wide-glyph continuation
+> flag rather than left as a reserved pad — see `buffer/cell.go`. Same size,
+> same padding-free property, and every byte meaningful.
+
 ## Decision
 
 **Array-of-structs, with a 16-byte padding-free `Cell` and a byte-wise row skip.**
 
 - The buffer is `[]Cell`, width × height, row-major, plus a mirror `[]Cell`
   holding the previous frame. The tier-1 row skip is
-  `bytes.Equal(asBytes(cur[y]), asBytes(prev[y]))`.
+  `bytes.Equal(RowBytes(cur, y*stride, w), RowBytes(prev, y*stride, w))`.
+- **The byte-wise row skip requires two preconditions, not one:**
+  1. `Cell` is padding-free (a property of the type), **and**
+  2. the byte range compared is contiguous (a property of the caller).
+  Padding-free alone does not make the compare sound; see "The second
+  Go-specific hazard" above.
+- **Byte-wise row comparison is sound on top-level buffers only.**
+  `Buffer` therefore carries a `stride`, and sub-buffers — strided views used
+  for layout composition — must never be byte-compared. The renderer composes
+  with sub-buffers and diffs once at the top.
 - **`Cell` is a plain comparable struct.** Widget authors write
   `buf.Set(x, y, 'x', fg, bg, attr)` and compare cells with `==`. This is the
   API ergonomics argument, and it turns out to be worth more than the
@@ -216,13 +345,25 @@ type Cell struct {
 
 - **The padding invariant is a footgun.** If someone adds a field to `Cell`
   and forgets the pad, `bytes.Equal` silently compares garbage. We accept this
-  and mitigate with a mandatory guard test
-  (`TestPackedCellHasNoPaddingHazard`) that fails on any size change, plus a
-  document comment stating the invariant. SoA has no equivalent hazard; that is
+  and mitigate with a mandatory guard test (`TestCellHasNoPadding`,
+  `TestCellHasNoInteriorPadding`) that fails on any size or offset change, plus
+  a document comment stating the invariant. SoA has no equivalent hazard; that is
   a genuine robustness advantage for SoA that we are trading away.
+- **The contiguity invariant is a second, quieter footgun — and it is the one
+  that actually bit us.** Padding-free `Cell` did not save us; a `SubBuffer`
+  that returned a tightly packed slice produced an unsound byte compare while
+  every documented type-level invariant held. Unlike the padding hazard there
+  is no type-level test that can cover this one, because it lives at the call
+  site. Mitigation is therefore structural rather than advisory: `Buffer`
+  carries `stride` so row addressing goes through one strided expression,
+  `RowBytes` states the precondition in its own doc comment, `diff.Frame`
+  states it again at the boundary, and `TestSubBufferRowsAreStrided` pins it.
+  Two of those are comments; the discipline of "compose with views, diff at the
+  top" is what actually enforces it.
 - **Row-viewing the buffer requires `unsafe.Slice`** to reinterpret `[]Cell`
-  as `[]byte`. This is sound *only* while the no-padding invariant holds, and it
-  is confined to one function in the diff so the blast radius is small. We
+  as `[]byte`. This is sound *only* while both preconditions hold — the
+  no-padding invariant *and* contiguity of the range passed in — and it is
+  confined to one function (`buffer.RowBytes`) so the blast radius is small. We
   should keep it in exactly one place.
 - **Widening for hyperlinks costs 50% more memory per cell** (16 → 24 bytes).
   Still 288 KB for a 200×60 screen, irrelevant at v1 sizes.
@@ -254,6 +395,13 @@ type Cell struct {
    packed into 16 bytes, revisit whether SoA's freedom from this hazard is
    worth the measured 12% and the API cost. Likely trigger: complex text
    shaping or per-cell inline styling demanding more than 16 bytes.
+1b. **The contiguity invariant (added 2026-10-04).** Lower probability than
+   (1) but harder to detect, because it has no type-level canary: the failure
+   mode is a plausible-looking redraw, not a failing test. Trigger for
+   revisiting whether to make `RowBytes` refuse non-top-level buffers
+   structurally — e.g. moving it behind a `*Buffer` receiver that can read
+   `stride`, so an unsound call is a compile error rather than a review
+   comment.
 2. **Wide characters.** A CJK or emoji glyph occupies two cells. Both are
    written, and the continuation cell must compare equal across frames or it
    will flicker. The row skip is unaffected. Needs its own ADR when

@@ -67,8 +67,8 @@ The skip is a **tie** between packed AoS and SoA — the win is padding-free
 contiguity, not SoA-ness. When *every* row is dirty the skip never fires and
 packed AoS is **4.4× faster** (147.2 vs 636.7 ns/op). Full two-tier diff: 7,133
 ns/op for packed AoS vs 8,003 for SoA, both 0 allocs/op. Bytes written are
-identical across all representations — 107 for the diff against 23,240 for a
-full repaint, a 217× reduction.
+identical across all representations — 141 for the diff against 19,979 for a
+full repaint, a ~141× reduction.
 
 **The Go-specific hazard, which is not the expected one.** A byte-wise row
 compare over a *padded* Go struct is unsound: we demonstrated two rows with
@@ -91,7 +91,7 @@ type Widget interface {
 }
 ```
 
-Static chrome is cheap because of the two-tier diff (217× fewer bytes), not
+Static chrome is cheap because of the two-tier diff (~141× fewer bytes), not
 because of the renderer mode — so the mode does not have to carry that weight.
 Every widget's `Draw` runs every frame; widgets are **not** required to
 implement incremental drawing, because Go cannot enforce invalidation discipline
