@@ -1,0 +1,19 @@
+# Binaries
+/termmosaic
+/examples/*/termmosaic
+/bin/
+
+# Go
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
