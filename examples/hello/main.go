@@ -8,6 +8,12 @@
 // diff, the layout solver, the renderer and the encoder with no terminal
 // involved at all.
 //
+// Input goes through the real input subsystem: one goroutine over
+// source.Events() receives keys, mouse events and resizes on one ordered
+// channel, instead of the two-goroutine input-plus-resize dance and the raw-byte
+// scan for 'q' this example used before ADR 0005. Everything about how those
+// bytes got decoded is the input package's business, not the example's.
+//
 // Note what this example does not use: the widget catalog is empty at this stage
 // of the project. The block is drawn by direct buffer writes on purpose, because
 // this example is the foundation layer and widgets get built against it later.
@@ -22,6 +28,7 @@ import (
 
 	"github.com/serkanalgur/termmosaic"
 	"github.com/serkanalgur/termmosaic/buffer"
+	"github.com/serkanalgur/termmosaic/input"
 	"github.com/serkanalgur/termmosaic/render"
 	"github.com/serkanalgur/termmosaic/term"
 )
@@ -214,24 +221,18 @@ func run() error {
 	var quitOnce sync.Once
 	stop := func() { quitOnce.Do(func() { close(quit) }) }
 
-	// Resize: the renderer recomputes the layout and forces a full repaint,
-	// because the previous frame described a screen that no longer exists.
-	go func() {
-		for {
-			select {
-			case <-quit:
-				return
-			case s, ok := <-t.ResizeEvents():
-				if !ok {
-					return
-				}
-				w, h = s.W, s.H
-				root.bounds = centred(w, h, blockW, blockH)
-				r.Resize(w, h)
-				r.InvalidateAll()
-			}
-		}
-	}()
+	// Input. The Source is built AFTER raw mode, because the kitty keyboard query
+	// it sends is answered on the input stream and is meaningless without raw
+	// mode. WriteProbe is wired to the example's own sink rather than to a method
+	// on Terminal, which is the point of ADR 0005 not widening ADR 0001's
+	// interface.
+	//
+	// DefaultConfig requests bracketed paste and probes for kitty disambiguation;
+	// it leaves mouse capture and focus reporting OFF, because enabling either by
+	// default takes text selection and scrollback copying away from the user's
+	// shell. A real application that wanted a mouse would set MouseMode.
+	sink := term.NewSink(os.Stdout)
+	src := input.NewSource(t, withProbe(input.DefaultConfig(), sink))
 
 	// The body shows a frame counter that only changes when a frame is drawn, so
 	// the example needs a heartbeat to keep the block alive at the target rate.
@@ -252,21 +253,33 @@ func run() error {
 		}
 	}()
 
-	// Input: TermMosaic has no input decoder yet — see the term package
-	// documentation — so this example scans raw bytes for a quit key itself.
-	// That is a documented gap, not a demonstration of the intended API.
+	// Keys and resizes arrive on ONE ordered channel, so a resize can never be
+	// delivered between the bytes of a half-read escape sequence, and no input
+	// event is ever dropped to make room for a resize.
 	go func() {
-		b := make([]byte, 32)
 		for {
-			n, err := t.Read(b)
-			if err != nil {
+			select {
+			case <-quit:
 				return
-			}
-			for i := 0; i < n; i++ {
-				switch b[i] {
-				case 'q', 'Q', 0x03, 0x1b: // q, Q, Ctrl-C, Esc
+			case ev, ok := <-src.Events():
+				if !ok {
+					// The terminal reached EOF.
 					stop()
 					return
+				}
+				switch ev.Kind {
+				case termmosaic.EventKey:
+					if isQuitKey(ev) {
+						stop()
+						return
+					}
+				case termmosaic.EventResize:
+					w, h = ev.Size.W, ev.Size.H
+					root.bounds = centred(w, h, blockW, blockH)
+					r.Resize(w, h)
+					// Force a full repaint: the previous frame described a
+					// screen that no longer exists.
+					r.InvalidateAll()
 				}
 			}
 		}
@@ -278,9 +291,47 @@ func run() error {
 
 	err = <-frameErr
 	close(stopBeat)
+	// Closing the Source restores the terminal modes it enabled and stops its
+	// goroutines. It does not close the terminal, which the deferred t.Close()
+	// above owns.
+	_ = src.Close()
 	_ = r.LeaveAltScreen()
 	_ = t.LeaveRawMode()
 	return err
+}
+
+// withProbe returns cfg with its WriteProbe wired to sink.
+//
+// The sink is what the renderer already writes frames through, so the enable
+// sequences and the kitty query go out on the same path as the UI rather than
+// through a second writer that could interleave with it.
+func withProbe(cfg input.Config, sink termmosaic.Sink) input.Config {
+	cfg.WriteProbe = func(p []byte) error {
+		if _, err := sink.Write(p); err != nil {
+			return err
+		}
+		return sink.Flush()
+	}
+	return cfg
+}
+
+// isQuitKey reports whether ev should end the example.
+//
+// These are the keys a person actually reaches for, expressed in the decoder's
+// vocabulary rather than as raw bytes: Ctrl-C arrives as Ctrl+'c' rather than as
+// 0x03, and Escape arrives as KeyEscape only after the decoder has waited out its
+// ambiguity delay. The raw-byte version could not tell an arrow key from four
+// unrelated bytes.
+func isQuitKey(ev termmosaic.Event) bool {
+	switch {
+	case ev.Key == termmosaic.KeyEscape:
+		return true
+	case ev.Rune == 'q' || ev.Rune == 'Q':
+		return ev.Mod == 0
+	case ev.Rune == 'c':
+		return ev.Mod == termmosaic.ModCtrl
+	}
+	return false
 }
 
 func isTerminal(f *os.File) bool {

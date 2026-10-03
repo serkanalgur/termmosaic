@@ -66,8 +66,18 @@ func DetectCaps(getenv func(string) string) termmosaic.Caps {
 	// user having to opt in to features that work.
 	caps.Mouse = true
 	caps.BracketedPaste = true
-	// The kitty keyboard protocol is NOT assumed: a terminal that does not
-	// implement it will treat the enable sequence as garbage.
+	// The kitty keyboard protocol is NOT assumed, and this flag means "MAY
+	// SUPPORT", not "ACTIVE". It is a TERM substring heuristic and nothing more;
+	// a terminal whose TERM contains "kitty" may still be a build without the
+	// protocol, and a terminal without it may still have the protocol.
+	//
+	// Negotiation state deliberately does NOT live here. Whether the protocol is
+	// actually in force is a property of a running session rather than of a
+	// device: it is established by input.Source's CSI ? u query and reported by
+	// Source.KittyActive(). Reading KittyKeyboard to decide whether to send
+	// enabling sequences is therefore wrong twice over — it would enable a
+	// protocol on a terminal that does not have one, and it would leave the flag
+	// at false on a terminal that does. See ADR 0005 section 2.
 	caps.KittyKeyboard = strings.Contains(term, "kitty")
 
 	// NO_COLOR is a colour decision, not a capability. It is applied by the

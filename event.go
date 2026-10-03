@@ -9,16 +9,24 @@ type EventKind int
 const (
 	// EventNone is the zero value and carries no event.
 	EventNone EventKind = iota
-	// EventKey is a key press, possibly with modifiers.
+	// EventKey is a key press, repeat or release.
 	EventKey
 	// EventResize reports a new terminal size.
 	EventResize
 	// EventMouse is a mouse button press, release or motion.
 	EventMouse
-	// EventPaste is a bracketed-paste payload.
+	// EventPaste is a bracketed-paste payload, delivered whole.
 	EventPaste
 	// EventFocus reports gaining or losing terminal focus.
 	EventFocus
+	// EventCompose reports IME composition state.
+	//
+	// DECLARED BUT NEVER EMITTED IN v0.x. IME support is deferred by ADR 0005
+	// §7; this constant exists so the union can already express composition,
+	// and so a widget author writing a switch today sees the case and knows
+	// composition is coming. Do not emit it and do not handle it as if it were
+	// live.
+	EventCompose
 )
 
 // String returns the kind's name.
@@ -36,6 +44,8 @@ func (k EventKind) String() string {
 		return "paste"
 	case EventFocus:
 		return "focus"
+	case EventCompose:
+		return "compose"
 	default:
 		return "unknown"
 	}
@@ -44,11 +54,18 @@ func (k EventKind) String() string {
 // Key identifies a key press. Printable keys are carried as their rune in
 // Event.Rune; Key is only set for keys that have no printable form.
 //
-// The set is deliberately the xterm-encodable set. TermMosaic supports the
-// kitty keyboard protocol when the terminal advertises it (Caps.KittyKeyboard),
-// which is how keys like Hyper and Super and unambiguous Ctrl+Shift+letter
-// arrive; without it, some combinations are indistinguishable and this is an
-// accepted limitation of owning the input layer.
+// The set is deliberately the xterm-encodable set, with no F13–F35. A new key
+// must be APPENDED at the end of the iota block below: the constants are
+// contiguous and inserting one in the middle silently renumbers every later
+// value.
+//
+// TermMosaic decodes the kitty keyboard protocol when the handshake on an
+// input.Source succeeds — not merely when a terminal advertises the capability.
+// Caps.KittyKeyboard is a TERM heuristic meaning "may support", and the
+// negotiation state lives on the Source because it is a property of a running
+// session rather than of a device. See ADR 0005 §2. Without a successful
+// handshake some combinations are indistinguishable; that is an accepted
+// limitation of owning the input layer.
 type Key int
 
 // Non-printable keys.
@@ -64,9 +81,11 @@ const (
 	// encode it that way and a widget usually wants to treat it differently
 	// from tab.
 	KeyBacktab
-	// KeyBackspace is the backspace key. Note that a terminal may deliver it
-	// as a control character rather than as an escape sequence, depending on
-	// the terminfo setting; the input decoder will have to reconcile that.
+	// KeyBackspace is the backspace key. A terminal may deliver it as a
+	// control character rather than as an escape sequence, depending on the
+	// terminfo setting, and the input decoder reconciles that: both 0x7f and
+	// 0x08 decode to KeyBackspace by default. See ADR 0005 §2, and
+	// input.Config.BackspaceByte to pin one.
 	KeyBackspace
 	// KeyEscape is the escape key, which a bare escape is indistinguishable
 	// from the start of an escape sequence.
@@ -224,11 +243,94 @@ type Mouse struct {
 	Mod KeyMod
 }
 
+// KeyType is what happened to a key.
+//
+// Without the kitty keyboard protocol every event is KeyPress and autorepeat is
+// indistinguishable from a second press; that is an accepted limitation of the
+// xterm encoding, not a bug.
+type KeyType uint8
+
+// Key event types.
+const (
+	// KeyPress is a key going down. It is the zero value, so a synthesized
+	// EventKey is a press unless something says otherwise.
+	KeyPress KeyType = iota
+	// KeyRepeat is an autorepeat, distinguishable from a second press only
+	// under the kitty keyboard protocol.
+	KeyRepeat
+	// KeyRelease is a key coming up.
+	KeyRelease
+)
+
+// String returns the key event type's name.
+func (t KeyType) String() string {
+	switch t {
+	case KeyPress:
+		return "press"
+	case KeyRepeat:
+		return "repeat"
+	case KeyRelease:
+		return "release"
+	default:
+		return "unknown"
+	}
+}
+
+// ComposePhase is the stage of an IME composition.
+type ComposePhase uint8
+
+// Composition phases.
+const (
+	// ComposeStart begins a composition.
+	ComposeStart ComposePhase = iota
+	// ComposeUpdate replaces the preedit string of an in-progress composition.
+	ComposeUpdate
+	// ComposeCommit carries the committed text and ends the composition.
+	ComposeCommit
+	// ComposeEnd discards a composition without committing it.
+	ComposeEnd
+)
+
+// String returns the composition phase's name.
+func (p ComposePhase) String() string {
+	switch p {
+	case ComposeStart:
+		return "start"
+	case ComposeUpdate:
+		return "update"
+	case ComposeCommit:
+		return "commit"
+	case ComposeEnd:
+		return "end"
+	default:
+		return "unknown"
+	}
+}
+
+// Compose is the payload of an EventCompose.
+//
+// RESERVED, NEVER EMITTED IN v0.x. IME support is deferred by ADR 0005 and
+// this type exists so the union can already express composition. The field set
+// is what an implementation needs and no more: Text is the preedit string as
+// the terminal reports it, Cursor is the byte offset of the caret within Text,
+// and Phase says whether this is the start of a composition, an update to it,
+// the committed text, or the end.
+type Compose struct {
+	Text   string
+	Cursor int
+	Phase  ComposePhase
+}
+
 // Event is a single input event delivered to the widget tree.
 //
-// One struct rather than an interface, because events are allocated per
-// keystroke and an interface here would mean a heap allocation on the input
-// path for no benefit. Unused fields are zero.
+// One struct rather than an interface, because events cross the input path per
+// keystroke and an interface here would mean a heap allocation for no benefit.
+// Unused fields are zero, with one exception: Compose is nil unless Kind is
+// EventCompose.
+//
+// INVARIANT: this struct is copied by value on the hot path and must not grow
+// without a deliberate decision. TestEventSizeIsBounded pins sizeof(Event); see
+// ADR 0005 section 8.
 type Event struct {
 	// Kind discriminates the event.
 	Kind EventKind
@@ -239,12 +341,23 @@ type Event struct {
 	Rune rune
 	// Mod is the modifier state.
 	Mod KeyMod
+	// Type is press, repeat or release. Always KeyPress unless the kitty
+	// keyboard protocol reported event types (ADR 0005 section 2).
+	Type KeyType
 	// Mouse is the payload for EventMouse.
 	Mouse Mouse
 	// Size is the new size for EventResize.
 	Size Size
-	// Text is the payload for EventPaste.
+	// Text is the payload for EventPaste, the entire paste undelimited and
+	// unescaped, and the committed text for EventCompose.
 	Text string
+	// Compose is the payload for EventCompose, and nil otherwise. This is the
+	// only pointer field in Event and the one field allowed to be nil; see
+	// ADR 0005 section 7 for why composition is reserved but deferred.
+	Compose *Compose
+	// Truncated reports that a paste payload exceeded the configured maximum
+	// and was cut short. The text is still a valid prefix of what was pasted.
+	Truncated bool
 	// Focused reports the new state for EventFocus.
 	Focused bool
 }

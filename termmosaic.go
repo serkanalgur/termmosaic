@@ -88,8 +88,15 @@ type Caps struct {
 	Unicode bool
 	// Mouse reports support for mouse reporting.
 	Mouse bool
-	// KittyKeyboard reports support for the kitty keyboard protocol, which
-	// gives unambiguous key events for keys xterm cannot encode.
+	// KittyKeyboard reports that this terminal MAY SUPPORT the kitty keyboard
+	// protocol, which gives unambiguous key events for keys xterm cannot encode.
+	//
+	// "May support" is the whole of the claim, and it is deliberately NOT the same
+	// as "the protocol is active". Detection is a TERM substring heuristic, so it
+	// is right sometimes and wrong sometimes, and whether the protocol is actually
+	// in force is established by a handshake on a running input.Source and
+	// reported by Source.KittyActive(). Negotiation state lives on the Source
+	// because it is a property of a session rather than of a device; see ADR 0005.
 	KittyKeyboard bool
 	// BracketedPaste reports support for bracketed paste, which is what makes
 	// a multi-line paste one event instead of several keystrokes.

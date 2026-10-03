@@ -221,16 +221,45 @@ func (t *UnixTerminal) watchResize() {
 			t.mu.Lock()
 			s := t.sizeOrDefault()
 			t.mu.Unlock()
-			select {
-			case t.resizes <- s:
-			case <-t.done:
+			if !t.publishSize(s) {
 				return
-			default:
-				// The channel is full: the consumer is not keeping up and a
-				// stale size is worth less than the latest one, so drop this
-				// notification rather than block the signal goroutine.
 			}
 		}
+	}
+}
+
+// publishSize queues s for delivery, replacing any sizes still queued rather
+// than joining them. It reports false when the terminal is closing.
+//
+// The policy is KEEP-LATEST, and it is worth being precise about why, because
+// the obvious implementation is the opposite of this one. A full channel means
+// the consumer is behind, so a queued size has already been superseded by the
+// size being published now; keeping the old ones and dropping the new one means
+// a widget ends up rendering for a terminal that no longer exists, and the final
+// size it needed never arrives. So undelivered sizes are discarded and the
+// newest one is queued.
+//
+// That makes this a coalescing policy and not a dropping one: every size a
+// consumer actually receives is a size the terminal really had, and the newest
+// one is always eventually delivered. The final send blocks, so the goroutine
+// stops taking signals while the consumer is behind rather than silently losing
+// the update it is waiting for.
+func (t *UnixTerminal) publishSize(s termmosaic.Size) bool {
+	for draining := true; draining; {
+		select {
+		case <-t.done:
+			return false
+		case <-t.resizes:
+			// A stale size: superseded by s, so drop it.
+		default:
+			draining = false
+		}
+	}
+	select {
+	case t.resizes <- s:
+		return true
+	case <-t.done:
+		return false
 	}
 }
 
