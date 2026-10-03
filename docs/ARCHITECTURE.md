@@ -2,10 +2,11 @@
 
 This document records architecture decisions for TermMosaic in condensed form.
 
-The four core architecture decisions below are **DECIDED** as of 2026-10-03.
-Full rationale, evidence, benchmark output, consequences (including the bad
-ones), and rejected alternatives live in **[docs/adr/](adr/README.md)**. Each
-section here links to its ADR. Colour model and theme remain open.
+The four core architecture decisions below are **DECIDED** as of 2026-10-03,
+and input decoding was added as Decision 7 on 2026-10-04. Full rationale,
+evidence, benchmark output, consequences (including the bad ones), and rejected
+alternatives live in **[docs/adr/](adr/README.md)**. Each section here links to
+its ADR. Colour model and theme remain open.
 
 ---
 
@@ -138,6 +139,75 @@ perceptual mapping, not naive truncation.
 Styling stays plain Go values — no layout-in-CSS (see Non-goals). The theme
 model and its relationship to the degradation ladder are not yet settled.
 
+## Decision 7: Input decoding — DECIDED
+
+**A pure decoder under a resumable driver, in a new `input` package.**
+→ [ADR 0005](adr/0005-input-decoding.md)
+
+```go
+// Pure: no I/O, no clock, no retained state. The three statuses are the whole
+// contract, and StatusIncomplete is what makes a sequence straddling two
+// read(2) calls a return value rather than a bug.
+func Decode(seq []byte, cfg Config) (termmosaic.Event, int, Status)
+
+// Resumable. Holds only the unavoidable state: partial sequence bytes, the
+// in-progress paste, and the escape deadline.
+type Parser struct{ /* ... */ }
+
+// One ordered event stream, merging input bytes and resize notifications.
+type Source struct{ /* ... */ }
+```
+
+The existing tagged-struct `Event` union is kept and extended, not replaced: it
+gains `Type` (kitty press/repeat/release) and a reserved `Compose *Compose`
+payload. Nothing becomes an interface, so the key path stays at **0
+allocations** and `Widget.Handle(Event) bool` is untouched. As in ADR 0002, that
+invariant gets a guard test — here pinning `sizeof(Event)` rather than
+`sizeof(Cell)`, because the hazard is an unbounded struct on the hot path.
+
+**Why a pure function.** Every input bug is a function of the bytes, so
+decoding is testable with no I/O, no goroutine and no terminal — the testability
+pillar applied to the one subsystem ADR 0001 named as our risk list. The state
+that cannot be made pure (partial bytes, paste accumulation, the ESC timeout)
+lives one layer up, in `Parser`.
+
+**Scope verdicts.**
+
+| Area | Verdict | Note |
+|---|---|---|
+| Kitty keyboard protocol | **IN** | Progressive enhancement via a `CSI ? u` query with a 100 ms hard timeout, then push `disambiguate` only. `eventTypes`, `alternateKeys` and `associatedText` are requestable but off by default — nothing in the widget catalog consumes them. |
+| Bracketed paste | **IN** | Always **one `EventPaste` carrying the whole payload**. A 10k-char paste is one undoable operation, one layout pass, one callback — not 10k of each. |
+| Mouse | decode **IN**, capture **OFF by default** | SGR 1006, urxvt 1015 and X10 are all parsed; only 1006 is requested. Capture is opt-in because it takes text selection and scrollback copying away from the user's shell. Enabling gives `MouseClick` (buttons + wheel); all-motion is not included. |
+| Focus (`ESC [ I` / `ESC [ O`) | decode **IN**, reporting **OFF by default** | Ten lines of decoder for an event kind the union already declares; terminal focus and widget focus are not the same thing, so enabling it is opt-in. |
+| IME / composition | **DEFERRED — scoped out and documented** | See below. |
+
+**Cost of the IME deferral, stated plainly.** Users composing CJK in a
+`TextInput` get wrong behaviour, not degraded behaviour: on most terminals the
+commit arrives as a burst of ordinary key events, which inserts correctly but
+makes the undo stack useless. We accept that and document it. What we refuse to
+accept is designing it into a corner, so the union already reserves
+`EventCompose` (declared, never emitted in v0.x) and a `Compose *Compose`
+payload, and the parser's entry point is the byte stream rather than the event
+type — an IME sub-decoder slots in before the CSI state machine and nothing else
+has to change.
+
+**Also deferred, with triggers in ADR 0005 §10:** kitty `F13`–`F35`, tmux/screen
+DCS passthrough (a real gap — without it a program under tmux on a modern
+terminal can lose key and mouse reporting), X11 UTF-8 extended mouse, and kitty
+`associated-text`.
+
+**Forced changes to existing code** are enumerated in ADR 0005 §11. The
+load-bearing ones: `examples/hello/main.go` replaces its raw-byte scan for `'q'`
+with `source.Events()`; `term/terminal_unix.go`'s resize watcher currently drops
+the *newest* size when its channel is full, which is backwards and must become
+keep-latest; and `Caps.KittyKeyboard` is re-documented as "may support", with
+negotiation state on `Source`. `Terminal` is **not** widened — the kitty query
+goes through `Config.WriteProbe`, so ADR 0001's interfaces stay as chosen.
+
+**No benchmark informed this decision**, and the ADR says so rather than
+implying evidence: input decoding is I/O-bound, and the allocation claim is a
+property to be pinned by test rather than a number measured today.
+
 ---
 
 ## Non-goals
@@ -157,8 +227,10 @@ in [docs/adr/](adr/README.md). Genuinely unresolved, and tracked in
 [STATUS.md](STATUS.md):
 
 - **Kitty graphics in v1** — leaning no; not formally decided.
-- **IME / preedit scope and cost** — the largest unquantified item. No design,
-  no measurement. OpenTUI has no reference implementation either.
+- **IME / preedit scope and cost** — *no longer an open question.*
+  [ADR 0005](adr/0005-input-decoding.md) scopes it out and documents the
+  resulting limitation honestly; the event model reserves `EventCompose` and a
+  `Compose` payload so it can be added later as a feature. See Decision 7.
 - **Wide characters and grapheme clusters** — a wide glyph spans two cells and
   the continuation cell must compare equal across frames or it flickers. Needs
   its own decision and a benchmark.
@@ -166,5 +238,7 @@ in [docs/adr/](adr/README.md). Genuinely unresolved, and tracked in
   exposes the cell buffer or only recorded bytes is still open, and widget tests
   need the cell buffer.
 - **Windows console support** — an unquantified v1.0 risk created by owning the
-  terminal layer.
+  terminal layer. ADR 0005 does not help here: the Windows console delivers
+  key/mouse *records*, not escape sequences, so Windows input is a second
+  decoder behind the same `Event` union rather than a solved problem.
 - **Colour model / degradation ladder** and **theme system** — see above.

@@ -32,13 +32,15 @@ break without notice until v1.0.0.**
 | Cell buffer representation (AoS vs SoA) | **DECIDED** — AoS, padding-free 16-byte `Cell` | **Overturned the prior SoA leaning.** Measured: packed-AoS row skip ties with SoA (5,373 vs 5,128 ns/op) and is 4.4× faster when all rows are dirty (147.2 vs 636.7). OpenTUI's advantage is Zig's `mem.eql`, not SoA. [ADR 0002](adr/0002-buffer-representation.md) |
 | Renderer mode (immediate vs retained vs hybrid) | **DECIDED** — hybrid | Retained widget tree invalidated by rectangle; widgets describe themselves on demand. No reconciler, no Elm loop. [ADR 0003](adr/0003-renderer-mode.md) |
 | Layout engine (own constraints vs flexbox) | **DECIDED** — constraint-based, own solver | `Length`/`Min`/`Max`/`Percentage`/`Ratio`/`Fill`. Yoga rejected: cgo breaks `CGO_ENABLED=0` cross-compilation. [ADR 0004](adr/0004-layout-engine.md) |
+| Input decoding (where the parser lives, what it decodes) | **DECIDED** — a pure `Decode` under a resumable `Parser` in a new `input` package | Kitty keyboard **in** (progressive enhancement, `disambiguate` only); paste **in** and always **one `EventPaste` carrying the whole payload**; mouse decoding **in** (SGR 1006 / urxvt 1015 / X10) but **capture off by default**; focus decoding **in**, reporting off by default; **IME scoped out and deferred**, with `EventCompose` reserved. [ADR 0005](adr/0005-input-decoding.md) |
 | Color model and degradation ladder | **OPEN** | |
 | Theme and styling system | **OPEN** | |
 
 ### Decisions
 
-The four core architecture rows above are **DECIDED** as of 2026-10-03 and are
-recorded in full, with rejected alternatives, in [docs/adr/](adr/README.md).
+The five core architecture rows above are **DECIDED** — the first four on
+2026-10-03, input decoding on 2026-10-04 — and are recorded in full, with
+rejected alternatives, in [docs/adr/](adr/README.md).
 
 Decisions 1 and 2 were made **empirically** — a scratch benchmark module was
 built outside the repo and measured on darwin/arm64 (Apple M1). The headline
@@ -53,8 +55,11 @@ Zig to Go**, and **`tcell` is not usable as the buffer layer** — its flush wal
 every cell per frame and its headless backend cannot expose the cell buffer.
 
 Raw benchmark output is quoted inline in ADR 0001 and ADR 0002, including the
-workloads that did not produce a clean result. Decisions 3 and 4 were made on
-API-surface and dependency grounds and involve no measurements.
+workloads that did not produce a clean result. Decisions 3, 4 and 5 were made on
+API-surface, testability and dependency grounds and involve no measurements.
+ADR 0005 says so explicitly: input decoding is I/O-bound, and the one number
+that matters — 0 allocations on the key path — is a property the ADR specifies
+and a test must pin, not a measurement taken today.
 
 ### Amendments
 
@@ -99,7 +104,9 @@ Recorded because they define our opportunity. Sources verified 2026-10.
 - OpenTUI has no CHANGELOG; release bodies are auto-generated PR lists.
 - OpenTUI pre-1.0 patch releases carry behavioral changes; the v1.0 refactor
   is already on the roadmap.
-- OpenTUI has no IME/preedit support.
+- OpenTUI has no IME/preedit support. **We do not either, by decision**
+  ([ADR 0005](adr/0005-input-decoding.md) §7) — the parity here is real, and it
+  is not something to present as a gap-closing feature.
 - Ink repaints the full screen on update, which shows up as input lag at
   scale.
 
@@ -113,10 +120,28 @@ Answered questions have been removed; the reasoning is preserved in
   the feature is not in the widget catalog. Still open because "no" has not
   been formally decided, and because a future `Image` widget may force the
   question.
-- **IME / preedit scope, and what it costs.** No measurement, no design, no
-  scope. We have no idea whether this is a parser, a protocol negotiation, or
-  an architectural change. OpenTUI has no IME support either, so there is no
-  ready reference. This is the largest unquantified item on this list.
+- **IME / preedit scope — DEFERRED, and scoped out.** This was "the largest
+  unquantified item on this list"; [ADR 0005](adr/0005-input-decoding.md) closes
+  it as a deliberate deferral rather than leaving it open. **Honest note about
+  what that costs:** users composing Japanese, Chinese or Korean in a
+  `TextInput` get *wrong* behaviour, not degraded behaviour — on most terminals
+  the committed text arrives as a burst of ordinary key events, which inserts
+  correctly but pollutes the undo stack with one entry per character. We accept
+  that; the mitigation is documentation. The door is deliberately left open at
+  three named seams so this is a deferred feature rather than a deferred rewrite:
+  `EventCompose` is declared (and never emitted in v0.x), `Event` carries a
+  `Compose *Compose` payload field, and the parser's entry point is the byte
+  stream rather than the event type. **Trigger to revisit:** two or more
+  independent reports of CJK/IME input being unusable; or `TextInput` shipping
+  with undo groups large enough to be obviously wrong on composition-shaped
+  bursts; or a terminal shipping a preedit protocol with real adoption. Not
+  before — there is no `TextInput` to design against and no reference
+  implementation in any comparable framework, OpenTUI included.
+- **tmux / screen DCS passthrough — DEFERRED, and a real gap.** It fell out of
+  the input-decoding work rather than being designed by it: without it, a
+  TermMosaic program under tmux on a modern terminal can lose key and mouse
+  reporting. Trigger: any tmux user reporting broken keys or mouse, or v1.0,
+  whichever comes first. See [ADR 0005 §10](adr/0005-input-decoding.md).
 - **Wide characters (CJK, emoji) and grapheme clusters.** A wide glyph occupies
   two cells; the continuation cell must compare equal across frames or it will
   flicker. Needs its own decision; no benchmark has been run. Deferred until
