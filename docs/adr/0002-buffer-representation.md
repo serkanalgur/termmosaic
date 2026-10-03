@@ -5,6 +5,10 @@
 - **Amended:** 2026-10-04 — the byte-compare soundness condition was stated
   incompletely (it named padding but not contiguity), and the byte-count figure
   was an artifact of a single-byte-glyph benchmark scene.
+- **Amended:** 2026-10-04 — risk item 1b below asked whether to make `RowBytes`
+  refuse non-top-level buffers structurally, and deferred the question to v1.0.
+  [ADR 0006](0006-subbuffer-cell-access.md) settles it now: `RowBytes` becomes a
+  `*Buffer` method that panics on a sub-buffer.
 - **Decides:** [STATUS.md](../STATUS.md) — Core architecture / Cell buffer representation
 - **Depends on:** [ADR 0001](0001-backend-strategy.md)
 - **Supersedes:** the "Option AoS / SoA" section of the former ARCHITECTURE.md
@@ -402,6 +406,26 @@ type Cell struct {
    structurally — e.g. moving it behind a `*Buffer` receiver that can read
    `stride`, so an unsound call is a compile error rather than a review
    comment.
+
+   > **Amended 2026-10-04 — decided by
+   > [ADR 0006](0006-subbuffer-cell-access.md); the text above is preserved as
+   > written.** The trigger fired immediately rather than at v1.0, because
+   > `Buffer.Cells()` turned out to be the same unsoundness at the API level:
+   > it hands out the flat backing slice, whose `y*Width()+x` index is silently
+   > wrong for a sub-buffer — the failure mode this item describes, one layer
+   > above `SubBuffer` itself. The mitigation proposed here is the one adopted.
+   > `RowBytes` is now `(*Buffer).RowBytes(y, x0, n)`, so the old free-function
+   > call is a compile error, and it **panics** on a view rather than returning
+   > nil, because `bytes.Equal(nil, nil)` would report two strided rows as
+   > equal. `diff.Frame` carries `*buffer.Buffer` instead of `[]buffer.Cell` so
+   > the type, not the doc comment, enforces it. `Cells()` is removed in favour
+   > of `Row(y) []Cell`, which is correct on views and top-level buffers alike.
+   > One consequence is recorded rather than buried: `RowBytes` is now a method
+   > that **panics**, while its sibling `SetCell` is deliberately panic-free.
+   > The distinction is real — `SetCell` receives layout-derived coordinates
+   > from widget code, `RowBytes` is called only by the diff on buffers the
+   > framework itself chose — but it is a distinction a future reader must be
+   > told about, and ADR 0006 states it in both doc comments.
 2. **Wide characters.** A CJK or emoji glyph occupies two cells. Both are
    written, and the continuation cell must compare equal across frames or it
    will flicker. The row skip is unaffected. Needs its own ADR when

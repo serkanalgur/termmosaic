@@ -15,6 +15,7 @@ original stays and a new one supersedes it, so the reasoning history survives.
 | [0003](0003-renderer-mode.md) | Renderer mode | Accepted | 2026-10-03 |
 | [0004](0004-layout-engine.md) | Layout engine | Accepted | 2026-10-03 |
 | [0005](0005-input-decoding.md) | Input decoding | Accepted | 2026-10-04 |
+| [0006](0006-subbuffer-cell-access.md) | Sub-buffer cell access | Accepted | 2026-10-04 |
 
 ## Decisions at a glance
 
@@ -60,6 +61,18 @@ original stays and a new one supersedes it, so the reasoning history survives.
   out**, with `EventCompose` and a `Compose` payload field reserved so it is a
   later feature rather than a rewrite.
 
+- **0006 — Cell access: a row accessor, not a flat slice.** `Buffer.Cells()`
+  is **removed**. It returns the flat backing slice, whose index
+  `y*Width()+x` is silently wrong for a sub-buffer — the same unsoundness ADR
+  0002 fixed once already, in `SubBuffer`, left open at a different door. It is
+  replaced by `Row(y) []Cell`, which is correct on top-level buffers and views
+  alike because the stride never leaves the `buffer` package. `RowBytes` becomes
+  a `*Buffer` method that **panics on a sub-buffer** — settling ADR 0002's v1.0
+  risk item 1b now rather than at v1.0 — and `diff.Frame` carries
+  `*buffer.Buffer` instead of `[]buffer.Cell`, so the "diff only top-level
+  buffers" rule is enforced by a type rather than by a doc comment. `Stride()` is
+  deliberately not exported.
+
 ## How these were decided
 
 Decisions 1 and 2 were made **empirically**. A scratch Go module was built
@@ -79,6 +92,13 @@ API-surface, testability and dependency grounds and are labelled as such.
 is I/O-bound, and the one number that matters — 0 allocations on the key path —
 is a property the ADR specifies and a test must pin rather than a measurement
 made today.
+
+Decision 6 follows the same pattern for the same reason: it is a narrow API
+question about an existing data structure, made on the existing
+`TestSubBufferRowsAreStrided` evidence rather than on a new measurement. Its one
+performance claim — that the diff's row hoisting leaves ADR 0002's figures
+intact — is a claim a benchmark must re-confirm, and ADR 0006 says so rather
+than asserting a number it did not measure.
 
 **Caveat worth repeating:** OpenTUI is a Zig core with TypeScript FFI bindings.
 Its numbers do not transfer to Go, and ADR 0002 exists precisely because we

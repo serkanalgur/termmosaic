@@ -33,14 +33,15 @@ break without notice until v1.0.0.**
 | Renderer mode (immediate vs retained vs hybrid) | **DECIDED** — hybrid | Retained widget tree invalidated by rectangle; widgets describe themselves on demand. No reconciler, no Elm loop. [ADR 0003](adr/0003-renderer-mode.md) |
 | Layout engine (own constraints vs flexbox) | **DECIDED** — constraint-based, own solver | `Length`/`Min`/`Max`/`Percentage`/`Ratio`/`Fill`. Yoga rejected: cgo breaks `CGO_ENABLED=0` cross-compilation. [ADR 0004](adr/0004-layout-engine.md) |
 | Input decoding (where the parser lives, what it decodes) | **DECIDED** — a pure `Decode` under a resumable `Parser` in a new `input` package | Kitty keyboard **in** (progressive enhancement, `disambiguate` only); paste **in** and always **one `EventPaste` carrying the whole payload**; mouse decoding **in** (SGR 1006 / urxvt 1015 / X10) but **capture off by default**; focus decoding **in**, reporting off by default; **IME scoped out and deferred**, with `EventCompose` reserved. [ADR 0005](adr/0005-input-decoding.md) |
+| Cell access on sub-buffers (`Cells()`, `RowBytes`) | **DECIDED** — `Row(y) []Cell` replaces `Cells()`; `RowBytes` is a `*Buffer` method that panics on a view | The flat slice `Cells()` returns is silently wrong for a sub-buffer. The stride never leaves `buffer`. Closes ADR 0002's v1.0 risk 1b now. [ADR 0006](adr/0006-subbuffer-cell-access.md) |
 | Color model and degradation ladder | **OPEN** | |
 | Theme and styling system | **OPEN** | |
 
 ### Decisions
 
-The five core architecture rows above are **DECIDED** — the first four on
-2026-10-03, input decoding on 2026-10-04 — and are recorded in full, with
-rejected alternatives, in [docs/adr/](adr/README.md).
+The six core architecture rows above are **DECIDED** — the first four on
+2026-10-03, input decoding and sub-buffer cell access on 2026-10-04 — and are
+recorded in full, with rejected alternatives, in [docs/adr/](adr/README.md).
 
 Decisions 1 and 2 were made **empirically** — a scratch benchmark module was
 built outside the repo and measured on darwin/arm64 (Apple M1). The headline
@@ -63,7 +64,7 @@ and a test must pin, not a measurement taken today.
 
 ### Amendments
 
-Three accepted ADRs were amended on 2026-10-04, after the core implementation
+Four accepted ADRs were amended on 2026-10-04, after the core implementation
 exposed claims that no longer described the code. Each amendment notes the date
 and reason in the ADR's header; the original reasoning is preserved in place
 rather than rewritten.
@@ -80,6 +81,12 @@ rather than rewritten.
   as its top usability sharp edge; the committed solver resolves all fixed
   constraints before any `Fill`, and a test pins that as a guarantee. The ADR
   now documents order-insensitivity as a deliberate divergence from tmux.
+- **ADR 0002 — the `RowBytes` receiver question is settled.** Risk item 1b asked
+  whether to make `RowBytes` structurally refuse non-top-level buffers by moving
+  it behind a `*Buffer` receiver. [ADR 0006](adr/0006-subbuffer-cell-access.md)
+  answers **yes**, and removes the v1.0 deferral: `RowBytes` becomes
+  `(*Buffer).RowBytes(y, x0, n)`, panics on a sub-buffer, and `diff.Frame`
+  carries `*buffer.Buffer` so the old call sites do not compile.
 
 ## Widget catalog
 
