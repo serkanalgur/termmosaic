@@ -1,0 +1,45 @@
+name: guard-dependencies
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # ADR 0001 records golang.org/x/term as pinned to v0.27.0 because @latest
+    # requires Go 1.26. It is not load-bearing and nothing in the code enforces
+    # the pin, so re-check weekly and open an issue when it can be released.
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  x-term-pin:
+    name: check x/term pin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Current pin
+        id: pin
+        run: echo "pinned=$(go list -m -f '{{.Version}}' golang.org/x/term)" >> "$GITHUB_OUTPUT"
+
+      - name: Latest available
+        id: latest
+        run: |
+          cd "$(mktemp -d)"
+          go mod init probe >/dev/null 2>&1
+          go get golang.org/x/term@latest >/dev/null 2>&1 || true
+          echo "latest=$(go list -m -f '{{.Version}}' golang.org/x/term 2>/dev/null || echo unknown)" >> "$GITHUB_OUTPUT"
+
+      - name: Report
+        env:
+          PINNED: ${{ steps.pin.outputs.pinned }}
+          LATEST: ${{ steps.latest.outputs.latest }}
+        run: |
+          echo "pinned:  $PINNED"
+          echo "latest:  $LATEST"
+          if [ "$PINNED" != "$LATEST" ]; then
+            echo "::notice title=x/term pin is behind::Pinned $PINNED, latest is $LATEST. If latest now supports Go 1.23, bump the floor and unpin (ADR 0001)."
+          fi

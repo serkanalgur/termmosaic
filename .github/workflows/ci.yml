@@ -1,0 +1,91 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Primary gate: build, vet, fmt, and race tests across all target platforms.
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Pinned deliberately: ADR 0001 records that raising this floor is what
+          # would unpin golang.org/x/term. See docs/adr/0001-backend-strategy.md.
+          go-version: "1.23"
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Test (race)
+        run: go test ./... -race
+
+  # The widget catalog is the product, so guard the zero-allocation claim on the
+  # hot path that ADR 0002 established. Run explicitly so a regression is loud.
+  no-alloc:
+    name: zero-allocation diff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Assert diff remains zero-allocation
+        run: go test ./internal/diff/ -run TestDiffIsZeroAllocation -v
+
+  # ADR 0001 commits to a single static binary with no cgo. If someone adds a
+  # dependency that needs cgo, this fails rather than silently breaking
+  # cross-compilation for every user.
+  cross-compile:
+    name: cross-compile ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - linux/amd64
+          - linux/arm64
+          - darwin/amd64
+          - darwin/arm64
+          - windows/amd64
+          - windows/arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Build with CGO disabled
+        env:
+          GOOS: ${{ matrix.target.split('/')[0] }}
+          GOARCH: ${{ matrix.target.split('/')[1] }}
+          CGO_ENABLED: "0"
+        run: go build ./...
