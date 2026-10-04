@@ -1109,7 +1109,10 @@ func (d *dashboard) Draw(buf *buffer.Buffer) {
 	// overlay nobody could read.
 	//
 	// It is drawn even in the failure case, because a reader whose screen has gone
-	// empty is exactly the reader who needs to know which key quits.
+	// empty is exactly the reader who needs to know which key quits. It is NOT drawn
+	// below MinSize, because the diagnostic that replaces the bands there is itself
+	// the answer to "what is happening", and an overlay over a one-line message about
+	// the terminal being too small would be a worse place to put it.
 	if d.helpOpen {
 		d.drawHelp(buf, r)
 	}
