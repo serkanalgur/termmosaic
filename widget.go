@@ -31,6 +31,32 @@ type Widget interface {
 	Handle(Event) bool
 }
 
+// Minimizable is an optional interface a Widget implements if it has a smallest
+// size at which it can render something meaningful.
+//
+// This is the existing Focusable pattern exactly: optional, so that adding it
+// costs no widget anything, and discoverable by a type assertion. A widget that
+// does not implement it is fully supported — there is no framework default
+// minimum and no framework reaction (ADR 0007 §4).
+//
+// MinSize is the size of the WHOLE widget INCLUDING its own chrome — a bordered
+// Table with MinSize{20, 5} needs 20x5 cells, not a 20x5 content area. Pinning
+// this here is deliberate: three authors would otherwise each decide whether
+// their border counts, and every caller's arithmetic would then be wrong for
+// some subset of the catalog.
+//
+// The framework does nothing with a MinSize. What to do when the available
+// space is below it is the application's decision, because only the application
+// knows whether losing a table is acceptable (ADR 0007, rejected alternative:
+// a framework-owned "too small" screen).
+type Minimizable interface {
+	Widget
+	// MinSize returns the widget's smallest meaningful size in cells. It must be
+	// pure, must not depend on the current Bounds, and must be safe to call before
+	// the widget has ever been drawn.
+	MinSize() Size
+}
+
 // Focusable is an optional interface a Widget implements if it can take focus.
 // The renderer uses it to maintain focus order without requiring every widget to
 // carry a focus method.

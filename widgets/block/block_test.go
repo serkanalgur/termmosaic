@@ -533,6 +533,133 @@ func TestBlockHandlesNothing(t *testing.T) {
 	b.Invalidate() // must not panic
 }
 
+// TestBlockMinSizeIncludesItsOwnChrome is ADR 0007's rule that MinSize is the
+// WHOLE widget rather than a content area, checked against the constants Draw
+// itself uses rather than against numbers written here: a layout that reserves
+// MinSize must never be a cell short of what the block needs.
+//
+// The interesting cases are the ones where MinSize rises above the 3x3 of a bare
+// bordered block — a title, and padding — because those are exactly where three
+// authors would each have counted differently.
+func TestBlockMinSizeIncludesItsOwnChrome(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(*Block)
+		want    buffer.Size
+	}{
+		{"borderless and unpadded needs one cell", func(*Block) {}, buffer.Size{W: 1, H: 1}},
+		{
+			"border alone needs MinBorderW by MinBorderH plus one interior cell",
+			func(b *Block) { b.Border = buffer.BorderPlain },
+			buffer.Size{W: MinBorderW + 1, H: MinBorderH + 1},
+		},
+		{
+			"a title needs MinTitleW wide",
+			func(b *Block) {
+				b.Border = buffer.BorderPlain
+				b.SetTitleString("x", buffer.PlainStyle)
+			},
+			buffer.Size{W: MinTitleW, H: MinBorderH + 1},
+		},
+		{
+			"a title does not raise the height",
+			func(b *Block) {
+				b.Border = buffer.BorderPlain
+				b.SetTitleString("a very long title", buffer.PlainStyle)
+			},
+			buffer.Size{W: MinTitleW, H: MinBorderH + 1},
+		},
+		{
+			"a title without a border does not raise anything, because drawTitle is unreachable",
+			func(b *Block) { b.SetTitleString("x", buffer.PlainStyle) },
+			buffer.Size{W: 1, H: 1},
+		},
+		{
+			// Two border cells on the width, 2*1 padding cells, one interior cell.
+			"padding is inset on every side",
+			func(b *Block) {
+				b.Border = buffer.BorderPlain
+				b.SetPadding(1)
+			},
+			buffer.Size{W: MinBorderW + 2*1 + 1, H: MinBorderH + 2*1 + 1},
+		},
+		{
+			// Borderless padding is still inset, so padding alone raises the
+			// minimum even with no chrome to anchor it.
+			"padding alone raises the minimum with no border",
+			func(b *Block) { b.SetPadding(2) },
+			buffer.Size{W: 2*2 + 1, H: 2*2 + 1},
+		},
+		{
+			"an empty title does not reserve the title width",
+			func(b *Block) {
+				b.Border = buffer.BorderPlain
+				b.SetTitleString("", buffer.PlainStyle)
+			},
+			buffer.Size{W: MinBorderW + 1, H: MinBorderH + 1},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			b := New(buffer.Rect{W: 40, H: 12})
+			c.arrange(b)
+			if got := b.MinSize(); got != c.want {
+				t.Errorf("MinSize = %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}
+
+// TestBlockMinSizeIsPureAndIndependentOfBounds is the property that makes
+// MinSize cacheable and safe to ask before the widget has ever been drawn: it
+// must not read the rectangle it is asked about, or two Blocks configured
+// identically would report different minimums.
+func TestBlockMinSizeIsPureAndIndependentOfBounds(t *testing.T) {
+	withTitle := func(w, h int) buffer.Size {
+		b := New(buffer.Rect{X: 3, Y: 7, W: w, H: h})
+		b.Border = buffer.BorderPlain
+		b.SetTitleString("a title", buffer.PlainStyle)
+		return b.MinSize()
+	}
+	want := withTitle(40, 12)
+	for _, r := range []buffer.Rect{
+		{}, {W: 1, H: 1}, {W: 2, H: 2}, {X: -5, Y: -5, W: 3, H: 3}, {W: 200, H: 60},
+	} {
+		if got := withTitle(r.W, r.H); got != want {
+			t.Errorf("MinSize at bounds %+v = %+v, want %+v: MinSize must not depend on Bounds", r, got, want)
+		}
+	}
+}
+
+// TestBlockSatisfiesMinSizeAtItsOwnMinimum is the end-to-end statement of the
+// rule: at exactly MinSize the block's chrome and at least one interior cell
+// actually appear, so a layout that reserves MinSize is not reserving a size the
+// widget then renders nothing into.
+func TestBlockSatisfiesMinSizeAtItsOwnMinimum(t *testing.T) {
+	for _, bordered := range []bool{false, true} {
+		for _, pad := range []int{0, 1, 2} {
+			for _, title := range []string{"", "t", "a title far too wide to fit"} {
+				b := New(buffer.Rect{})
+				if bordered {
+					b.Border = buffer.BorderPlain
+				}
+				b.SetPadding(pad)
+				b.SetTitleString(title, buffer.PlainStyle)
+				if title == "" {
+					b.SetTitleString("", buffer.PlainStyle)
+				}
+
+				min := b.MinSize()
+				b.SetBounds(buffer.Rect{W: min.W, H: min.H})
+				if b.Interior().Empty() {
+					t.Errorf("bordered=%v pad=%d title=%q: at MinSize %+v the interior is empty",
+						bordered, pad, title, min)
+				}
+			}
+		}
+	}
+}
+
 // max1 clamps a degenerate dimension so a zero-sized screen, which has no cells
 // to draw into, is not asked to prove anything.
 func max1(v int) int {

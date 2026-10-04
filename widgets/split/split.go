@@ -424,6 +424,33 @@ func (s *Split) axisLength() int {
 	return s.bounds.H
 }
 
+// MinSize returns the smallest rect in which every pane gets minPane cells and
+// the dividers get their spacing, on Split's axis; the cross axis needs one cell,
+// since a pane of zero rows or columns has nothing to draw in.
+//
+// It is the same minPane the drag and the keyboard resize clamp to, so MinSize
+// and the smallest the widget will let the user reach are one number rather than
+// two. It is pure: it reads the pane count and the configured spacing, never the
+// bounds, so it is safe before the first draw and safe to cache.
+//
+// A spacing wider than the axis makes MinSize exceed any real screen, which is
+// true rather than a bug — the caller set a gap the screen cannot pay for, and
+// §4's rule applies: draw it clipped, do not panic and do not blank.
+func (s *Split) MinSize() buffer.Size {
+	n := len(s.panes)
+	along := 1
+	if n > 0 {
+		along = n*minPane + s.Spacing*(n-1)
+		if along < 1 {
+			along = 1
+		}
+	}
+	if s.Direction == layout.Horizontal {
+		return buffer.Size{W: along, H: 1}
+	}
+	return buffer.Size{W: 1, H: along}
+}
+
 // Draw paints the background, solves the layout if it changed and draws the panes
 // in order. Positioning them is part of solving, so it has already happened.
 //
@@ -595,10 +622,12 @@ func (s *Split) moveFocus(delta int) {
 }
 
 // Compile-time proofs. Split is Focusable because it decides which pane receives
-// keys, and it is a Widget because a container is the root of a subtree more often
-// than any leaf is.
+// keys, a Widget because a container is the root of a subtree more often than any
+// leaf is, and Minimizable because its minimum is arithmetic over its own pane
+// count and spacing rather than a guess.
 var (
-	_ termmosaic.Widget    = (*Split)(nil)
-	_ termmosaic.Focusable = (*Split)(nil)
-	_ Bounded              = (*Split)(nil)
+	_ termmosaic.Widget      = (*Split)(nil)
+	_ termmosaic.Focusable   = (*Split)(nil)
+	_ termmosaic.Minimizable = (*Split)(nil)
+	_ Bounded                = (*Split)(nil)
 )

@@ -116,6 +116,71 @@ func TestGeometryAliasesAreTheSameType(t *testing.T) {
 	}
 }
 
+// minSizedWidget is the smallest possible implementation of Minimizable: a
+// declared minimum and nothing else. It exists so the interface can be tested
+// without depending on any one widget's policy.
+type minSizedWidget struct {
+	bounds Rect
+	min    Size
+}
+
+func (m *minSizedWidget) Bounds() Rect        { return m.bounds }
+func (m *minSizedWidget) Draw(*buffer.Buffer) {}
+func (m *minSizedWidget) Invalidate()         {}
+func (m *minSizedWidget) Handle(Event) bool   { return false }
+func (m *minSizedWidget) MinSize() Size       { return m.min }
+
+// plainWidget is the same widget WITHOUT MinSize, which ADR 0007 §4 makes fully
+// supported. If the optional interface ever became mandatory this would not
+// compile, which is the point of keeping it a type assertion.
+type plainWidget struct{ bounds Rect }
+
+func (p *plainWidget) Bounds() Rect        { return p.bounds }
+func (p *plainWidget) Draw(*buffer.Buffer) {}
+func (p *plainWidget) Invalidate()         {}
+func (p *plainWidget) Handle(Event) bool   { return false }
+
+// TestMinimizableIsOptionalAndDiscoverable is the whole design of ADR 0007 §1 in
+// one test: Minimizable costs a widget that does not want one nothing, and a
+// caller can find one by type assertion. A widget without MinSize is not an
+// error and gets no framework reaction.
+func TestMinimizableIsOptionalAndDiscoverable(t *testing.T) {
+	var w Widget = &minSizedWidget{bounds: Rect{W: 4, H: 2}, min: Size{W: 20, H: 5}}
+
+	m, ok := w.(Minimizable)
+	if !ok {
+		t.Fatal("a widget with MinSize does not satisfy Minimizable")
+	}
+	// The whole widget INCLUDING chrome: 20x5, not the content area.
+	if got := m.MinSize(); got != (Size{W: 20, H: 5}) {
+		t.Errorf("MinSize = %+v, want {20 5}", got)
+	}
+
+	var bare Widget = &plainWidget{bounds: Rect{W: 4, H: 2}}
+	if _, ok := bare.(Minimizable); ok {
+		t.Error("a widget without MinSize must not satisfy Minimizable; the interface is optional")
+	}
+
+	// It is safe to ask before the widget has ever been drawn, which is a property
+	// of the interface being about a declaration rather than about a layout.
+	if got := m.MinSize(); got != (Size{W: 20, H: 5}) {
+		t.Errorf("MinSize before any Draw = %+v, want the same value", got)
+	}
+}
+
+// TestMinimizableIncludesChromeIsTheDocumentedConvention is here so the
+// convention in the doc comment cannot be quietly changed: a bordered widget
+// reporting its content size would make every caller's arithmetic wrong, so the
+// chrome is part of the number.
+func TestMinimizableIncludesChromeIsTheDocumentedConvention(t *testing.T) {
+	// A widget with two cells of border and a 10x1 content area reports 12x3.
+	var w Widget = &minSizedWidget{bounds: Rect{W: 12, H: 3}, min: Size{W: 12, H: 3}}
+	m := w.(Minimizable)
+	if m.MinSize().W <= 10 || m.MinSize().H <= 1 {
+		t.Errorf("MinSize %+v must be at least the content plus its chrome", m.MinSize())
+	}
+}
+
 func TestMouseAndPastePayloads(t *testing.T) {
 	e := Event{
 		Kind:  EventMouse,

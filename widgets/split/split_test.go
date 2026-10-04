@@ -683,6 +683,103 @@ func TestSplitPanesReportsNoAllocations(t *testing.T) {
 	}
 }
 
+// TestSplitMinSizeIsThePaneCountAndSpacing is ADR 0007's MinSize applied to a
+// container: the minimum is arithmetic over the pane count and the configured
+// spacing, and it uses the SAME minPane the drag and keyboard resize clamp to, so
+// the smallest the widget can be shrunk to and the smallest it declares are one
+// number rather than two.
+func TestSplitMinSizeIsThePaneCountAndSpacing(t *testing.T) {
+	panes := make([]termmosaic.Widget, 3)
+	for i := range panes {
+		panes[i] = label(new(basic.Text), "p")
+	}
+
+	horiz := New(layout.Horizontal, panes...)
+	vert := New(layout.Vertical, panes...)
+
+	cases := []struct {
+		name    string
+		s       *Split
+		spacing int
+		want    buffer.Size
+	}{
+		// Three panes of minPane with no gap: 3 along the axis, 1 across it.
+		{"horizontal, no spacing", horiz, 0, buffer.Size{W: 3, H: 1}},
+		{"vertical, no spacing", vert, 0, buffer.Size{W: 1, H: 3}},
+		// Two one-cell dividers between three panes.
+		{"horizontal, spacing 1", horiz, 1, buffer.Size{W: 5, H: 1}},
+		{"vertical, spacing 2", vert, 2, buffer.Size{W: 1, H: 7}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			c.s.SetSpacing(c.spacing)
+			if got := c.s.MinSize(); got != c.want {
+				t.Errorf("MinSize = %+v, want %+v", got, c.want)
+			}
+		})
+	}
+
+	// One pane needs one cell, not three: there are no dividers to pay for.
+	one := New(layout.Horizontal, panes[0])
+	if got := one.MinSize(); got != (buffer.Size{W: 1, H: 1}) {
+		t.Errorf("single-pane MinSize = %+v, want {1 1}", got)
+	}
+	// An empty Split is legal and reports the smallest rect it can still paint.
+	if got := New(layout.Vertical).MinSize(); got != (buffer.Size{W: 1, H: 1}) {
+		t.Errorf("empty MinSize = %+v, want {1 1}", got)
+	}
+}
+
+// TestSplitMinSizeIsPureAndIndependentOfBounds is what makes the value cacheable
+// and safe to ask before the first draw.
+func TestSplitMinSizeIsPureAndIndependentOfBounds(t *testing.T) {
+	panes := make([]termmosaic.Widget, 2)
+	for i := range panes {
+		panes[i] = label(new(basic.Text), "p")
+	}
+	want := func() buffer.Size {
+		s := New(layout.Horizontal, panes...)
+		s.SetSpacing(1)
+		return s.MinSize()
+	}()
+	for _, r := range []buffer.Rect{
+		{}, {W: 1, H: 1}, {W: 2, H: 2}, {X: -4, Y: -4, W: 9, H: 9}, {W: 200, H: 60},
+	} {
+		s := New(layout.Horizontal, panes...)
+		s.SetSpacing(1)
+		s.SetBounds(r)
+		if got := s.MinSize(); got != want {
+			t.Errorf("MinSize at bounds %+v = %+v, want %+v: MinSize must not depend on Bounds", r, got, want)
+		}
+	}
+}
+
+// TestSplitMinSizeMatchesTheSmallestTheUserCanResizeTo is the property that ties
+// MinSize to Resize: a pane must never be resizable below minPane, and MinSize
+// reserves exactly minPane per pane. If these two ever diverge, a layout that
+// reserves MinSize hands out space the user cannot undo.
+func TestSplitMinSizeMatchesTheSmallestTheUserCanResizeTo(t *testing.T) {
+	panes := make([]termmosaic.Widget, 2)
+	for i := range panes {
+		panes[i] = label(new(basic.Text), "p")
+	}
+	s := New(layout.Horizontal, panes...)
+	s.SetBounds(buffer.Rect{W: 40, H: 10})
+	min := s.MinSize()
+
+	// Shrink first pane to nothing and no further; then read the solved widths.
+	s.Resize(0, -1000)
+	widths := []int{s.PaneBounds(0).W, s.PaneBounds(1).W}
+	for i, w := range widths {
+		if w < minPane {
+			t.Errorf("pane %d is %d cells after resizing it to zero, want at least minPane=%d", i, w, minPane)
+		}
+	}
+	if total := widths[0] + widths[1]; total < min.W {
+		t.Errorf("two panes total %d cells, which is below the declared MinSize %d", total, min.W)
+	}
+}
+
 // BenchmarkSplitDraw is the container's frame cost: eight panes, one screen.
 func BenchmarkSplitDraw(b *testing.B) {
 	panes := make([]termmosaic.Widget, 8)

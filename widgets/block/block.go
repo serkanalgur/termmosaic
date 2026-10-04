@@ -341,6 +341,32 @@ func (b *Block) truncateTitle(avail int) []buffer.Span {
 	return buffer.Truncate(b.title, avail)
 }
 
+// MinSize returns the smallest rectangle that carries this Block's chrome and at
+// least one interior cell, so that MinSize is the WHOLE widget including its
+// border and padding rather than a content area (ADR 0007 §2).
+//
+// It is derived from the same constants Draw uses, not from literals: a border
+// needs MinBorderW by MinBorderH, a title needs MinTitleW, and Padding is inset on
+// every side. A borderless block with no padding therefore reports 1x1, and a
+// bordered block with a title reports MinTitleW by MinBorderH — the point at
+// which drawTitle actually runs.
+//
+// It is pure and reads no state that Draw mutates, so it is safe before the first
+// draw and safe to cache.
+func (b *Block) MinSize() buffer.Size {
+	inset := b.Padding
+	if b.Border != buffer.BorderNone {
+		inset++
+	}
+	// One interior cell on each axis is what makes the block show something
+	// rather than just its frame.
+	w, h := 2*inset+1, 2*inset+1
+	if b.Border != buffer.BorderNone && b.titleWidth > 0 && w < MinTitleW {
+		w = MinTitleW
+	}
+	return buffer.Size{W: w, H: h}
+}
+
 // Invalidate satisfies termmosaic.Widget. The block repaints in full every frame
 // and holds no state finer-grained than its bounds, so there is nothing to mark.
 func (b *Block) Invalidate() {}
@@ -349,7 +375,11 @@ func (b *Block) Invalidate() {}
 // it consumes nothing, and a composing parent forwards events to its content.
 func (b *Block) Handle(termmosaic.Event) bool { return false }
 
-// Block is a Widget. It is deliberately NOT Focusable: focus belongs to whatever
-// the block contains, and a chrome widget that claimed it would swallow keys the
-// composed content needed.
-var _ termmosaic.Widget = (*Block)(nil)
+// Block is a Widget, and it is Minimizable because its chrome has an exact
+// smallest size that a layout can reserve without guessing. It is deliberately
+// NOT Focusable: focus belongs to whatever the block contains, and a chrome
+// widget that claimed it would swallow keys the composed content needed.
+var (
+	_ termmosaic.Widget      = (*Block)(nil)
+	_ termmosaic.Minimizable = (*Block)(nil)
+)

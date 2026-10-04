@@ -112,6 +112,138 @@ func ClampCount(n, available int) int {
 	return n
 }
 
+// Priority ranks a content region for responsive budgeting. A widget drops
+// regions from the lowest priority up when its available space cannot show them
+// all. The four values are a total order and are the only ones.
+type Priority uint8
+
+// The four priorities, lowest first. PrioLow is the zero value, so a Region
+// built without naming a priority is dropped first; PrioNormal is the default in
+// practice because it is what a widget should reach for, and PrioAlways is the
+// one a caller opts into deliberately for content that must never disappear.
+const (
+	PrioLow    Priority = iota // dropped first
+	PrioNormal                 // the default; dropped before PrioHigh
+	PrioHigh                   // dropped last among budgetable regions
+	PrioAlways                 // never dropped, whatever the budget
+)
+
+// Region is one budgetable chunk of a widget's content, measured along whichever
+// axis the widget is laying out. Budget does not know or care which axis that is;
+// the axis is the caller's business.
+//
+// A Region is a statement about content, not about space, so it is built once at
+// construction and stored — it does not depend on the current rect. Only Budget's
+// answer does.
+type Region struct {
+	// Size is how many cells this region occupies along the caller's axis.
+	// Negative values are treated as zero.
+	Size int
+	// Prio is the region's drop priority.
+	Prio Priority
+}
+
+// Budget reports which of regions fit in available cells, dropping from the
+// lowest priority up until the total fits. The returned slice has one entry per
+// region, in the same order: true means the region is shown.
+//
+// Rules, all of which are the contract:
+//   - PrioAlways regions are never dropped and always count against the budget.
+//   - Within one priority, regions are kept in declaration order: equal priority
+//     means declaration order is the tiebreak, never a coin flip. A region that
+//     fits is kept, and a region that does not is skipped without consuming the
+//     cells a later same-priority region could still use.
+//   - If PrioAlways regions alone exceed available, every region is reported
+//     kept. The caller is then over budget and clips. Budget never panics and
+//     never reports a region as dropped when dropping it would not help.
+//   - The returned slice is newly allocated. Callers must CACHE it and recompute
+//     only when the widget's rectangle changes (ADR 0007 §3); Draw cannot call
+//     this per frame without adding an allocation to every one of them.
+//
+// A nil or empty regions returns an empty non-nil slice, so a caller may range
+// over the result and compare it against len(regions) without a nil check. A
+// negative available counts as zero: there is no space, which is a state a
+// clipped or detached terminal reaches legitimately. A negative Size counts as
+// zero for the same reason it does in ClampCount.
+//
+// Budget does not measure; it counts cells along the caller's axis, so it is
+// subject to the same recorded limitation as ClampCount — a double-width rune
+// eats two cells and a budget computed here can be one unit optimistic.
+func Budget(regions []Region, available int) []bool {
+	show := make([]bool, len(regions))
+	if len(regions) == 0 {
+		return show
+	}
+	if available < 0 {
+		available = 0
+	}
+
+	// PrioAlways first, because it is the only class whose total can be checked
+	// against the budget before any decision is made. A Priority outside the
+	// four defined values is treated as PrioAlways rather than skipped: skipping
+	// would report such a region as dropped by default, and dropping content
+	// because a caller invented a rank is the one outcome Budget must not produce.
+	var always int
+	for i := range regions {
+		if normalisePrio(regions[i].Prio) == PrioAlways {
+			always += regionSize(regions[i].Size)
+		}
+	}
+	if always > available {
+		// Dropping anything would not bring the total under budget, so nothing is
+		// dropped. The caller clips, which is what ADR 0007 §4 requires of it.
+		for i := range show {
+			show[i] = true
+		}
+		return show
+	}
+
+	remaining := available - always
+	for i := range regions {
+		if normalisePrio(regions[i].Prio) == PrioAlways {
+			show[i] = true
+		}
+	}
+	// High to low: each priority sees only what the ones above it left. Walking
+	// the priorities as outer loops is what makes "dropped from the lowest up" and
+	// "never spend a cell on something that will be dropped" the same statement.
+	for prio := PrioHigh; ; prio-- {
+		for i := range regions {
+			if normalisePrio(regions[i].Prio) != prio {
+				continue
+			}
+			n := regionSize(regions[i].Size)
+			if n <= remaining {
+				remaining -= n
+				show[i] = true
+			}
+		}
+		if prio == PrioLow {
+			break
+		}
+	}
+	return show
+}
+
+// normalisePrio folds a Priority onto the four defined values, so Budget is total
+// over the uint8 range rather than only over the constants. Anything above
+// PrioHigh ranks with PrioAlways.
+func normalisePrio(p Priority) Priority {
+	if p > PrioHigh {
+		return PrioAlways
+	}
+	return p
+}
+
+// regionSize reads a Region's size with negative values treated as zero, which
+// is what makes a subtraction below safe from underflowing a cell count.
+func regionSize(n int) int {
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
 // Touches reports whether two rectangles overlap or share an edge. The
 // dirty-rect coalescer uses it, because two rectangles sharing a column are
 // contiguous on screen and cheaper as one diff region than as two.
