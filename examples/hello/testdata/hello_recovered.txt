@@ -3,7 +3,7 @@
 
        ┌ termmosaic ────────────────────────────────┐
        │                                            │
-       │ frame     1                                │
+       │ frame     7                                │
        │ depth     truecolor                        │
        │ quit      press q                          │
        │                                            │

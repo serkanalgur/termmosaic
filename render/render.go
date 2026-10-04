@@ -355,6 +355,11 @@ func (e *FrameError) Unwrap() error { return e.Err }
 // Render draws one frame if anything is dirty, and returns the number of bytes
 // written. A frame with nothing dirty returns 0 and touches neither the widget
 // tree nor the Sink.
+//
+// A frame that is forced but produces no bytes — a zero-sized screen, or an
+// InvalidateAll of unchanged content — also touches neither, and does not Flush.
+// That is ADR 0007 §4's contract for a degenerate size, and it is why a detached
+// terminal's event loop can call Render every tick indefinitely at zero cost.
 func (r *Renderer) Render() (int, error) {
 	// Posted callbacks run with the renderer's lock released. A callback is
 	// expected to mutate widget state and call Invalidate, and Invalidate takes
@@ -408,9 +413,17 @@ func (r *Renderer) Render() (int, error) {
 				Bytes: n,
 			}
 		}
-	}
-	if err := r.sink.Flush(); err != nil {
-		return n, &FrameError{Op: "flush", Err: err, Bytes: n}
+		// Flush only when bytes actually went out. ADR 0007 §4's contract for a
+		// zero-sized screen is "writes zero bytes and does not call the Sink", and a
+		// forced frame that produced nothing — a detached terminal, or an
+		// InvalidateAll of unchanged content — is exactly that case. Flushing an empty
+		// buffer is harmless for a well-behaved Sink and is still a call, which is
+		// what the contract rules out. The paths that write a constant escape
+		// sequence (Reset, EnterAltScreen, HideCursor) go through writeAll and flush
+		// themselves, so nothing here loses its flush.
+		if err := r.sink.Flush(); err != nil {
+			return n, &FrameError{Op: "flush", Err: err, Bytes: n}
+		}
 	}
 
 	// Swap the buffers so the frame just painted becomes the comparison base.

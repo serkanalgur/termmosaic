@@ -39,7 +39,7 @@ func renderGolden(t *testing.T, frames int) *headless.MemorySink {
 		Height: goldenH,
 		Caps:   termmosaic.DefaultCaps(),
 	})
-	root := newHello(centred(goldenW, goldenH, blockW, blockH), buffer.DepthTrueColor)
+	root := newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor)
 	r.SetRoot(root)
 	for i := 0; i < frames; i++ {
 		if _, err := r.Render(); err != nil {
@@ -122,7 +122,7 @@ func TestSecondFrameChangesOnlyTheCounter(t *testing.T) {
 	r := render.New(sink, render.Config{
 		Width: goldenW, Height: goldenH, Caps: termmosaic.DefaultCaps(),
 	})
-	r.SetRoot(newHello(centred(goldenW, goldenH, blockW, blockH), buffer.DepthTrueColor))
+	r.SetRoot(newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor))
 
 	if _, err := r.Render(); err != nil {
 		t.Fatal(err)
@@ -155,7 +155,7 @@ func TestIdleFrameWritesNothing(t *testing.T) {
 	r := render.New(sink, render.Config{
 		Width: goldenW, Height: goldenH, Caps: termmosaic.DefaultCaps(),
 	})
-	r.SetRoot(newHello(centred(goldenW, goldenH, blockW, blockH), buffer.DepthTrueColor))
+	r.SetRoot(newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor))
 	if _, err := r.Render(); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestDegradedColourGolden(t *testing.T) {
 			r := render.New(sink, render.Config{
 				Width: goldenW, Height: goldenH, Caps: tc.caps,
 			})
-			root := newHello(centred(goldenW, goldenH, blockW, blockH), tc.caps.ColourDepth())
+			root := newHello(rootBounds(goldenW, goldenH), tc.caps.ColourDepth())
 			r.SetRoot(root)
 			if _, err := r.Render(); err != nil {
 				t.Fatal(err)
@@ -212,7 +212,7 @@ func TestNoColorGolden(t *testing.T) {
 	r1 := render.New(withColor, render.Config{
 		Width: goldenW, Height: goldenH, Caps: termmosaic.DefaultCaps(),
 	})
-	r1.SetRoot(newHello(centred(goldenW, goldenH, blockW, blockH), buffer.DepthTrueColor))
+	r1.SetRoot(newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor))
 	if _, err := r1.Render(); err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestNoColorGolden(t *testing.T) {
 	r2 := render.New(noColor, render.Config{
 		Width: goldenW, Height: goldenH, Caps: termmosaic.DefaultCaps(), NoColor: true,
 	})
-	r2.SetRoot(newHello(centred(goldenW, goldenH, blockW, blockH), buffer.DepthTrueColor))
+	r2.SetRoot(newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor))
 	if _, err := r2.Render(); err != nil {
 		t.Fatal(err)
 	}
@@ -239,28 +239,115 @@ func TestNoColorGolden(t *testing.T) {
 	checkGolden(t, "hello_nocolor.sgr", noColor.RawString())
 }
 
+// TestResizeGolden renders the example through a size sweep that goes UP, back
+// DOWN and through the degenerate sizes, checking the golden after each full-size
+// step.
+//
+// ADR 0007 §1 rule 3's forced-changes table asks for exactly this shape — "extended
+// to cover a shrink and a degenerate size (0x0 and a size below the block's
+// minimum), since a resize test that only grows cannot catch stale cells" — and the
+// reason is worth keeping: growing gives the widget more room, so every extra cell
+// is freshly painted and nothing can be left over. Only SHRINKING can leave a row
+// from the previous size on screen, and only a size below the block's minimum
+// exercises the guards that drop the title and the body.
 func TestResizeGolden(t *testing.T) {
 	sink := headless.NewMemorySink(goldenW, goldenH)
 	r := render.New(sink, render.Config{
 		Width: goldenW, Height: goldenH, Caps: termmosaic.DefaultCaps(),
 	})
-	root := newHello(centred(goldenW, goldenH, blockW, blockH), buffer.DepthTrueColor)
+	root := newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor)
 	r.SetRoot(root)
 	if _, err := r.Render(); err != nil {
 		t.Fatal(err)
 	}
 
-	// Grow the terminal: the renderer must recompute the block's bounds and
-	// repaint everything, because the previous frame described a screen that no
-	// longer exists.
-	const newW, newH = 72, 18
-	sink.Resize(newW, newH)
-	r.Resize(newW, newH)
-	root.bounds = centred(newW, newH, blockW, blockH)
-	if _, err := r.Render(); err != nil {
-		t.Fatal(err)
+	// resizeTo performs the resize exactly as the example's event handler does —
+	// recompute bounds, then Resize — with nothing in between, which is ADR 0007
+	// §5's order of operations — and then asserts that the screen matches what a
+	// FRESH start at that size would have produced.
+	//
+	// The comparison ignores DIGITS because the block's frame counter differs
+	// between a renderer that has been sweeping and one that has just started. Every
+	// other character is chrome, and chrome is what a stale cell would corrupt: a row
+	// left over from a wider frame would show the wider frame's text.
+	resizeTo := func(t *testing.T, w, h int) {
+		t.Helper()
+		sink.Resize(w, h)
+		r.Resize(w, h)
+		root.bounds = rootBounds(w, h)
+		if _, err := r.Render(); err != nil {
+			t.Fatalf("resize to %dx%d: %v", w, h, err)
+		}
+		if got := sink.UnknownSequences(); got != 0 {
+			t.Fatalf("%dx%d: %d unrecognised sequences:\n%s", w, h, got, sink.RawString())
+		}
+		if got, _ := r.Size(); got != w {
+			t.Fatalf("Size() reports %dx%d after resizing to %dx%d", got, h, w, h)
+		}
+		assertScreenMatchesAFreshStart(t, sink, w, h)
 	}
+
+	// --- GROW ---------------------------------------------------------------
+	const newW, newH = 72, 18
+	resizeTo(t, newW, newH)
 	checkGolden(t, "hello_resized.txt", sink.String())
+
+	// --- SHRINK, below the size the block was built for ----------------------
+	// 30x7 is narrower and shorter than blockW x blockH, so the title, the value
+	// column and the body rows all compete for the same cells.
+	resizeTo(t, 30, 7)
+	if got := root.bounds.W; got != 30 {
+		t.Errorf("the block's width is %d on a 30-wide screen, want the full screen", got)
+	}
+	checkGolden(t, "hello_shrunk.txt", sink.String())
+
+	// --- DEGENERATE ----------------------------------------------------------
+	// 0x0 is the detached-terminal case and 4x2 is below the block's minimum;
+	// both must render without failing and both must leave the renderer able to
+	// come back to a real size.
+	for _, size := range [][2]int{{0, 0}, {4, 2}, {20, 1}} {
+		resizeTo(t, size[0], size[1])
+		if w, h := r.Size(); w != size[0] || h != size[1] {
+			t.Errorf("Size() = %dx%d, want %dx%d", w, h, size[0], size[1])
+		}
+	}
+
+	// --- AND BACK -----------------------------------------------------------
+	// The last step is the one that matters: recovering from a degenerate size
+	// must leave the same screen a fresh start at that size would.
+	resizeTo(t, goldenW, goldenH)
+	checkGolden(t, "hello_recovered.txt", sink.String())
+}
+
+// assertScreenMatchesAFreshStart asserts that got shows the same chrome as a
+// renderer started fresh at w-by-h would.
+//
+// Digits are removed before the comparison because the example's block shows a frame
+// counter, and a renderer that has been swept through several sizes has a different
+// one. Everything else is chrome, and chrome is precisely what a stale cell
+// corrupts: a row surviving from a wider frame carries that frame's text, and a
+// column surviving from a taller one carries that one's border.
+func assertScreenMatchesAFreshStart(t *testing.T, got *headless.MemorySink, w, h int) {
+	t.Helper()
+	fresh := headless.NewMemorySink(w, h)
+	r := render.New(fresh, render.Config{Width: w, Height: h, Caps: termmosaic.DefaultCaps()})
+	r.SetRoot(newHello(rootBounds(w, h), buffer.DepthTrueColor))
+	if _, err := r.Render(); err != nil {
+		t.Fatalf("fresh start at %dx%d: %v", w, h, err)
+	}
+	strip := func(s string) string {
+		return strings.Map(func(r rune) rune {
+			if r >= '0' && r <= '9' {
+				return -1
+			}
+			return r
+		}, s)
+	}
+	a, b := strip(got.String()), strip(fresh.String())
+	if a != b {
+		t.Errorf("%dx%d: the swept screen does not match a fresh start at the same size.\n"+
+			"--- swept ---\n%s\n--- fresh ---\n%s", w, h, a, b)
+	}
 }
 
 // TestWriteIntRendersEveryDecimalPlace covers the hand-rolled formatting that
@@ -305,9 +392,15 @@ func wantDecimal(v int) string {
 }
 
 // TestGoldenFilesExist fails with a clear instruction rather than a file-not-found
-// error, because that is the first thing anyone hits here.
+// error, because that is the first thing anyone hits here. The list includes the
+// shrink and recovery files, so a golden that was never generated is a failure here
+// rather than a confusing diff later.
 func TestGoldenFilesExist(t *testing.T) {
-	for _, name := range []string{"hello.txt", "hello.sgr", "hello_frame2.txt"} {
+	names := []string{
+		"hello.txt", "hello.sgr", "hello_frame2.txt",
+		"hello_resized.txt", "hello_shrunk.txt", "hello_recovered.txt",
+	}
+	for _, name := range names {
 		if _, err := os.Stat(filepath.Join("testdata", name)); err != nil {
 			t.Errorf("missing golden file %s: %v", name, err)
 		}
@@ -395,7 +488,7 @@ func TestDrawIsTotalAtEverySize(t *testing.T) {
 // and documentation alone does not catch it.
 func TestDrawIsAllocationFree(t *testing.T) {
 	b := buffer.NewBuffer(60, 14)
-	h := newHello(centred(60, 14, blockW, blockH), buffer.DepthTrueColor)
+	h := newHello(rootBounds(60, 14), buffer.DepthTrueColor)
 	h.Draw(b) // warm any lazily-initialised state
 
 	if got := testing.AllocsPerRun(100, func() { h.Draw(b) }); got != 0 {

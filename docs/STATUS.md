@@ -38,6 +38,7 @@ break without notice until v1.0.0.**
 | Color model and degradation ladder | **PROPOSED** | Built and working: `Colour` is truecolor/named-16/256 with a redmean quantiser and a `ColourDepth` rung, plus `NO_COLOR`. **Not yet validated.** Nobody has checked the redmean mapping is perceptually acceptable, so treat the 256 and 16 rungs as provisional. The `buffer.Quantiser` interface is the escape hatch for a Lab-space replacement. |
 | Theme and styling system | **DECIDED** — **no theme in v1**; widgets carry `Style` fields, framework defaults are the terminal's own colours plus named attribute styles | One `buffer.Style` value (fg/bg/attr, by value, 12 bytes, 0 allocs) replaces the loose-argument write API; `ansi.Style` becomes an alias of it. Trigger for a theme: the first role two widgets must share. [ADR 0008](adr/0008-style-and-text.md) |
 | Text and span rendering | **DECIDED** — `Span` + `Buffer.SetSpans`, parsed once, wrapped outside `Draw` | A wide glyph's continuation cell takes its **owning span's** style or the row flickers forever. `Wrap`/`Truncate` allocate and are banned from `Draw`. Borders and titles have one vocabulary (`BorderPlain`/`Rounded`/`Double`/`Thick`/`ASCII`, one `Block`). [ADR 0008](adr/0008-style-and-text.md) |
+| `docs/ARCHITECTURE.md` | **DECIDED** — a short orientation document, not a summary | Reduced to 105 lines at the v0.1.0 release gate. It had grown to 251 lines duplicating ADR reasoning, its decision numbering (5=colour, 6=theme, 7=input) did not match the ADR set, and it still called the colour model OPEN after this table moved it to PROPOSED. It now states what the pieces are, how they fit, and links each ADR — no duplicated reasoning — and preserves the **Non-goals** section verbatim, which is not duplicated anywhere else. |
 | Documentation site | **PROPOSED** — Hugo + Pagefind on GitHub Pages; captures generated in Go from `MemorySink` cells, not screenshots | No browser TTY exists, so the only truthful picture of a widget is the cell grid the renderer produced — which is what `widgets/widgettest` already builds and what the golden tests assert on, so the docs cannot drift from behaviour. **Not built.** A live WASM playground is rejected: `docs/ARCHITECTURE.md` lists "no WASM build" as a written non-goal and `term/terminal_windows.go` is a stub, so there is no seam to port. Plan, page tree, per-widget template and effort: [docs/SITE-PLAN.md](SITE-PLAN.md). |
 
 ### Decisions
@@ -75,6 +76,15 @@ Four accepted ADRs were amended on 2026-10-04, after the core implementation
 exposed claims that no longer described the code. Each amendment notes the date
 and reason in the ADR's header; the original reasoning is preserved in place
 rather than rewritten.
+
+**A fifth amendment, also on 2026-10-04, closed ADR 0008's risk 5** — "the
+wide-glyph interaction is implemented but unbenchmarked" — by benchmarking it, on
+the diff, the cell writers, `Wrap` and a whole rendered frame. The amendment
+records the measurements, states that the wide paths did not regress, and records
+one defect the benchmark surfaced and this release deliberately does not fix: the
+diff's cursor-run suppression assumes one cell per rune, so every wide glyph is
+preceded by a cursor-position escape. It is the only change made to any ADR for
+v0.1.0.
 
 - **ADR 0002 — the byte-compare soundness condition was half-stated.** Padding
   is one precondition; contiguity of the compared range is the other, and it is
@@ -144,6 +154,58 @@ framework's defaults are the terminal's own colours plus named attribute styles.
 `NO_COLOR` and the 16-colour rung stay encode-time only, so no widget path
 consults them.
 
+## Release gate for v0.1.0 — what closed, and what did not
+
+Recorded so that nothing below is silently open. "Closed" means it is done and
+verified; "not done" means it is still open and is named as such rather than
+left for someone to rediscover.
+
+**Closed.**
+
+- **`CHANGELOG.md` now exists**, hand-maintained, with Breaking / Added / Fixed /
+  Known Limitations sections. It was a stated requirement of the definition of
+  usable library and had never been written. The Known Limitations section lists
+  what is genuinely unsupported rather than what is merely unpolished.
+- **The four ADR 0007 §3 renderer tests exist** — `TestRenderAtZeroSizeWritesNothing`,
+  `TestResizeShrinksAndRepaintsWholeRect`, `TestResizeCoalescedToOneRepaintPerTick`
+  and `TestRootBoundsClippedToScreen` — each pinned by mutation rather than merely
+  by presence. Writing them **found a real defect**: `Render` flushed the sink even
+  when it wrote nothing, breaking ADR 0007 §4's contract. Fixed.
+- **`SetSpansWindowIn`'s `skip` path question is settled.** It was recorded as
+  unreachable; it is reachable, via `clampColOffset`'s ceiling rather than via
+  `scrollCols`. `Table`'s behaviour is unchanged; the reasoning was wrong, and both
+  the code comment and this document are corrected.
+- **`examples/hello` no longer uses the clamp-and-centre pattern.** `centred(sw,
+  sh, 46, 9)` is replaced by a bounds computation expressed as two `layout.Solve`
+  calls, which is the documented path rather than the anti-pattern ADR 0007 was
+  written about. The golden files are regenerated; the visible consequence is that
+  the block sits one row lower on an odd slack, because largest-remainder
+  distribution hands the leftover cell to the earliest-declared `Fill`.
+- **`docs/ARCHITECTURE.md` is a pointer.** 251 lines of duplicated and stale ADR
+  summary replaced by 105 lines of orientation with a link per ADR.
+- **Wide-glyph paths are benchmarked.** See the open-questions entry below for the
+  numbers and for the one defect found and deliberately not fixed.
+
+**Not done, and deliberately so.**
+
+- **The cache-poisoning debug mode is still not built.** ADR 0007's expensive half,
+  still a convention rather than a check. Not a release gate.
+- **The diff's cursor-move overhead on wide glyphs is not fixed.** One line, and
+  specified in ADR 0008's amendment, but `internal/diff` is the most load-bearing
+  code in the project and this is not the task to change it in.
+- **IME / preedit is not implemented**, by ADR 0005's deliberate deferral. The cost
+  is documented rather than mitigated.
+- **tmux / screen DCS passthrough is still missing.** Deferred with a trigger.
+- **The colour quantiser is still unvalidated.** PROPOSED, not DECIDED.
+- **The documentation site is not built.** Separate work, separate repository.
+- **`TextArea` has no rendered selection, and there is no `Form` container, no table
+  column selection, no pager selection and no redo stack.** Each would be a widget
+  API addition; none is in scope for a release gate.
+- **`docs/adr/README.md`'s "Still open" list is stale in one entry**: it lists the
+  colour model as undecided, where this table records it as PROPOSED. Correcting it
+  means editing an ADR, which the v0.1.0 gate forbids except for ADR 0008's risk 5,
+  so it is recorded here instead.
+
 ## Known gaps in comparable frameworks
 
 Recorded because they define our opportunity. Sources verified 2026-10.
@@ -192,10 +254,27 @@ Answered questions have been removed; the reasoning is preserved in
   TermMosaic program under tmux on a modern terminal can lose key and mouse
   reporting. Trigger: any tmux user reporting broken keys or mouse, or v1.0,
   whichever comes first. See [ADR 0005 §10](adr/0005-input-decoding.md).
-- **Wide characters (CJK, emoji) and grapheme clusters.** A wide glyph occupies
-  two cells; the continuation cell must compare equal across frames or it will
-  flicker. Needs its own decision; no benchmark has been run. Deferred until
-  internationalization is scoped.
+- **Wide characters (CJK, emoji) and grapheme clusters — STILL OPEN, and now
+  MEASURED.** A wide glyph occupies two cells and the continuation cell must
+  compare equal across frames or the row flickers; that rule is implemented,
+  tested, and was **benchmarked for the first time in v0.1.0**. The wide paths
+  did **not** regress: on a 200x60 scene a full repaint costs 74,139 ns/op against
+  the ASCII scene's 74,078, and the row-skip tier is indistinguishable. All paths
+  are 0 allocs/op. Numbers and method: the 2026-10-04 amendment to
+  [ADR 0008](adr/0008-style-and-text.md) risk 5; benchmarks in
+  `internal/diff/wideglyph_test.go`, `buffer/wideglyph_test.go` and
+  `render/wideglyph_bench_test.go`.
+  **What is still open is the decision, not the performance:** `RuneWidth`'s table
+  is hand-written from East Asian Width ranges rather than generated from Unicode
+  data, and grapheme clusters are not composed (a flag emoji renders as two cells'
+  worth of junk). Deferred until internationalization is scoped.
+  **A defect the benchmark surfaced and this release does NOT fix:** the diff's
+  cursor-run suppression assumes one cell per rune, so every wide glyph is
+  preceded by a cursor-position escape — 68,832 bytes against 6,233 for the same
+  6,000 runes on a dense wide scene. Correct output, 11x the bytes. The fix is one
+  line and is specified in the ADR 0008 amendment; it is out of scope for a
+  release gate because `internal/diff` is the most load-bearing code here and ADR
+  0002's headline numbers are quoted from it.
 - **Headless backend: v1 or v0.5?** Largely settled — [ADR 0001](adr/0001-backend-strategy.md)
   makes the headless memory sink a v1 deliverable, because the whole testability
   pillar depends on it. The remaining open sub-question is its **assertion
@@ -212,22 +291,43 @@ Answered questions have been removed; the reasoning is preserved in
   see the table row above. Built and working, not yet perceptually validated.
   The **theme/styling system** is no longer in this list:
   [ADR 0008](adr/0008-style-and-text.md) decides it as "no theme in v1".
-- **A cache-poisoning debug mode, and the four ADR 0007 §3 tests still
-  unwritten.** The catalog surfaced that a rect-keyed cache is only half the
-  contract — see ADR 0007's 2026-10-04 amendment. The cheap half is now a
-  stated convention; the mechanical check is not built. A debug mode that
-  corrupts a widget's cache after `Draw` and asserts the next frame is
-  identical would catch that whole class instead of by review.
-  `TestRenderAtZeroSizeWritesNothing`, `TestResizeShrinksAndRepaintsWholeRect`,
-  `TestResizeCoalescedToOneRepaintPerTick` and `TestRootBoundsClippedToScreen`
-  are named in ADR 0007 and still do not exist — they are renderer and
-  application level, not widget level. The 0×0 half is verified indirectly
-  (0×0, 0×24 and 24×0 each write zero bytes) but has no test of its own.
-- **`SetSpansWindowIn`'s `skip` path is unreachable from `Table` today.**
-  `scrollCols` always positions on a column start, so the partially-visible-
-  column case cannot arise. The primitive is correct and covered in `buffer`
-  (12+ cases), but its only real user does not reach it. Trigger: a widget that
-  scrolls by cell rather than by column.
+- **A cache-poisoning debug mode — STILL OPEN. The four ADR 0007 §3 tests — now
+  written.** Two separate items, previously recorded as one:
+  - **The cache-poisoning debug mode remains unbuilt.** The catalog surfaced
+    that a rect-keyed cache is only half the contract — see ADR 0007's 2026-10-04
+    amendment. The cheap half is a stated convention; the mechanical check is not
+    built. A debug mode that corrupts a widget's cache after `Draw` and asserts the
+    next frame is identical would catch that whole class instead of by review.
+  - **`TestRenderAtZeroSizeWritesNothing`, `TestResizeShrinksAndRepaintsWholeRect`,
+    `TestResizeCoalescedToOneRepaintPerTick` and `TestRootBoundsClippedToScreen`
+    now exist**, in `render/responsive_contract_test.go`, together with
+    `TestRootBoundsEntirelyOffScreenClipsToNothing`. Each is pinned by mutation, not
+    merely by presence. **Writing them found a real defect:** `Renderer.Render`
+    called `Sink.Flush` even when it wrote zero bytes, which broke ADR 0007 §4's
+    "does not call the Sink" contract for a zero-sized screen; `Render` now flushes
+    only when bytes went out. The degenerate-size resize sweep
+    (`TestResizeShrinksAndRepaintsWholeRect/through_a_degenerate_size`) and the
+    example's own grow/shrink/degenerate/recover sweep
+    (`examples/hello`'s `TestResizeGolden`, with two new golden files) are the
+    scripted resize sweep ADR 0007 risk 6 asks for.
+- **`SetSpansWindowIn`'s `skip` path — RESOLVED, and the recorded reason was
+  WRONG.** This said the path was unreachable from `Table` because `scrollCols`
+  always positions on a column start. That is false, and `widgets/data`'s
+  `table_window_test.go` proves it. `Table` keeps two horizontal offsets: a column
+  index and a CELL position, and the cell position is set to a column start only
+  when a caller asks for one. `clampColOffset`'s **ceiling** is
+  `totalW - contentW` — the right-hand edge of the content — which is generally not
+  a column start. Two reachable consequences, both pinned: scrolling to the end
+  (shift+End) clamps onto that ceiling and leaves the column before it partially
+  visible; and any resize that changes `contentW` or `totalW` re-clamps onto it, so
+  the partial column appears with no scrolling key pressed at all. So `skip` is on
+  the production path and `Table` needs no new behaviour.
+  **Neither of the two options this question offered is the right one**, which is
+  why it took a measurement to settle: the primitive did not need teaching to
+  scroll by cell, and it did not need documenting as unused. `Table`'s behaviour is
+  **unchanged**; a misleading comment on
+  `TestTableWideColumnIsMarkedRatherThanBleedingIntoTheFrame` that repeated the false
+  claim has been corrected in place.
 
 ## Definition of "usable library"
 
@@ -235,7 +335,8 @@ The bar this project is measured against:
 
 - SemVer honored from v0.1; **no behavioral change in a patch release**.
 - A hand-maintained `CHANGELOG.md` with Breaking / Added / Fixed /
-  Known Limitations sections.
+  Known Limitations sections. **MET for v0.1.0** — [CHANGELOG.md](../CHANGELOG.md)
+  is written and carries all four sections.
 - CI green on Linux, macOS, and Windows across supported architectures.
 - Every widget has a runnable example and a documented public API.
 - Known limitations are enumerated in the docs, not discovered by users.

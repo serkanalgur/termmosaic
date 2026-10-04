@@ -31,6 +31,7 @@ import (
 	"github.com/serkanalgur/termmosaic"
 	"github.com/serkanalgur/termmosaic/buffer"
 	"github.com/serkanalgur/termmosaic/input"
+	"github.com/serkanalgur/termmosaic/layout"
 	"github.com/serkanalgur/termmosaic/render"
 	"github.com/serkanalgur/termmosaic/term"
 	"github.com/serkanalgur/termmosaic/widgets/block"
@@ -201,19 +202,56 @@ func (h *hello) writeInt(buf *buffer.Buffer, x, y, v int) int {
 	}
 }
 
-// centred returns a w-by-h rectangle centred in a sw-by-sh screen, clamped so a
-// block never asks for more room than the terminal has. Taking the screen size as
-// an argument rather than reading a global keeps the golden test able to drive
-// exactly this code.
-func centred(sw, sh, w, h int) buffer.Rect {
-	bw, bh := w, h
-	if bw > sw {
-		bw = sw
+// rootBounds returns the example's block rectangle inside an sw-by-sh screen.
+//
+// It is expressed as two layout.Solve calls — one per axis — because that is the
+// documented path rather than the anti-pattern ADR 0007 was written about. The
+// centred(sw, sh, 46, 9) this replaces hard-coded the block's size, clamped it by
+// hand, and used centre-of-screen arithmetic that no amount of shrinking made
+// correct: at 20x8 the user got a 20x8 block whose body rows were silently cut off
+// by a height guard, and at 10x4 the title and the body with it. Nothing crashed and
+// nothing was useful — the block survived rather than adapted.
+//
+// Max(n) says the same thing in the solver's own vocabulary: as much room as this
+// block would like, never more than the screen has. The two Fill(1) either side are
+// the centring — the leftover space, shared equally — and when there is no leftover
+// they get nothing, which IS the clamp, expressed rather than hand-written.
+//
+// Note what Solve guarantees that the old arithmetic could not: Max is bounded by
+// the space it is measured against, so the result cannot overflow the screen and
+// needs no clipping afterwards (ADR 0007 §1 rule 2). The clip rule still exists for
+// layouts built from Length constraints, which is the case layout.Solve documents as
+// overflow; see render's TestRootBoundsClippedToScreen.
+//
+// One visible consequence, recorded so nobody reads it as a bug: Solve hands a
+// leftover cell to the EARLIEST-declared Fill, so when the slack above and below is
+// odd the block sits one row LOWER than dead centre. On a 14-row screen that is
+// three rows above and two below. Largest-remainder distribution is layout's
+// documented, deterministic tiebreak, and the alternative — hand-rounding the offset
+// — is the arithmetic this function replaced.
+//
+// Not on the frame path: it is called once at startup and once per resize, which is
+// what ADR 0003's dirty-rectangle model makes affordable.
+func rootBounds(sw, sh int) buffer.Rect {
+	xs := layout.Solve(layout.Horizontal, centredOnAxis(blockW), 0, sw)
+	ys := layout.Solve(layout.Vertical, centredOnAxis(blockH), 0, sh)
+	return buffer.Rect{
+		X: layout.Offset(xs, 0, 1),
+		Y: layout.Offset(ys, 0, 1),
+		W: xs[1],
+		H: ys[1],
 	}
-	if bh > sh {
-		bh = sh
-	}
-	return buffer.Rect{X: (sw - bw) / 2, Y: (sh - bh) / 2, W: bw, H: bh}
+}
+
+// centredOnAxis returns the constraint list that puts a block of n cells in the
+// middle of one axis: n cells if they fit, and whatever is left over shared evenly
+// either side if they do not.
+//
+// It is a []layout.Constraint rather than three values because the solver's input is
+// a list and building one here keeps rootBounds reading as two solves rather than as
+// an arithmetic expression pretending to be a layout.
+func centredOnAxis(n int) []layout.Constraint {
+	return []layout.Constraint{layout.Fill(1), layout.Max(n), layout.Fill(1)}
 }
 
 func main() {
@@ -255,7 +293,7 @@ func run() error {
 	// positions it, it is just never visible.
 	r.SetCursor(render.Cursor{Valid: true, Visible: false})
 
-	root := newHello(centred(w, h, blockW, blockH), caps.ColourDepth())
+	root := newHello(rootBounds(w, h), caps.ColourDepth())
 	r.SetRoot(root)
 
 	if err := t.EnterRawMode(); err != nil {
@@ -329,12 +367,17 @@ func run() error {
 						return
 					}
 				case termmosaic.EventResize:
+					// ADR 0007 §5's order, and nothing else between the two
+					// steps: recompute the root's rectangle, then resize the
+					// renderer. Renderer.Resize never draws, so the whole
+					// interval between the event and the next Render is
+					// available to recompute bounds, and Resize already forces a
+					// full repaint — so the r.InvalidateAll() that used to sit
+					// here was redundant. The pacer then decides when to paint,
+					// which is what coalesces a drag burst into one repaint.
 					w, h = ev.Size.W, ev.Size.H
-					root.bounds = centred(w, h, blockW, blockH)
+					root.bounds = rootBounds(w, h)
 					r.Resize(w, h)
-					// Force a full repaint: the previous frame described a
-					// screen that no longer exists.
-					r.InvalidateAll()
 				}
 			}
 		}

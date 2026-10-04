@@ -48,11 +48,7 @@ func staticScene(t int) (prev, cur *buffer.Buffer, rects []buffer.Rect) {
 	cur = buildFrame(t)
 
 	// Dirty rectangles: the bar row and the three readout rows.
-	rects = make([]buffer.Rect, 0, 4)
-	rects = append(rects, buffer.Rect{X: barX0, Y: barY, W: barW, H: 1})
-	for i := 0; i < 3; i++ {
-		rects = append(rects, buffer.Rect{X: readoutX, Y: readoutY0 + i*2, W: readoutW, H: 1})
-	}
+	rects = sceneRects()
 	return prev, cur, rects
 }
 
@@ -67,36 +63,51 @@ const (
 	readoutW  = 2
 )
 
-// buildFrame renders frame t: static chrome plus a progress bar and three
-// numeric readouts whose contents depend on t. Everything else is identical in
-// every frame, which is the 99%-static property the benchmark depends on.
-func buildFrame(t int) *buffer.Buffer {
-	w, h := sceneW, sceneH
-	fg := buffer.NewColour(0xd0, 0xd0, 0xd0)
-	panel := buffer.NewColour(0x30, 0x36, 0x40)
-	fill := buffer.NewColour(0x18, 0x1c, 0x24)
+// The scene's palette. It is package-level rather than local to buildFrame
+// because the ASCII and the wide-glyph scene are built from the same chrome and
+// must differ only in their content, which they can only do if they share these
+// values. TestSceneShape fails if the ASCII scene's output drifts.
+var (
+	sceneFg     = buffer.NewColour(0xd0, 0xd0, 0xd0)
+	scenePanel  = buffer.NewColour(0x30, 0x36, 0x40)
+	sceneFill   = buffer.NewColour(0x18, 0x1c, 0x24)
+	sceneAccent = buffer.NewColour(0x30, 0xc0, 0x80)
+)
 
-	// A Buffer rather than a raw []buffer.Cell: Frame carries buffers, so the
-	// scene must be built as the same shape the renderer hands the diff
-	// (ADR 0006). Row writes go through Row, which is stride-correct, so the
-	// scene builder is exercising the public bulk accessor too.
-	buf := buffer.NewBuffer(w, h)
-	set := func(x, y int, c buffer.Cell) { buf.SetCell(x, y, c) }
-	rowFill := buffer.NewCell(' ', buffer.NewStyle(fill, fill, 0))
-	for y := 0; y < h; y++ {
+// newSceneBuffer returns a sceneW-by-sceneH buffer pre-filled with a space in
+// bg, which is the background every scene in these benchmarks starts from.
+//
+// A Buffer rather than a raw []buffer.Cell: Frame carries buffers, so a scene
+// must be built as the same shape the renderer hands the diff (ADR 0006). Row
+// writes go through Row, which is stride-correct, so the scene builder is
+// exercising the public bulk accessor too.
+func newSceneBuffer(bg buffer.Colour) *buffer.Buffer {
+	buf := buffer.NewBuffer(sceneW, sceneH)
+	rowFill := buffer.NewCell(' ', buffer.NewStyle(bg, bg, 0))
+	for y := 0; y < sceneH; y++ {
 		row := buf.Row(y)
 		for x := range row {
 			row[x] = rowFill
 		}
 	}
+	return buf
+}
 
-	// --- static chrome: three panel borders ------------------------------
-	// The glyphs come from buffer's table rather than from literals here, for
-	// the same reason a widget must: one table in the repository means
-	// BorderPlain is the same rune everywhere, and it means this benchmark is
-	// exercising the shared vocabulary rather than a private copy of it.
+// drawScenePanels draws the three static panels that frame every scene here. It
+// is shared by the ASCII and the wide-glyph scene so the two are identical apart
+// from their dynamic content, which is what makes the two comparable.
+//
+// The glyphs come from buffer's table rather than from literals, for the same
+// reason a widget must: one table in the repository means BorderPlain is the same
+// rune everywhere. Box-drawing runes are single-width, so the borders are
+// deliberately NOT doubled in the wide scene — a real terminal draws a CJK UI's
+// frame in the same line-drawing characters an ASCII one uses, and doubling them
+// would measure a scene no application renders.
+func drawScenePanels(buf *buffer.Buffer) {
+	w, h := sceneW, sceneH
 	g := buffer.BorderPlain.Glyphs(false)
-	edge := buffer.NewStyle(panel, fill, 0)
+	edge := buffer.NewStyle(scenePanel, sceneFill, 0)
+	set := func(x, y int, c buffer.Cell) { buf.SetCell(x, y, c) }
 	for _, p := range []struct{ x0, y0, x1, y1 int }{
 		{0, 0, w - 1, 8},
 		{0, 10, 39, h - 2},
@@ -115,11 +126,34 @@ func buildFrame(t int) *buffer.Buffer {
 		set(p.x0, p.y1, edge.Cell(g.BottomLeft))
 		set(p.x1, p.y1, edge.Cell(g.BottomRight))
 	}
+}
+
+// sceneRects are the dirty rectangles every scene in these benchmarks reports:
+// the bar row and the three readout rows.
+func sceneRects() []buffer.Rect {
+	rects := make([]buffer.Rect, 0, 4)
+	rects = append(rects, buffer.Rect{X: barX0, Y: barY, W: barW, H: 1})
+	for i := 0; i < 3; i++ {
+		rects = append(rects, buffer.Rect{X: readoutX, Y: readoutY0 + i*2, W: readoutW, H: 1})
+	}
+	return rects
+}
+
+// buildFrame renders frame t: static chrome plus a progress bar and three
+// numeric readouts whose contents depend on t. Everything else is identical in
+// every frame, which is the 99%-static property the benchmark depends on.
+func buildFrame(t int) *buffer.Buffer {
+	fg, fill := sceneFg, sceneFill
+	buf := newSceneBuffer(fill)
+	set := func(x, y int, c buffer.Cell) { buf.SetCell(x, y, c) }
+
+	// --- static chrome: three panel borders ------------------------------
+	drawScenePanels(buf)
 
 	// --- static sidebar text ----------------------------------------------
 	for i := 0; i < 29; i++ {
 		y := 11 + i
-		if y >= h-2 {
+		if y >= sceneH-2 {
 			break
 		}
 		label := fmt.Sprintf("  - item %02d static", i)
@@ -143,8 +177,9 @@ func buildFrame(t int) *buffer.Buffer {
 	// block-drawing glyph such as '█' is 3 bytes in UTF-8, which more than
 	// triples the cost of a changed cell. See
 	// BenchmarkDiffDefaultSceneUnicode for the same scene with realistic
-	// block glyphs, and the note above the benchmark for the comparison.
-	accent := buffer.NewColour(0x30, 0xc0, 0x80)
+	// block glyphs, BenchmarkDiffWideGlyphScene for the same scene with
+	// double-width glyphs, and the note above the benchmark for the comparison.
+	accent := sceneAccent
 	for i := 0; i < barW; i++ {
 		var c buffer.Cell
 		switch {

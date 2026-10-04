@@ -1041,3 +1041,71 @@ deliberately. The span writing inside it is now shared.
 **Still open, unchanged:** risk 5 above stands. None of this has been
 benchmarked with wide characters, and the affected surface is now wider — `Wrap`
 and four range-clipped writers. Risk 6 also stands.
+
+## Amendment 2026-10-04 — risk 5 is measured, and it found something
+
+**Why:** risk 5 said the wide-glyph interaction was "implemented but
+unbenchmarked". It is now benchmarked, on three surfaces — the diff
+(`internal/diff/wideglyph_test.go`), the cell writers and `Wrap`
+(`buffer/wideglyph_test.go`), and a whole rendered frame
+(`render/wideglyph_bench_test.go`). The original risk text above is preserved; this
+section records what the measurement found, including one defect it surfaced that
+this release deliberately does not fix.
+
+**What was measured, and on what.** darwin/arm64 (Apple M1), Go 1.23.0. The
+comparison pairs are like-for-like on *cells* and report ns/cell alongside ns/op,
+because a double-width rune covers two cells and the two scenes therefore do not
+emit the same number of runes — a bare ns/op comparison would be arithmetic rather
+than evidence. Every wide rune in the scenes is verified double-width by
+`TestWideGlyphSetsAreActuallyDoubleWidth`, across four blocks of `RuneWidth`'s
+table, so a scene whose "wide" glyphs measured 1 could not pass silently.
+
+| Measurement | ASCII | Wide glyphs |
+|---|---|---|
+| Diff, 99% static, 4 dirty rows | 531 ns/op, 141 B, 0 allocs | 565 ns/op, 300 B, 0 allocs |
+| Diff, all 60 rows | 6,713 ns/op, 0 allocs | 6,757 ns/op, 0 allocs |
+| Full repaint, 200×60 | 74,078 ns/op, 19,979 B, 0 allocs | 74,139 ns/op, 21,678 B, 0 allocs |
+| Row skip over static content | 272 ns/op | 251 ns/op |
+| `SetSpansIn`, per cell written | 0.657 ns | 0.465 ns |
+| `SetSpansWindowIn` with a skip, per cell | — | 0.428 ns |
+| `Wrap`, 38 cells into 20 | 2,375 ns, 11 allocs, 2 lines | 1,681 ns, 11 allocs, 2 lines |
+
+**Findings.**
+
+1. **The wide paths did not regress, and are marginally faster.** A double-width
+   rune costs one extra branch and one extra 16-byte cell write, and saves the
+   loop iteration and the `RuneWidth` call that two narrow runes would have
+   needed. `Wrap`'s allocations are unchanged and expected: it returns one `Span`
+   per line, which is why §4 forbids it from `Draw`.
+2. **The output-bytes ceiling holds.** A changed ASCII cell costs 1 byte and a
+   changed wide cell at most 4, so wide output is bounded by 4× ASCII. On the
+   partial diff the wide scene is *larger* (300 vs 141) because it emits wider
+   glyphs over fewer rows; on a full repaint it is 1.09×. Both are pinned by
+   `TestWideGlyphOutputIsBoundedByTheUTF8Ceiling`.
+3. **The continuation-cell rule works, and is now pinned in wide content.** A
+   frame identical to its predecessor writes zero bytes over a screen of 6,000 wide
+   glyphs, and a one-glyph change writes exactly one rune. Without this the risk
+   above would still be open: a continuation cell that fails to compare equal
+   repaints its row at 60 Hz forever, and no narrow-glyph scene can reproduce it.
+4. **A defect the benchmark surfaced, NOT fixed in this release.** `Diff` suppresses
+   a cursor move when the following cell is `lastX+1`. A wide glyph advances the
+   terminal's cursor by **two**, but `lastX` is set to the glyph's own `x`, so the
+   check fails and **every wide glyph is preceded by a full CUP escape**. On a
+   scene of 6,000 glyphs in one style that is 6,000 cursor moves against the
+   narrow scene's 30, and 68,832 bytes against 6,233 — **11×** — for the same
+   number of runes. The output is correct, so this is byte efficiency, not
+   correctness, and `TestDenseWideGlyphCostsOneCursorMovePerGlyph` pins the current
+   behaviour so a fix shows up as a deliberate change to that test.
+
+   **Not fixed here, deliberately.** `internal/diff` is the most load-bearing code
+   in the project and ADR 0002's headline numbers are quoted from it; changing its
+   cursor-run logic is not a release-gate task and wants its own review and its own
+   measurement. The fix is one line — track the last written CELL rather than the
+   last written GLYPH — and it is recorded here so the next person does not
+   rediscover it as a performance bug report.
+
+**What did not move.** Risk 6 stands: nothing here has been run against a real
+terminal, and `Caps.Unicode` remains a proxy. The width table remains
+hand-written from East Asian Width ranges rather than generated from Unicode data,
+and grapheme clusters remain uncomposed; a benchmark cannot make a table correct.
+The trigger for revisiting that is unchanged — scope internationalization.

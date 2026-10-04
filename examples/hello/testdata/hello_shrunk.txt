@@ -1,0 +1,7 @@
+┌ termmosaic ────────────────┐
+│                            │
+│ frame     3                │
+│ depth     truecolor        │
+│ quit      press q          │
+│                            │
+└────────────────────────────┘

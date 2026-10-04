@@ -13,8 +13,13 @@ package buffer
 //     composed. A flag emoji renders as two cells' worth of junk rather than
 //     one 2-cell glyph, and a ZWJ sequence renders as several glyphs.
 //
-// No benchmark exercises this. If internationalization is scoped, this needs its
-// own decision and a proper width table; see the ADR 0002 risk list.
+// No benchmark exercised this until v0.1.0: the wide paths are now measured in
+// buffer/wideglyph_test.go (the writers and Wrap) and internal/diff/wideglyph_test.go
+// (a wide scene through the diff). Those measurements show the wide path is NOT
+// slower — a wide rune costs one extra branch and a second cell write, and saves
+// the loop iteration and RuneWidth call that two narrow runes would have needed.
+// What they do not do is make the table correct; it is still hand-written and still
+// needs a decision of its own if internationalization is scoped.
 func RuneWidth(r rune) int {
 	if r == 0 {
 		return 0

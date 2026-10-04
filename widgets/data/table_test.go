@@ -393,9 +393,16 @@ func (t *Table) maxCellsForTest() int { return t.maxCells }
 // nothing lands on the scrollbar or the border beside it.
 //
 // It goes through buffer.SetSpansWindowIn — the writer a horizontally scrolled
-// column uses — and the scrolled-skip case it also serves is covered in buffer's
-// own tests, because the Table's cell offset always lands on a column start, so a
-// partially scrolled column is not reachable from here.
+// column uses.
+//
+// An earlier version of this comment claimed the scrolled-skip case was covered
+// only in buffer's own tests, "because the Table's cell offset always lands on a
+// column start, so a partially scrolled column is not reachable from here". That was
+// wrong. The cell offset lands on a column start when a caller asks for one, but
+// clampColOffset's CEILING is totalW - contentW — the right-hand edge of the
+// content — which is generally not a column start, so scrolling to the end or
+// resizing lands mid-column. table_window_test.go proves it and pins it; see
+// TestTablePartialColumnSkipIsReachable there.
 func TestTableWideColumnIsMarkedRatherThanBleedingIntoTheFrame(t *testing.T) {
 	tb := NewTable(buffer.Rect{X: 0, Y: 0, W: 18, H: 5}, named("ID", 4), sized("STATE"))
 	tb.Header = true
