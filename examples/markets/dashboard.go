@@ -603,7 +603,13 @@ func (d *dashboard) handleKey(ev termmosaic.Event) bool {
 			d.helpOpen = false
 			return true
 		}
-		if ev.Mod == 0 && (ev.Rune == '?' || ev.Rune == 'q' || ev.Rune == 'Q') {
+		// '?' dismisses. 'q' deliberately does NOT: it is the quit key, and a help
+		// panel that turned "quit" into "close a panel" for as long as it was open
+		// would be a trap. The input loop tests isQuitKey before offering the event
+		// here, so 'q' reaches the program regardless — but the board also consumes
+		// it below, so a caller that routed the other way round would still exit
+		// rather than be left with a help panel it could not close with q.
+		if ev.Mod == 0 && ev.Rune == '?' {
 			d.helpOpen = false
 			return true
 		}
@@ -661,6 +667,34 @@ func (d *dashboard) handleKey(ev termmosaic.Event) bool {
 // The focusable order is the reading order, so a click that two widgets could
 // claim — none currently overlap — goes to the one a reader would have aimed at.
 func (d *dashboard) handleMouse(ev termmosaic.Event) bool {
+	// The WHEEL is routed to the widget under the POINTER rather than to the ring in
+	// order, and this is a real correction rather than a nicety.
+	//
+	// form.Tabs consumes a wheel notch whether or not the pointer is over it — which
+	// is a defensible rule for a form, where scrolling a list does not require focus
+	// — but it means a tab row first in the ring swallows EVERY notch in the
+	// application, and the table under the pointer never sees one. Since the tab row
+	// here is a one-row strip and the table is the thing a reader scrolls, the
+	// application asks the widget whose rectangle contains the pointer first, and
+	// falls back to the ring order when the pointer is over none of them (a wheel
+	// over a KPI tile, which nothing in the ring claims, must still be consumed by
+	// somebody rather than falling through to the application).
+	//
+	// Clicks are NOT routed this way. A click is a commitment to a panel, and
+	// hit-testing is each widget's own business — which is why this special case is
+	// about the wheel and nothing else.
+	if ev.Mouse.Button == termmosaic.MouseWheelUp || ev.Mouse.Button == termmosaic.MouseWheelDown {
+		for _, w := range d.focusables {
+			if w.Bounds().Contains(ev.Mouse.X, ev.Mouse.Y) && w.Handle(ev) {
+				// Focus deliberately NOT taken. A reader scrolling with the wheel is
+				// reading, not committing to a panel, and moving the focus under the
+				// pointer would rewrite the key hint while they are still looking at
+				// the numbers. A CLICK is the gesture that commits; see handleMouse's
+				// second loop.
+				return true
+			}
+		}
+	}
 	for i, w := range d.focusables {
 		if w.Handle(ev) {
 			d.setFocus(i)

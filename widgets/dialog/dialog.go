@@ -1113,6 +1113,10 @@ func (d *Dialog) rebuildChoices(in buffer.Rect, styles dialogStyles) {
 	}
 	first, _ := d.vm.Range()
 	textW := in.W - d.choiceMarkW
+	// The loop bound is the VISIBLE WINDOW, and that is the whole O(visible) claim:
+	// a thousand-choice dialog and a three-choice one cost the same per resize,
+	// because nothing here ranges over the collection. Both bounds are kept because
+	// the window can extend past the collection when a shrink clamps the offset.
 	for i := first; i < first+d.choiceShown && i < len(d.choices); i++ {
 		d.choiceLabels = append(d.choiceLabels,
 			capRow(d.blk.Ascii, d.choices[i], styles.choice, textW))

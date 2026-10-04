@@ -310,6 +310,20 @@ func New(r buffer.Rect, items ...Item) *Menu {
 	return m
 }
 
+// init returns m's block, creating it if the Menu is the zero value.
+//
+// The Widget contract requires Bounds and MinSize to be safe before the widget has
+// ever been drawn, and for a caller building a layout that means before it has
+// called anything on the widget at all. A nil block would panic there, so it is
+// created on first touch rather than required of the caller — which is why the zero
+// Menu is usable rather than merely non-crashing on the paths New covers.
+func (m *Menu) init() *block.Block {
+	if m.blk == nil {
+		m.blk = block.New(m.bounds)
+	}
+	return m.blk
+}
+
 // Bounds returns the menu's rectangle, safe to call before the first Draw.
 func (m *Menu) Bounds() buffer.Rect { return m.bounds }
 
@@ -317,7 +331,7 @@ func (m *Menu) Bounds() buffer.Rect { return m.bounds }
 // interior, so a new rectangle makes the next Draw rebuild it.
 func (m *Menu) SetBounds(r buffer.Rect) {
 	m.bounds = r
-	m.blk.SetBounds(r)
+	m.init().SetBounds(r)
 }
 
 // Block returns the block that draws this menu's border, title, padding and
@@ -327,7 +341,7 @@ func (m *Menu) SetBounds(r buffer.Rect) {
 //
 // The Background a caller sets there is the one this menu's rows are painted
 // over, which is why Menu has no Background field of its own.
-func (m *Menu) Block() *block.Block { return m.blk }
+func (m *Menu) Block() *block.Block { return m.init() }
 
 // Focused reports whether the menu has focus.
 func (m *Menu) Focused() bool { return m.focused }
@@ -342,7 +356,7 @@ func (m *Menu) SetFocused(v bool) { m.focused = v }
 // MinSize returns the smallest menu that shows a header, a marker, a label and
 // two columns' worth of structure: a whole-widget size including this menu's own
 // chrome, per ADR 0007 §2.
-func (m *Menu) MinSize() buffer.Size { return minWhole(m.blk, minMenuW, minMenuH) }
+func (m *Menu) MinSize() buffer.Size { return minWhole(m.init(), minMenuW, minMenuH) }
 
 // Items returns the ROOT level's items.
 //
@@ -725,7 +739,7 @@ func (m *Menu) visibleRows(d int) int {
 			return m.lay.cols[i].itemRect.H
 		}
 	}
-	return m.blk.Interior().H
+	return m.init().Interior().H
 }
 
 // firstSelectable returns the first non-disabled index at depth d, or -1.
@@ -843,11 +857,11 @@ func (m *Menu) Draw(buf *buffer.Buffer) {
 		// ADR 0007 §4: Draw returns immediately on an empty Bounds.
 		return
 	}
-	m.blk.Draw(buf)
+	m.init().Draw(buf)
 	if !m.open {
 		return
 	}
-	in := m.blk.Interior()
+	in := m.init().Interior()
 	if in.Empty() {
 		return
 	}
@@ -931,6 +945,10 @@ func (m *Menu) drawRow(buf *buffer.Buffer, c *layoutCol, row buffer.Rect, i int,
 		}
 		buf.Set(c.checkX, row.Y, glyph, m.checkStyle().Resolved())
 	}
+	// The label text was cut to the region in the rebuild, marker included, so this
+	// writes it whole without re-capping. The style is applied HERE rather than
+	// cached with the text, because whether a row is selected or disabled is not
+	// known when the cut is made and changes without the layout changing.
 	buf.SetString(c.labelX, row.Y, m.labelAt(c, i), st.Resolved())
 	if c.showHint {
 		buf.SetString(c.hintX, row.Y, m.hintAt(c, i), m.hintStyle().Resolved())

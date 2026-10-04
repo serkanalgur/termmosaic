@@ -975,8 +975,11 @@ func dialogEntry() Entry {
 		Constructor: "dialog.New(r buffer.Rect, v dialog.Variant) *dialog.Dialog",
 		Summary:     "A modal box with a title, a body and a row of actions.",
 		Note: "Modal: keys do not reach the tree beneath. The focused action " +
-			"is marked by an underline as well as colour, so it survives " +
-			"NO_COLOR. Escape is Cancel, never a no-op.",
+			"is ringed rather than coloured - a bracket pair of the same width " +
+			"as the idle pair, so moving focus never reflows the row - and " +
+			"reinforced with reverse video, which survives NO_COLOR because " +
+			"colour is suppressed only at encode time. Escape is Cancel, " +
+			"never a no-op.",
 		Widths:  Widths(),
 		Heights: rows(11),
 		Construct: func(r buffer.Rect) termmosaic.Widget {

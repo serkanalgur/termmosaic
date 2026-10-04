@@ -114,22 +114,6 @@ func choiceDialog(w, h, n int) *Dialog {
 // drawn in the terminal's own colours.
 func plainSpans(s string) []buffer.Span { return []buffer.Span{buffer.NewSpan(s, buffer.PlainStyle)} }
 
-// filled marks a block with no border, for the tests that want the interior to be
-// the whole rect.
-func borderless(d *Dialog) *Dialog {
-	d.Block().SetBorder(buffer.BorderNone)
-	return d
-}
-
-// minOf is the larger of two ints, for the tests that assert a threshold rather
-// than a hard-coded number.
-func minOf(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // blockOf is used by the composition test to prove a caller can configure the
 // chrome through Block without Dialog re-exporting anything.
 func blockOf(d *Dialog) *block.Block { return d.Block() }

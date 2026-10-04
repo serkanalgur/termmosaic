@@ -282,6 +282,16 @@ type series struct {
 // primary's. That is the whole point: the sparkline, the gauge and the two window
 // extremes then say there is no history instead of drawing another currency's
 // shape under this one's name.
+// PrimaryPair reports the currency this market's window and headline figures are
+// about. It is the read side of withPair, and it exists so a caller can ask the
+// market rather than reaching into its fields.
+func (m *market) PrimaryPair() string {
+	if m == nil {
+		return ""
+	}
+	return m.primary
+}
+
 func (m *market) withPair(code string) *market {
 	if m == nil {
 		return nil

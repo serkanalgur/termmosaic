@@ -1,0 +1,7 @@
+[1                                             ]
+> New                                      ^N  >
+  Save                                     ^S
+  Sep
+ xWrap
+  Help                                     F1
+

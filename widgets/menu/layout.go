@@ -9,6 +9,8 @@
 package menu
 
 import (
+	"strings"
+
 	"github.com/serkanalgur/termmosaic/buffer"
 	"github.com/serkanalgur/termmosaic/widgets/block"
 )
@@ -87,9 +89,15 @@ type column struct {
 	// this rather than wrapping `header` in a slice at draw time, which would
 	// allocate once per level per frame.
 	headerSpans []buffer.Span
-	// labels[i] is item i's text cut to the column's label width, and hints[i]
-	// its keybinding cut to the hint width. Both are cached because truncation
-	// allocates.
+	// labels[i] is item i's text cut to the column's label width, and hints[i] its
+	// keybinding cut to the hint width.
+	//
+	// They are STRINGS, truncation marker included, rather than spans. The marker is
+	// the only thing telling the user their label was cut, so it must survive the cut —
+	// but the STYLE of a row is not known when the cut is made, because it depends on
+	// whether that row is selected and whether it is disabled, and the selection moves
+	// without invalidating the layout. So the text is cached and the style is applied
+	// at write time, which is the only arrangement in which both can be right.
 	labels []string
 	hints  []string
 
@@ -447,16 +455,30 @@ func (m *Menu) cutStrings(c *layoutCol, items []Item, headTruncated bool) {
 	c.hints = resizeStrings(c.hints, len(items))
 	for i := range items {
 		c.labels[i] = cutText(m.Ascii, items[i].Label, c.labelW)
-		c.hints[i] = cutText(m.Ascii, items[i].Hint, buffer.StringWidth(items[i].Hint))
+		c.hints[i] = cutText(m.Ascii, items[i].Hint, hintWidthOf(items[i].Hint))
 	}
 	// The header's style is resolved HERE rather than in Draw because whether a
 	// column is active is fixed for the life of this cached layout: it changes only
 	// when the cursor path does, and every operation that changes the path
 	// invalidates the layout. So a header's style is as much a property of the
 	// cached layout as its text is.
-	c.header = cutText(m.Ascii, m.headerText(c.depth, headTruncated), c.rect.W)
+	//
+	// It is cached as a STRING because a header is written with SetSpansCappedIn,
+	// which does its own capping against the bracket — so the header needs no
+	// truncation here at all, and building a second truncated copy for it would be
+	// work nothing reads.
+	c.header = m.headerText(c.depth, headTruncated)
 	c.headerSpans = c.headerSpans[:0]
 	c.headerSpans = append(c.headerSpans, buffer.NewSpan(c.header, m.headerStyle(c.active).Resolved()))
+}
+
+// hintWidthOf returns the cell width of a hint, which is the width of the hint
+// REGION for the level. Zero for an item with no hint.
+func hintWidthOf(hint string) int {
+	if hint == "" {
+		return 0
+	}
+	return buffer.StringWidth(hint)
 }
 
 // clampSelections puts every frame's selection back inside its own level.
@@ -514,25 +536,40 @@ func (m *Menu) headerText(d int, headTruncated bool) string {
 	return s
 }
 
-// cutText returns text truncated to at most w cells, choosing the truncation
-// marker from the ASCII rung so a terminal with no Unicode gets "~" and the
-// layout is identical either way — both markers are one cell wide.
+// cutText returns text truncated to at most w cells in st, choosing the truncation
+// marker from the ASCII rung so a terminal with no Unicode gets "~" and the layout
+// is identical either way — both markers are one cell wide.
 //
 // It delegates to buffer's truncation rather than cutting here, because three
-// widgets each re-deriving "how many cells is this rune" is how one of them ends
-// up splitting a double-width glyph.
+// widgets each re-deriving "how many cells is this rune" is how one of them ends up
+// splitting a double-width glyph.
+//
+// The result is a SLICE rather than a string for the reason the marker matters: an
+// over-long label cut to "Save…" must show the ellipsis, and the ellipsis is the
+// only thing telling the user there was more.
 func cutText(ascii bool, text string, w int) string {
-	if w <= 0 {
+	if w <= 0 || text == "" {
 		return ""
 	}
 	if buffer.StringWidth(text) <= w {
 		return text
 	}
-	spans := []buffer.Span{buffer.NewSpan(text, buffer.PlainStyle)}
+	in := []buffer.Span{buffer.NewSpan(text, buffer.PlainStyle)}
+	var spans []buffer.Span
 	if ascii {
-		return buffer.TruncateASCII(spans, w)[0].Text
+		spans = buffer.TruncateASCII(in, w)
+	} else {
+		spans = buffer.Truncate(in, w)
 	}
-	return buffer.Truncate(spans, w)[0].Text
+	// buffer.Truncate returns the kept content and the marker as SEPARATE runs —
+	// the marker takes its own style — so taking the first run would drop the very
+	// glyph that says the label was cut. Concatenating here, in the rebuild, is
+	// where that allocation belongs.
+	var b strings.Builder
+	for i := range spans {
+		b.WriteString(spans[i].Text)
+	}
+	return b.String()
 }
 
 // resizeStrings returns a string slice of length n, reusing s's storage.

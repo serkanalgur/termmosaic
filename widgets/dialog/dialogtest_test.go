@@ -178,19 +178,6 @@ func renderNoColor(t *testing.T, w, h int, root termmosaic.Widget) *headless.Mem
 	return sink
 }
 
-// noColorAttrs returns the set of SGR attribute codes in a raw frame, which is how
-// a test checks that something an attribute conveys SURVIVED NO_COLOR rather than
-// being encoded away with the colours.
-func noColorAttrs(raw string) map[string]bool {
-	out := map[string]bool{}
-	for _, code := range []string{"\x1b[1m", "\x1b[4m", "\x1b[7m"} {
-		if strings.Contains(raw, code) {
-			out[code] = true
-		}
-	}
-	return out
-}
-
 // countRowsStartingWith returns how many rows begin with prefix after the frame is
 // removed. It is the probe that can tell two WRAPPED layouts apart: a substring
 // match cannot, because the narrow layout's words are all still present in the
@@ -303,17 +290,6 @@ const keyPageDown = "\x1b[6~"
 func renderIn(t *testing.T, w, h int, root termmosaic.Widget) *headless.MemorySink {
 	t.Helper()
 	return widgettest.Render(t, w, h, 1, root)
-}
-
-// widgetScreen returns the sink's screen as runes per row, for the tests that check
-// that a widget wrote nothing outside its rect.
-func widgetScreen(sink *headless.MemorySink) [][]rune {
-	_, h := sink.Size()
-	out := make([][]rune, h)
-	for y := 0; y < h; y++ {
-		out[y] = []rune(sink.Line(y))
-	}
-	return out
 }
 
 // buttonRows returns how many rows the dialog's action block occupies on a rendered

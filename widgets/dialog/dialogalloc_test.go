@@ -64,6 +64,48 @@ func TestDrawIsZeroAllocationAfterAFocusMove(t *testing.T) {
 	}
 }
 
+// TestTheChoiceListCostsWhatIsVisibleNotWhatExists is the virtualization claim as a
+// MEASUREMENT rather than as a statement about a loop bound: preparing the layout for
+// a dialog with ten thousand choices must cost what one with ten costs, because
+// everything size-derived is computed for the visible window alone.
+//
+// AllocsPerRun cannot see CPU, so the measurement is the allocation COUNT of repeated
+// adaptations: a widget that prepared every choice would build a span slice per
+// choice per resize, and this reports it.
+func TestTheChoiceListCostsWhatIsVisibleNotWhatExists(t *testing.T) {
+	// adapt alternates between two rects so every iteration is a cache MISS — which
+	// is the expensive path, and the one a non-virtualized widget would make O(count).
+	adapt := func(n int) float64 {
+		d := choiceDialog(40, 12, n)
+		buf := cellBuf(41, 12)
+		atSize(d, 40, 12)
+		d.Draw(buf)
+		wide := true
+		return testing.AllocsPerRun(50, func() {
+			if wide {
+				atSize(d, 41, 12)
+			} else {
+				atSize(d, 40, 12)
+			}
+			wide = !wide
+			d.Draw(buf)
+		})
+	}
+
+	// ADAPTING allocates — that is by design and is why Draw is the thing held to
+	// zero. What must not scale with the COLLECTION is how much of it there is, so
+	// the assertion is equality between a small and a huge list rather than zero.
+	few, many := adapt(10), adapt(10_000)
+	if many != few {
+		t.Errorf("adapting a %d-choice dialog allocated %v times against %v for a 10-choice "+
+			"one: the layout cost is not O(visible) but O(count)", 10_000, many, few)
+	}
+	if few == 0 {
+		t.Error("setup: the adaptation allocated nothing at all, so this test measures " +
+			"nothing — it needs a path that genuinely allocates")
+	}
+}
+
 // TestDrawIsZeroAllocationWhileTheChoiceListScrolls covers the virtualized path,
 // because scrolling is the one thing a dialog does that touches the engine: a
 // scroll changes which labels are visible, so a widget that truncated them inside
