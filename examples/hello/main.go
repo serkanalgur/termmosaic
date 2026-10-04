@@ -925,14 +925,22 @@ func (h *hello) Handle(ev termmosaic.Event) bool {
 	case termmosaic.KeyEscape:
 		return true // the caller quits; see run
 	}
+	// A modified rune is a CHORD, not the bare key, which is why the modifiers are
+	// checked rather than only the rune: ctrl-r must not be read as 'r', and a bare
+	// 0x03 must not be read as ctrl-c. The decoder has already made that distinction
+	// — Ctrl-C arrives as Ctrl+'c' rather than as 0x03 — so the check is on the
+	// decoder's own vocabulary rather than on bytes.
 	switch {
 	case ev.Mod == termmosaic.ModCtrl && (ev.Rune == 'c' || ev.Rune == 'C'):
 		return true
-	case ev.Mod == 0 && ev.Rune == 'q' || ev.Mod == 0 && ev.Rune == 'Q':
-		return true
-	case ev.Mod == 0 && ev.Rune == '?':
-		h.toggleHelp()
-		return true
+	case ev.Mod == 0:
+		switch ev.Rune {
+		case 'q', 'Q':
+			return true // the caller quits; see run
+		case '?':
+			h.toggleHelp()
+			return true
+		}
 	}
 	return false
 }

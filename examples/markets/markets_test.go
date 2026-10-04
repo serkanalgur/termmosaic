@@ -168,12 +168,12 @@ func TestGoldens(t *testing.T) {
 	}
 }
 
-// TestInteractiveStateGoldens pins the three interactive states the plain layout
-// goldens cannot reach: a focused table row, the help overlay, and a switched
-// currency.
+// TestInteractiveStateGoldens pins the four interactive states the plain layout
+// goldens cannot reach: a focused table row, the help overlay, a switched currency,
+// and a paused screen.
 //
 // The layout goldens above all render the same state — the default pair, no
-// selection, no overlay — because they are about the LAYOUT. These three are about
+// selection, no overlay — because they are about the LAYOUT. These four are about
 // the states a reader puts the screen into, and a golden is the right tool for them
 // for the same reason it is for the others: what "a focused row looks right" means
 // is a picture, and a handful of substring assertions would pass on a screen where
