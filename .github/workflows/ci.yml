@@ -38,6 +38,10 @@ jobs:
         run: go vet ./...
 
       - name: Check formatting
+        # The windows runner defaults to PowerShell, which cannot parse a bash
+        # `if [ -n ... ]` block — it fails with a ParserError before gofmt even
+        # runs. Pin the shell so every matrix leg runs the same commands.
+        shell: bash
         run: |
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then
