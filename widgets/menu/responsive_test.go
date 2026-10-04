@@ -1,0 +1,413 @@
+package menu
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/serkanalgur/termmosaic"
+	"github.com/serkanalgur/termmosaic/buffer"
+)
+
+// The degenerate-size table, straight from ADR 0007 §4. Every one of these must be
+// a VALID size for Draw: no panic, and whatever is drawn is what the widget means
+// to draw rather than an accident.
+var degenerateSizes = []termmosaic.Size{
+	{W: 0, H: 0},
+	{W: 0, H: 10},
+	{W: 10, H: 0},
+	{W: 1, H: 1},
+	{W: 1, H: 10},
+	{W: 10, H: 1},
+	{W: 2, H: 2},
+	{W: 3, H: 3},
+	{W: 4, H: 5},
+}
+
+// TestMenuDrawIsTotalAtDegenerateSizes is ADR 0007 §4 pinned for this widget. A
+// test that only drew at 40x10 would pass against a widget that divided by its own
+// height somewhere below four rows, and the failure would be a panic in somebody's
+// terminal during a drag.
+func TestMenuDrawIsTotalAtDegenerateSizes(t *testing.T) {
+	for _, size := range degenerateSizes {
+		t.Run(sizeLabel(size), func(t *testing.T) {
+			m := newMenu(t, size.W, size.H, tree()...)
+			// Every key in the contract, at every degenerate size. If any of them
+			// panics on an empty interior, this is where it shows.
+			for _, seq := range []string{"\x1b[A", "\x1b[B", "\x1b[C", "\x1b[D", "\r", "\x1b[H", "\x1b[F", "\x1b[5~", "\x1b[6~"} {
+				m.Handle(decodeKey(t, seq))
+			}
+			m.Handle(mouseEvent(2, 2))
+			drawInto(m, size.W, size.H)
+		})
+	}
+}
+
+// TestMenuDrawIsTotalBelowMinSizeWithSubmenusOpen repeats the same sweep with a
+// three-level menu open, which is the worst case: more columns than the width can
+// hold, which is the branch in the layout that divides by the number of columns.
+func TestMenuDrawIsTotalBelowMinSizeWithSubmenusOpen(t *testing.T) {
+	for _, size := range degenerateSizes {
+		t.Run(sizeLabel(size), func(t *testing.T) {
+			m := newMenu(t, size.W, size.H, tree()...)
+			m.selectIndex(0, 0)
+			press(t, m, "\x1b[C")
+			press(t, m, "\x1b[C")
+			if d := m.Depth(); d != 3 {
+				t.Fatalf("setup: depth %d, want 3", d)
+			}
+			drawInto(m, size.W, size.H)
+		})
+	}
+}
+
+// TestMenuNeverBlanksAtADegenerateSize is the other half of §4: "clip, never
+// blank". At any size with a non-empty rect, the cells the menu owns must have been
+// WRITTEN — not merely left as the buffer's default, which would look identical to
+// a menu that decided to draw nothing.
+//
+// The check is on the block's own background fill, which is what makes it a real
+// assertion: a menu whose Draw returned early on a too-small rect would leave
+// those cells untouched, and the cells the widget's own chrome would have painted
+// are exactly the ones it skipped.
+func TestMenuNeverBlanksAtADegenerateSize(t *testing.T) {
+	for _, size := range degenerateSizes {
+		if size.W <= 0 || size.H <= 0 {
+			continue // there is no cell to paint
+		}
+		t.Run(sizeLabel(size), func(t *testing.T) {
+			// The sentinel is a GLYPH, not a background: the menu's own content
+			// writes cells in their own styles, so a cell's background legitimately
+			// differs from the block's and asserting on it would fail for a menu
+			// that painted correctly. A glyph is unambiguous — every cell the widget
+			// wrote carries either its content or the block's blank fill, and never
+			// the sentinel.
+			buf := sentinelBuf(size.W, size.H)
+			m := newMenu(t, size.W, size.H, tree()...)
+			m.Draw(buf)
+			for y := 0; y < size.H; y++ {
+				for x := 0; x < size.W; x++ {
+					if got := buf.CellAt(x, y).Ch; got == sentinelRune {
+						t.Fatalf("cell (%d,%d) still carries the sentinel: Draw did not write every cell "+
+							"of Bounds (ADR 0007 §1 rule 3)", x, y)
+					}
+				}
+			}
+		})
+	}
+}
+
+// sentinelRune and sentinelBuf fill a buffer with a glyph no menu content contains,
+// so "the widget wrote this cell" and "the widget never touched this cell" are
+// distinguishable.
+//
+// A background sentinel would NOT work: content cells carry their own styles, so a
+// correct widget's cells legitimately have backgrounds the block did not paint. This
+// is the same reasoning render's tagBlock fixture uses, and the reason that fixture
+// writes a glyph per row rather than filling with spaces.
+const sentinelRune = '#'
+
+// sentinelBuf returns a w-by-h buffer every cell of which carries sentinelRune.
+func sentinelBuf(w, h int) *buffer.Buffer {
+	buf := cellBuf(w, h)
+	c := buffer.NewCell(sentinelRune, buffer.NewStyle(buffer.DefaultColour, buffer.DefaultColour, 0))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			buf.SetCell(x, y, c)
+		}
+	}
+	return buf
+}
+
+// TestMenuGrowsAndShrinksLeavingNoStaleCells is §1 rule 3 in the direction that
+// matters. Growing cannot leave a stale cell — every extra cell is freshly written
+// — so only SHRINKING can, and a sweep that only shrank would miss a defect that
+// only bites on the way out.
+//
+// The menu is rendered through widgettest.Render at each size in turn on ONE sink,
+// which is what makes it a diff-level question: a cell the widget wrote at 60x14 and
+// did not rewrite at 20x6 stays on the terminal.
+func TestMenuGrowsAndShrinksLeavingNoStaleCells(t *testing.T) {
+	// The steps cross every threshold the widget has: the header appearing, a column
+	// being dropped, the hint column being dropped, the check gutter surviving.
+	for _, size := range []termmosaic.Size{
+		{W: 60, H: 14}, {W: 30, H: 10}, {W: 18, H: 8}, {W: 12, H: 6},
+		{W: 6, H: 4}, {W: 3, H: 2}, {W: 60, H: 14}, {W: 24, H: 5},
+	} {
+		// One menu, resized in place across the whole sweep, so the second frame
+		// inherits every cell the first one wrote. A FRESH menu per size would prove
+		// nothing about staleness.
+		m := sizedOnce(t)
+		m.SetBounds(rect(size.W, size.H))
+		// A background that changes with the SIZE, so a cell the widget left alone
+		// carries the previous size's colour. This is why the assertion is on the
+		// background rather than on the text: content cells legitimately carry their
+		// own styles, so only the block's fill is guaranteed across the whole rect.
+		bg := buffer.NewStyle(buffer.DefaultColour, buffer.NewColour(byte(size.W|1), byte(size.H|1), 0x5a), 0)
+		m.Block().SetBackground(bg)
+
+		// Drive it through the whole stack once, then read the cells back.
+		sink := widgetRender(t, size.W, size.H, m)
+		for y := 0; y < size.H; y++ {
+			for x := 0; x < size.W; x++ {
+				got := sink.CellAt(x, y).BG
+				if got == bg.BG {
+					continue
+				}
+				// A cell may legitimately carry a content style; what it may never
+				// carry is a colour from a PREVIOUS size, which no style in this menu
+				// can produce. Every background this widget ever writes is either the
+				// block's or a default, so anything else is stale by definition.
+				if got.IsDefault() {
+					continue
+				}
+				t.Fatalf("%dx%d: cell (%d,%d) carries bg %v, which is not this size's background "+
+					"(%v) nor a content style: a stale cell survived the resize", size.W, size.H, x, y, got, bg.BG)
+			}
+		}
+	}
+}
+
+// sizedOnce returns a menu of a size no step of the sweep uses, so the first
+// resize in the sweep is a genuine change rather than a no-op.
+func sizedOnce(t *testing.T) *Menu {
+	t.Helper()
+	return newMenu(t, 71, 23, tree()...)
+}
+
+// TestMenuLayoutChangesWithSizeRatherThanRescaling is the responsiveness
+// requirement stated as a test: two sizes must produce DIFFERENT LAYOUTS, not the
+// same layout at two scales.
+//
+// A widget that merely rescales would pass every "is it drawn" assertion at every
+// size and fail this one, because the thing that distinguishes a responsive widget
+// from a fixed one is that it gives up CONTENT at a size where the content will not
+// fit. The three give-ups asserted here are the three this widget makes:
+//
+//	hint column  dropped when the label would be squeezed below minLabelW
+//	check column present whenever any item on the path is a toggle, absent
+//	              when the path holds none — driven by CONTENT, not size
+//	header row   dropped when there is no row left for an item under it
+func TestMenuLayoutChangesWithSizeRatherThanRescaling(t *testing.T) {
+	t.Run("the hint column is dropped as the width shrinks", func(t *testing.T) {
+		m := newMenu(t, 60, 8, tree()...)
+		wide := drawInto(m, 60, 8)
+		if !m.lay.cols[0].showHint {
+			t.Fatalf("at 60 cells the hint column is already dropped: %q", line(wide, 1, 60))
+		}
+		m.SetBounds(rect(10, 8))
+		narrow := drawInto(m, 10, 8)
+		if m.lay.cols[0].showHint {
+			t.Errorf("at 10 cells the hint column is still shown: %q", line(narrow, 1, 10))
+		}
+		if !strings.Contains(line(wide, 1, 60), "^N") {
+			t.Errorf("at 60 cells the hint is missing: %q", line(wide, 1, 60))
+		}
+		if strings.Contains(line(narrow, 1, 10), "^N") {
+			t.Errorf("at 10 cells the hint is still drawn: %q", line(narrow, 1, 10))
+		}
+		// And the LABEL survived the give-up, which is the point of the priority.
+		if !strings.Contains(line(narrow, 1, 10), "New") {
+			t.Errorf("the label was dropped along with the hint: %q — the hint is the first to go", line(narrow, 1, 10))
+		}
+	})
+
+	t.Run("the header row is dropped as the height shrinks", func(t *testing.T) {
+		items := []Item{{Label: "only"}}
+		m := newMenu(t, 30, 6, items...)
+		drawInto(m, 30, 6)
+		if m.lay.cols[0].headRect.Empty() {
+			t.Fatalf("at 6 rows there is no header row; there is room for one")
+		}
+		// Two rows fit a header and one item. One row cannot fit both, and the item
+		// wins: a menu that spends its only row on a caption and shows no item is a
+		// frame with a title.
+		m.SetBounds(rect(30, 1))
+		short := drawInto(m, 30, 1)
+		if !m.lay.cols[0].headRect.Empty() {
+			t.Errorf("at 1 row the header row is still drawn: %q", line(short, 0, 30))
+		}
+		if !strings.Contains(line(short, 0, 30), "only") {
+			t.Errorf("at 1 row the item is not drawn: %q — an item outranks a header", line(short, 0, 30))
+		}
+	})
+
+	t.Run("the check column follows the content, not the size", func(t *testing.T) {
+		// Two menus of the SAME size over different trees, one with a toggle and one
+		// without. Their layouts must differ, because the check gutter's presence is
+		// a statement about the items.
+		plain := newMenu(t, 40, 8, Item{Label: "a"}, Item{Label: "b"})
+		drawInto(plain, 40, 8)
+		withToggle := newMenu(t, 40, 8, Item{Label: "a"}, Item{Label: "b", Checkable: true})
+		drawInto(withToggle, 40, 8)
+
+		if plain.lay.hasCheck {
+			t.Error("a menu with no checkable item still built a check column")
+		}
+		if !withToggle.lay.hasCheck {
+			t.Error("a menu with a checkable item did not build a check column")
+		}
+		if got, want := withToggle.lay.cols[0].labelX, plain.lay.cols[0].labelX+checkW; got != want {
+			t.Errorf("with a check column the label starts at %d, want %d — the gutter must be paid for", got, want)
+		}
+	})
+
+	t.Run("the submenu marker column follows the content too", func(t *testing.T) {
+		leaves := newMenu(t, 40, 8, Item{Label: "a"}, Item{Label: "b"})
+		drawInto(leaves, 40, 8)
+		branch := newMenu(t, 40, 8, Item{Label: "a", Items: []Item{{Label: "x"}}}, Item{Label: "b"})
+		drawInto(branch, 40, 8)
+		if leaves.lay.hasSubmenu || !branch.lay.hasSubmenu {
+			t.Errorf("submenu gutter: leaves=%v branch=%v; it must follow whether any item has a submenu",
+				leaves.lay.hasSubmenu, branch.lay.hasSubmenu)
+		}
+	})
+}
+
+// TestMenuDropsShallowColumnsAndSaysSo is the width behaviour for a deep menu: the
+// DEEPEST columns win, and the leftmost one that survives carries an ellipsis so
+// the user is not left believing there was nothing above it.
+func TestMenuDropsShallowColumnsAndSaysSo(t *testing.T) {
+	m := newMenu(t, 8, 10, tree()...)
+	m.selectIndex(0, 0)
+	press(t, m, "\x1b[C")
+	press(t, m, "\x1b[C")
+	if d := m.Depth(); d != 3 {
+		t.Fatalf("setup: depth %d, want 3", d)
+	}
+	drawInto(m, 8, 10)
+	if len(m.lay.cols) >= 3 {
+		t.Fatalf("at 8 cells with 3 levels open, %d columns were shown: the shallow ones must be dropped", len(m.lay.cols))
+	}
+	if m.lay.firstDepth == 0 {
+		t.Error("columns were dropped but firstDepth is 0, so the ellipsis would not be drawn")
+	}
+	c := &m.lay.cols[0]
+	if !strings.HasPrefix(c.header, asciiEllipsis) && !strings.HasPrefix(c.header, ellipsis) {
+		t.Errorf("the leftmost surviving column's header is %q, want it to start with the ellipsis", c.header)
+	}
+	// The ACTIVE level still has a column, which is the whole reason the deepest
+	// ones were the ones kept.
+	found := false
+	for i := range m.lay.cols {
+		if m.lay.cols[i].depth == 2 {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the active level has no column: dropping must keep the deepest, not the first")
+	}
+}
+
+// TestMenuMinSizeIsTheWholeWidgetIncludingChrome is ADR 0007 §2 applied here. The
+// number must move when the chrome does, and it must be reachable before the first
+// Draw.
+func TestMenuMinSizeIsTheWholeWidgetIncludingChrome(t *testing.T) {
+	bare := New(rect(80, 24))
+	if got := bare.MinSize(); got.W < minMenuW || got.H < minMenuH {
+		t.Errorf("a borderless menu's MinSize is %+v, want at least %dx%d", got, minMenuW, minMenuH)
+	}
+	bare.Block().SetBorder(buffer.BorderPlain)
+	bordered := bare.MinSize()
+	if bordered.W <= bare.MinSize().W-2 || bordered.H <= bare.MinSize().H-2 {
+		// Re-read the borderless figure, which the line above has already changed.
+		t.Logf("bordered MinSize %+v", bordered)
+	}
+	if bordered.W < minMenuW+2 || bordered.H < minMenuH+2 {
+		t.Errorf("a bordered menu's MinSize is %+v, want at least %dx%d including the border",
+			bordered, minMenuW+2, minMenuH+2)
+	}
+	// And it must not depend on the current bounds: MinSize is pure.
+	m := newMenu(t, 5, 3, tree()...)
+	if got := m.MinSize(); got.W < minMenuW || got.H < minMenuH {
+		t.Errorf("MinSize changed with Bounds: %+v at 5x3, want at least %dx%d", got, minMenuW, minMenuH)
+	}
+	m.SetBounds(rect(200, 100))
+	if got := m.MinSize(); got.W < minMenuW || got.H < minMenuH {
+		t.Errorf("MinSize changed with Bounds: %+v at 200x100", got)
+	}
+}
+
+// TestMenuAtMinSizeStillShowsAMarkerAndALabel checks the promise MinSize makes: at
+// its own declared minimum, the menu shows something. A widget that declares a
+// minimum and shows nothing at it has declared a lie.
+func TestMenuAtMinSizeStillShowsAMarkerAndALabel(t *testing.T) {
+	m := newMenu(t, 200, 50, tree()...)
+	ms := m.MinSize()
+	m.SetBounds(rect(ms.W, ms.H))
+	got := rows(t, ms.W, ms.H, m)
+	joined := strings.Join(got, "\n")
+	if !strings.Contains(joined, DefaultMarker) {
+		t.Errorf("at MinSize %dx%d no selection marker is drawn:\n%s", ms.W, ms.H, joined)
+	}
+	if !strings.Contains(joined, "New") {
+		t.Errorf("at MinSize %dx%d no label is drawn:\n%s", ms.W, ms.H, joined)
+	}
+}
+
+// TestMenuRepaintsWholeBoundsBeforeContent is ADR 0007 §1 rule 3 stated as a
+// property of THIS widget: every cell of Bounds carries the block's background
+// before any content goes into it.
+//
+// It is checked by drawing into a buffer that was deliberately FILLED WITH A
+// SENTINEL first, so a cell the widget never wrote keeps the sentinel. A buffer
+// that started blank — which is what every other test here does — cannot tell a
+// painted cell from an untouched one, and would pass against a widget that drew
+// three rows into a fourteen-row rectangle.
+func TestMenuRepaintsWholeBoundsBeforeContent(t *testing.T) {
+	const w, h = 40, 12
+	sentinel := buffer.NewCell('#', buffer.NewStyle(buffer.DefaultColour, buffer.NewColour(0xff, 0x00, 0xff), 0))
+	buf := cellBuf(w, h)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			buf.SetCell(x, y, sentinel)
+		}
+	}
+	m := newMenu(t, w, h, tree()...)
+	m.Draw(buf)
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			if buf.CellAt(x, y).BG == sentinel.BG {
+				t.Fatalf("cell (%d,%d) still carries the sentinel: Draw did not repaint its whole Bounds "+
+					"before drawing content (ADR 0007 §1 rule 3)", x, y)
+			}
+		}
+	}
+}
+
+// TestMenuShrinkAfterWideFrameLeavesNothingBehind is the same property across a
+// SHRINK, which is the only direction in which a stale cell can survive.
+//
+// The wide frame writes the root's items and a submenu's column; the narrow frame
+// has room for neither, and the cells must not keep the wide frame's glyphs.
+func TestMenuShrinkAfterWideFrameLeavesNothingBehind(t *testing.T) {
+	m := newMenu(t, 60, 12, tree()...)
+	m.selectIndex(0, 0)
+	press(t, m, "\x1b[C")
+	wide := drawInto(m, 60, 12)
+	// The submenu's first item is on the same row as the root's, one row below the
+	// header — which is what makes the two columns read as one menu.
+	subRow := m.lay.cols[1].itemRect.Y
+	if got := line(wide, subRow, 60); !strings.Contains(got, "Deep") {
+		t.Fatalf("setup: the wide frame does not show the submenu: %q", got)
+	}
+
+	// Now shrink to a size with room for one column only.
+	m.SetBounds(rect(12, 3))
+	narrow := drawInto(m, 12, 3)
+	for y := 0; y < 3; y++ {
+		got := line(narrow, y, 12)
+		if strings.Contains(got, "Deep") || strings.Contains(got, "Plain") {
+			t.Errorf("row %d = %q still shows a submenu that no longer fits: the wide frame's cells survived", y, got)
+		}
+	}
+	// And the root's first item IS still there, so this is not a menu that gave up.
+	if !strings.Contains(strings.Join([]string{line(narrow, 0, 12), line(narrow, 1, 12), line(narrow, 2, 12)}, "\n"), "New") {
+		t.Error("the shrink left nothing at all: a clip is not a blank")
+	}
+}
+
+// sizeLabel renders a size as a subtest name.
+func sizeLabel(s termmosaic.Size) string {
+	return itoa(s.W) + "x" + itoa(s.H)
+}

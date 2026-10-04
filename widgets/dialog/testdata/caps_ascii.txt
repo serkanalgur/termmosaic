@@ -1,0 +1,12 @@
++ Theme -------------------------------+
+|                                      |
+|Pick one.                             |
+|> a-option                            |
+|  b-option                            |
+|  c-option                            |
+|  d-option                            |
+|  e-option                            |
+|  f-option                            |
+|                                      |
+| Cancel                               |
++--------------------------------------+

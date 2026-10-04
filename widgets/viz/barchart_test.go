@@ -101,6 +101,29 @@ func TestBarChartPartialCellUsesTheEighthRamp(t *testing.T) {
 	}
 }
 
+func TestBarChartHorizontalStaysInsideItsRect(t *testing.T) {
+	// A horizontal chart NOT at the origin. Its labels must land in its own label
+	// column, not at absolute column 0: a widget writing outside Bounds is an ADR
+	// 0007 §4 violation, and it is invisible in every other test in this file
+	// because they all draw at X=0 where the two answers coincide.
+	c := NewBarChart(buffer.Rect{X: 40, Y: 6, W: 30, H: 5})
+	c.Block().SetBorder(buffer.BorderPlain)
+	c.Vertical = false
+	c.SetData([]Datum{{Label: "cpu", Value: 25}, {Label: "disk", Value: 80}})
+	buf := cellBuf(80, 14)
+	c.Draw(buf)
+	for _, y := range []int{7, 8} {
+		if got := cellsOf(buf, y, 0, 40); strings.TrimSpace(got) != "" {
+			t.Errorf("row %d drew %q to the LEFT of the chart's own rectangle", y, got)
+		}
+	}
+	for y, want := range map[int]string{7: "cpu", 8: "disk"} {
+		if got := cellsOf(buf, y, 40, 40); !strings.Contains(got, want) {
+			t.Errorf("row %d does not carry the label %q inside the chart: %q", y, want, got)
+		}
+	}
+}
+
 func TestBarChartHorizontalDrawsOneRowPerCategory(t *testing.T) {
 	c := NewBarChart(buffer.Rect{X: 0, Y: 0, W: 30, H: 6})
 	c.Vertical = false

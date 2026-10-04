@@ -10,7 +10,9 @@ import (
 	"github.com/serkanalgur/termmosaic/widgets/basic"
 	"github.com/serkanalgur/termmosaic/widgets/block"
 	"github.com/serkanalgur/termmosaic/widgets/data"
+	"github.com/serkanalgur/termmosaic/widgets/dialog"
 	"github.com/serkanalgur/termmosaic/widgets/form"
+	"github.com/serkanalgur/termmosaic/widgets/menu"
 	"github.com/serkanalgur/termmosaic/widgets/split"
 	"github.com/serkanalgur/termmosaic/widgets/viz"
 )
@@ -129,6 +131,8 @@ func Entries() []Entry {
 		meterEntry(),
 		sparklineEntry(),
 		barChartEntry(),
+		menuEntry(),
+		dialogEntry(),
 	}
 }
 
@@ -925,3 +929,74 @@ the test suite asserts on cells rather than on escape sequences.
     not prove the encoder agrees with the screen model. widgettest.Render is
     the second thing, and it is the one that catches the bugs that matter.
 `
+
+// menuEntry is a two-level Menu with one branch open, because a menu with no
+// submenu does not show the one thing that distinguishes this widget: the
+// submenu marker on a branch, and the second column beside it.
+func menuEntry() Entry {
+	return Entry{
+		Name:        "Menu",
+		Package:     "widgets/menu",
+		Constructor: "menu.New(r buffer.Rect, items ...menu.Item) *menu.Menu",
+		Summary:     "A navigable menu with nested submenus to arbitrary depth.",
+		Note: "The selected item and any open branch are marked with a " +
+			"character and a rule, not colour alone. Depth beyond one " +
+			"submenu is available but not shown here.",
+		Widths:  Widths(),
+		Heights: rows(14),
+		Construct: func(r buffer.Rect) termmosaic.Widget {
+			m := menu.New(r,
+				menu.Item{Label: "Open", Hint: "^O", Items: []menu.Item{
+					{Label: "Recent files", Hint: "^R"},
+					{Label: "Saved sessions"},
+				}},
+				menu.Item{Label: "Reload data", Hint: "^R"},
+				menu.Item{Label: "Toggle wrap", Hint: "^W", Checked: true},
+				menu.Item{Label: "Archive (unavailable)"},
+				menu.Item{Label: "Quit", Hint: "^Q"},
+			)
+			m.ItemStyle = styBody
+			m.SelectedStyle = styOnAccent
+			m.HintStyle = styDim
+			chrome(m.Block(), "File")
+			m.Open()
+			return m
+		},
+	}
+}
+
+// dialogEntry is a confirm dialog focused on OK, because that is the variant
+// whose focus default is a decision rather than a convention: a dialog that
+// opens on Cancel makes "walk away" the result of a stray Enter.
+func dialogEntry() Entry {
+	return Entry{
+		Name:        "Dialog",
+		Package:     "widgets/dialog",
+		Constructor: "dialog.New(r buffer.Rect, v dialog.Variant) *dialog.Dialog",
+		Summary:     "A modal box with a title, a body and a row of actions.",
+		Note: "Modal: keys do not reach the tree beneath. The focused action " +
+			"is ringed rather than coloured - a bracket pair of the same width " +
+			"as the idle pair, so moving focus never reflows the row - and " +
+			"reinforced with reverse video, which survives NO_COLOR because " +
+			"colour is suppressed only at encode time. Escape is Cancel, " +
+			"never a no-op.",
+		Widths:  Widths(),
+		Heights: rows(11),
+		Construct: func(r buffer.Rect) termmosaic.Widget {
+			d := dialog.New(r, dialog.VariantConfirm)
+			d.SetTitle("Discard unsaved changes?", styTitle)
+			d.SetBodyString("3 buffers have edits that are not on disk.")
+			d.SetActions(
+				dialog.Action{Label: "Cancel"},
+				dialog.Action{Label: "Discard", Style: styCrit},
+			)
+			d.SetCancelAction(0)
+			d.BodyStyle = styBody
+			d.ActionStyle = styBody
+			d.FocusStyle = styOnAccent
+			d.ChoiceStyle = styBody
+			d.ChoiceFocusStyle = styOnAccent
+			return d
+		},
+	}
+}

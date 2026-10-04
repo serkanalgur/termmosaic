@@ -585,20 +585,21 @@ func denseWide() *buffer.Buffer {
 // BenchmarkDiffDenseNarrow and BenchmarkDiffDenseWide emit the same 6,000 runes in
 // the same styles and differ only in glyph width.
 //
-// THE RESULT, and it is a finding rather than a pass: the wide scene writes 68,832
-// bytes where the narrow one writes 6,233 for the very same 6,000 runes — 11x. The
-// cause is the cursor-run optimisation in Diff, which suppresses the next cursor
-// move when the following cell is lastX+1. A wide glyph advances the terminal's
-// cursor by TWO, but lastX is set to the glyph's own x, so the check fails and
-// every single wide glyph is preceded by a full CUP escape: 6,000 CUP sequences
+// THE RESULT, after the fix: the wide scene writes 19,443 bytes where the narrow
+// one writes 6,233 for the very same 6,000 runes - 3.12x, and 60 CUP sequences
 // where the narrow scene needs 30.
 //
-// The output is CORRECT — the terminal draws exactly the right screen — so this is
-// a byte-efficiency defect on dense wide content, not a correctness bug, and the
-// ~11x is an upper bound that a wall of 99%-static chrome would pull well down.
-// It is measured and reported rather than fixed here, because the diff is the most
-// load-bearing code in the project and a change to it is not a v0.1.0 release-gate
-// task. The finding is recorded in the amendment to ADR 0008's risk 5.
+// The defect this benchmark surfaced is FIXED. Diff's cursor-run suppression
+// checks whether the next cell is lastX+1, and a wide glyph advances the
+// terminal's cursor by TWO while lastX recorded only the glyph's own x, so
+// every wide glyph used to be preceded by a full CUP escape: 6,000 of them and
+// 68,832 bytes, 11x. The run tracker now advances by the glyph's cell width.
+// Output was always correct - this was byte efficiency on dense wide content -
+// and the ASCII path, which is the one that matters most, does not regress.
+//
+// The remaining 3.12x is inherent: a wide rune is three UTF-8 bytes where a
+// narrow one is one, so the same 6,000 runes cannot produce the same frame.
+
 func BenchmarkDiffDenseNarrow(b *testing.B) { benchDense(b, denseNarrow) }
 
 // BenchmarkDiffDenseWide is the wide half of the pair above. Its out-B/rune column

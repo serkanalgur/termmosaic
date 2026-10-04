@@ -38,9 +38,11 @@ var catalog = []string{
 	"List", "Table", "Tree", "Pager",
 	// Visualisation.
 	"ProgressBar", "Gauge", "Meter", "Sparkline", "BarChart",
+	// Navigation and modality.
+	"Menu", "Dialog",
 }
 
-// TestManifestCoversEveryWidget is the drift gate: the manifest must name all 22
+// TestManifestCoversEveryWidget is the drift gate: the manifest must name all 24
 // widgets, each exactly once, with a file on disk for each.
 //
 // A widget added to the framework without a registry entry is invisible to this

@@ -1,0 +1,8 @@
+ 1             2 New        [3 Deep    ]
+› New   ^N  ▸ › Deep      ▸ › One
+  Save  ^S      Plain         Two
+  Sep
+ ✓Wrap
+  Help  F1
+
+

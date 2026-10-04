@@ -1,8 +1,8 @@
 
  ┌ termmosaic ─────────────────────────────────────────────────┐
  │                                                             │
- │ frame 1                        cols  2 columns              │
- │ depth truecolor                                             │
+ │ > frame 1                        cols  2 columns            │
+ │   depth truecolor                                           │
  │ hello from termmosaic — resize this terminal                │
  │ the layout above is recomputed only when Bounds() changes,  │
  │ so a resize repaints in full and a steady frame costs       │
@@ -10,6 +10,6 @@
  │                                                             │
  │                                                             │
  │                                                             │
- │ press q to quit                                             │
+ │ press q to quit  ·  ? keys  ·  arrows move focus            │
  │                                                             │
  └─────────────────────────────────────────────────────────────┘
