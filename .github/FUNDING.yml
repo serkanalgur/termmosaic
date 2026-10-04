@@ -1,0 +1,10 @@
+# Funding for TermMosaic.
+#
+# GitHub shows a "Sponsor" button on the repository and on the profile once
+# this file exists and the linked account has Sponsors enabled.
+#
+# Adding more platforms here is a one-line entry each, for example:
+#   ko_fi: yourname
+#   patreon: yourname
+#   custom: ["https://example.com/donate"]
+github: [serkanalgur]
