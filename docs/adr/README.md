@@ -16,6 +16,7 @@ original stays and a new one supersedes it, so the reasoning history survives.
 | [0004](0004-layout-engine.md) | Layout engine | Accepted | 2026-10-03 |
 | [0005](0005-input-decoding.md) | Input decoding | Accepted | 2026-10-04 |
 | [0006](0006-subbuffer-cell-access.md) | Sub-buffer cell access | Accepted | 2026-10-04 |
+| [0007](0007-responsive-screens.md) | Responsive screen composition | Accepted | 2026-10-04 |
 
 ## Decisions at a glance
 
@@ -73,6 +74,25 @@ original stays and a new one supersedes it, so the reasoning history survives.
   buffers" rule is enforced by a type rather than by a doc comment. `Stride()` is
   deliberately not exported.
 
+- **0007 — Responsive screens: a budget, not a reflow.** There are **no size
+  classes and no framework breakpoints** — a size class is a lossy function of
+  two numbers and a product decision in the wrong layer, and every threshold a
+  widget needs is a local named constant beside its own `Draw`. What the
+  framework shares is the *arithmetic*: `geometry.ClampCount(n, available)`,
+  `geometry.Budget(regions, available)` with a four-value `Priority` scale, and
+  an optional `termmosaic.Minimizable` interface declaring a widget's smallest
+  meaningful size. Policy stays per widget; safety and arithmetic are shared.
+  **The `Widget` interface is unchanged** — the space is already reachable from
+  `Bounds()`, and adaptation is lazy and self-detecting (a widget re-derives
+  anything size-derived when `Bounds()` differs), which beats a fourth mandatory
+  method precisely because a widget cannot forget it. **Degenerate sizes are a
+  decided contract: no panic, ever; clip, never blank** — below `MinSize()` a
+  widget draws its minimum layout clipped, and 0×0 is a valid size that writes
+  zero bytes. A resize always repaints the whole screen, because
+  `buffer.Resize` discards the cells a partial diff would need; and drag-resize
+  coalescing is **free**, because an app that calls `r.Resize` per event and
+  lets the pacer decide when to paint already gets it.
+
 ## How these were decided
 
 Decisions 1 and 2 were made **empirically**. A scratch Go module was built
@@ -99,6 +119,12 @@ question about an existing data structure, made on the existing
 performance claim — that the diff's row hoisting leaves ADR 0002's figures
 intact — is a claim a benchmark must re-confirm, and ADR 0006 says so rather
 than asserting a number it did not measure.
+
+Decision 7 follows the same pattern and says so in its own risks section: every
+cost it quotes about a drag-resize is **derived from existing code and from
+ADR 0002/0003's measurements**, not from an observed resize. It has never run
+against a real terminal being dragged, and it names the scripted resize sweep
+that should be written before the catalog is finished.
 
 **Caveat worth repeating:** OpenTUI is a Zig core with TypeScript FFI bindings.
 Its numbers do not transfer to Go, and ADR 0002 exists precisely because we

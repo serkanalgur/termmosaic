@@ -2,6 +2,10 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
+- **Amended:** 2026-10-04 — [ADR 0007](0007-responsive-screens.md) considered
+  three ways to make `Widget` express adaptive content and **changed none of the
+  four methods**; the amendment tightens the `Bounds()`/`Draw` ordering contract
+  and adds one sibling optional interface (`Minimizable`) beside `Focusable`.
 - **Decides:** [STATUS.md](../STATUS.md) — Core architecture / Renderer mode
 - **Depends on:** [ADR 0001](0001-backend-strategy.md),
   [ADR 0002](0002-buffer-representation.md)
@@ -95,6 +99,29 @@ type Widget interface {
   gives the List/Table/Tree virtualizers a cheap "only these rows changed" hint.
 - The frame pipeline is: events → widget tree → `Draw` into the back buffer →
   dirty-rect accumulation → two-tier diff → `Sink`.
+
+### Adaptation on resize — decided in ADR 0007, interface unchanged
+
+*Amended 2026-10-04.* The interface above is unchanged, and that is a decision
+rather than an omission. ADR 0007 evaluated three ways to give `Widget`
+adaptive content — an extra parameter on `Draw`, a fourth mandatory `Layout(Rect)`
+method, and a renderer-pushed `Resize(Rect)` — and rejected all three: the
+space is already reachable from `Bounds()`; a mandatory method a widget can
+forget is exactly the silent-failure surface this ADR's "Bad" section calls its
+top risk; and pushing mutation down the tree reopens the same risk from the
+goroutine side. Adaptation is instead lazy and self-detecting: a widget re-derives
+anything size-derived when `Bounds()` differs from the rect it last adapted to,
+which a widget cannot forget because the check *is* the computation.
+
+Two things this ADR's contract therefore gains, both tightening rather than
+widening:
+
+- **`Bounds()` must reflect the new rectangle before the next `Draw`, and `Draw`
+  must read `Bounds()`** rather than any cached copy of it. `Renderer.Resize`
+  never draws, so the application has the whole interval between receiving
+  `EventResize` and the next frame to recompute bounds.
+- **A widget's available space is `Bounds()`, never the buffer's size.** The
+  buffer is the screen; the widget's rect is the widget's space.
 
 ### Async ergonomics
 

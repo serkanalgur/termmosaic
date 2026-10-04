@@ -34,14 +34,16 @@ break without notice until v1.0.0.**
 | Layout engine (own constraints vs flexbox) | **DECIDED** — constraint-based, own solver | `Length`/`Min`/`Max`/`Percentage`/`Ratio`/`Fill`. Yoga rejected: cgo breaks `CGO_ENABLED=0` cross-compilation. [ADR 0004](adr/0004-layout-engine.md) |
 | Input decoding (where the parser lives, what it decodes) | **DECIDED** — a pure `Decode` under a resumable `Parser` in a new `input` package | Kitty keyboard **in** (progressive enhancement, `disambiguate` only); paste **in** and always **one `EventPaste` carrying the whole payload**; mouse decoding **in** (SGR 1006 / urxvt 1015 / X10) but **capture off by default**; focus decoding **in**, reporting off by default; **IME scoped out and deferred**, with `EventCompose` reserved. [ADR 0005](adr/0005-input-decoding.md) |
 | Cell access on sub-buffers (`Cells()`, `RowBytes`) | **DECIDED** — `Row(y) []Cell` replaces `Cells()`; `RowBytes` is a `*Buffer` method that panics on a view | The flat slice `Cells()` returns is silently wrong for a sub-buffer. The stride never leaves `buffer`. Closes ADR 0002's v1.0 risk 1b now. [ADR 0006](adr/0006-subbuffer-cell-access.md) |
+| Responsive screen composition | **DECIDED** — a **budget, not a reflow**; no size classes, no framework breakpoints | Framework shares the arithmetic (`geometry.ClampCount`, `geometry.Budget` + `Priority`, optional `termmosaic.Minimizable`); policy stays per widget. **`Widget` is unchanged.** Degenerate sizes are a contract: **no panic ever, clip never blank**; a resize always repaints the whole screen because `buffer.Resize` discards the cells. [ADR 0007](adr/0007-responsive-screens.md) |
 | Color model and degradation ladder | **OPEN** | |
 | Theme and styling system | **OPEN** | |
 
 ### Decisions
 
-The six core architecture rows above are **DECIDED** — the first four on
-2026-10-03, input decoding and sub-buffer cell access on 2026-10-04 — and are
-recorded in full, with rejected alternatives, in [docs/adr/](adr/README.md).
+The seven core architecture rows above are **DECIDED** — the first four on
+2026-10-03, input decoding, sub-buffer cell access and responsive screen
+composition on 2026-10-04 — and are recorded in full, with rejected
+alternatives, in [docs/adr/](adr/README.md).
 
 Decisions 1 and 2 were made **empirically** — a scratch benchmark module was
 built outside the repo and measured on darwin/arm64 (Apple M1). The headline
@@ -60,7 +62,10 @@ workloads that did not produce a clean result. Decisions 3, 4 and 5 were made on
 API-surface, testability and dependency grounds and involve no measurements.
 ADR 0005 says so explicitly: input decoding is I/O-bound, and the one number
 that matters — 0 allocations on the key path — is a property the ADR specifies
-and a test must pin, not a measurement taken today.
+and a test must pin, not a measurement taken today. ADR 0007 makes the same
+disclosure: its drag-resize costs are derived from existing code and from
+ADR 0002/0003's measurements, and no resize has ever been observed against a
+real terminal.
 
 ### Amendments
 
@@ -100,6 +105,20 @@ Button, KeyHint, Form.
 **Data** — List, Table, Tree, Virtual Scroll, Pager.
 
 **Visualization** — ProgressBar, Gauge, Meter, Sparkline, BarChart.
+
+**Responsiveness is decided before implementation**, in
+[ADR 0007](adr/0007-responsive-screens.md), because three coders are about to
+build independent widget sets against a shared vocabulary. This closes the
+question the catalog previously left open — *should the framework define
+breakpoints or size classes?* — with a **no**: a size class is a lossy function
+of two numbers and a product decision in the wrong layer, so each widget's
+threshold is a local named constant beside its own `Draw`. What is shared is
+`geometry.ClampCount`, `geometry.Budget` with the four-value `Priority` scale,
+and the optional `termmosaic.Minimizable` interface. Two catalog-wide rules
+inherit directly and are non-negotiable: **a widget's available space is
+`Bounds()`, never `buf.Size()`**, and **a widget repaints its whole `Bounds()`
+before drawing content into it**, or shrinking leaves stale cells. `Widget` is
+unchanged.
 
 ## Known gaps in comparable frameworks
 
