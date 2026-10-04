@@ -2,7 +2,7 @@
 
 
 
-             ┌─ termmosaic ───────────────────────────────┐
+             ┌ termmosaic ────────────────────────────────┐
              │                                            │
              │ frame     2                                │
              │ depth     truecolor                        │

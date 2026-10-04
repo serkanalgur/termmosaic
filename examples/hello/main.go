@@ -14,13 +14,12 @@
 // scan for 'q' this example used before ADR 0005. Everything about how those
 // bytes got decoded is the input package's business, not the example's.
 //
-// Note what this example does not use: the widget catalog is still empty at this
-// stage of the project, and in particular there is no Block yet. The border and
-// title are drawn here by direct buffer writes, but they draw NO runes of their
-// own and invent NO thresholds of their own — every glyph comes from
-// buffer.BorderStyle and every style from buffer.NewStyle, which is ADR 0008's
-// vocabulary. The catalog's Block will own borders and titles properly; until
-// then this is where the example shows the vocabulary being used.
+// The border and the title belong to widgets/block, which is the catalog's only
+// owner of both (ADR 0008 §2). This example used to draw them by hand, with its own
+// W<4 and W<16 guards, and that was the single worst thing about it: it was a second
+// border implementation in an example, which is precisely the collision Block
+// exists to prevent. It now composes a Block, spells no border rune and invents no
+// threshold, and asks the Block for the interior rectangle its body draws into.
 package main
 
 import (
@@ -34,6 +33,7 @@ import (
 	"github.com/serkanalgur/termmosaic/input"
 	"github.com/serkanalgur/termmosaic/render"
 	"github.com/serkanalgur/termmosaic/term"
+	"github.com/serkanalgur/termmosaic/widgets/block"
 )
 
 // The example's palette: four plain colours. This is an application's styling
@@ -65,32 +65,43 @@ const (
 	blockH = 9
 )
 
-// The border's minimum size, in cells. ADR 0007 §4 is explicit that no widget
-// may assume a floor of its own; a border needs two cells on each axis, one per
-// corner.
+// hello is the example's widget: a Block for the chrome, plus a body that changes
+// each frame.
 //
-// These stand in for the catalog's Block until it exists. ADR 0007 §1 rule 5
-// makes a threshold a local named constant, and ADR 0008 fixes these particular
-// VALUES for the whole catalog, so the example pins itself to them rather than
-// inventing its own.
-const (
-	minBorderW = 2
-	minBorderH = 2
-	// titlePad is the one space Block inserts on each side of a title. The title
-	// threshold is therefore the border threshold plus the padding plus room for
-	// one glyph: 2 + 2 + 1 = 5.
-	minTitleW = 5
-)
-
-// hello is the example's widget: a bordered block whose body changes each frame.
+// The Block is a value field rather than a pointer because it has no identity: it is
+// chrome, and a widget tree holding a pointer to a border would be one more thing to
+// keep alive for no reason.
 type hello struct {
 	bounds buffer.Rect
+	// blk draws the border, the background and the title, and reports the interior
+	// rectangle the body draws into. It is the only thing in this file that knows
+	// what a border is.
+	blk block.Block
 	// depth is the colour depth the renderer negotiated. It is shown in the
 	// block so the degradation ladder is visible in a real terminal.
 	depth buffer.ColourDepth
 	// ticks counts the frames drawn, so the block has something dynamic for the
 	// diff to skip past.
 	ticks int
+}
+
+// newHello returns the example's widget with its chrome configured.
+//
+// The Block is configured ONCE, here, rather than per frame: the title is constant,
+// so the span slice and the truncated form are built at construction and the draw
+// path only reads them (ADR 0008 §4).
+func newHello(r buffer.Rect, depth buffer.ColourDepth) *hello {
+	h := &hello{bounds: r, depth: depth}
+	h.blk.SetBounds(r)
+	h.blk.SetBorder(buffer.BorderPlain)
+	h.blk.SetBorderStyle(stEdge)
+	h.blk.SetBackground(stBody)
+	h.blk.SetPadding(1)
+	// The title is "termmosaic", not " termmosaic ": Block inserts the one space on
+	// each side itself, and a caller that added them would shift the title two
+	// columns right of where the border's interior says it belongs.
+	h.blk.SetTitleString("termmosaic", stTitle)
+	return h
 }
 
 // Bounds returns the block's rectangle.
@@ -107,72 +118,23 @@ func (h *hello) Handle(termmosaic.Event) bool { return false }
 // Draw paints the block.
 //
 // It runs every frame, as ADR 0003 specifies: widgets describe themselves on
-// demand and are not required to implement incremental drawing, because Go
-// cannot enforce invalidation discipline and silent invalidation bugs are the
-// worst failure mode a TUI has.
+// demand and are not required to implement incremental drawing, because Go cannot
+// enforce invalidation discipline and silent invalidation bugs are the worst failure
+// mode a TUI has.
 //
-// It allocates nothing. Every span slice and every truncated title below is
-// built here, which is legal precisely because the title is constant: there is
-// no text derived from the widget's size, so there is nothing ADR 0007 §3 would
-// want cached. A widget with reflowing text must build its spans at construction
-// and its wrapped lines in a size-change check, never here.
+// It allocates nothing. The Block caches its truncated title against the rect it was
+// computed for, so the only thing here that varies per frame is the frame counter,
+// which is written digit by digit.
 func (h *hello) Draw(buf *buffer.Buffer) {
-	r := h.bounds
-	if r.W < minBorderW || r.H < minBorderH {
-		return
-	}
+	// The Block is told the bounds on every frame rather than only at construction:
+	// the application recomputes them on a resize, and a Block whose rectangle were
+	// stale would paint chrome in the wrong place (ADR 0007 §3).
+	h.blk.SetBounds(h.bounds)
+	h.blk.Draw(buf)
 
-	// The background is painted first and unconditionally. The renderer never
-	// clears: it diffs against the previous frame, so a cell that is not
-	// written keeps whatever was there. A widget that shrinks its content must
-	// therefore repaint its whole bounds, or stale cells show through.
-	buf.FillRect(r, stBody.Blank())
-
-	h.drawBorder(buf, r)
-	h.drawTitle(buf, r)
-	h.drawBody(buf, r)
-}
-
-// drawBorder paints the corners and the runs between them.
-//
-// Every rune comes from buffer's glyph table, never from a literal here: the
-// example is not allowed to own border glyphs any more than a widget is. The
-// ASCII rung is the one boolean, and it is false because this example asks for
-// Unicode directly; a real application passes !caps.Unicode.
-func (h *hello) drawBorder(buf *buffer.Buffer, r buffer.Rect) {
-	g := buffer.BorderPlain.Glyphs(false)
-	for x := r.X + 1; x < r.Right()-1; x++ {
-		buf.SetCell(x, r.Y, stEdge.Cell(g.Horizontal))
-		buf.SetCell(x, r.Bottom()-1, stEdge.Cell(g.Horizontal))
-	}
-	for y := r.Y + 1; y < r.Bottom()-1; y++ {
-		buf.SetCell(r.X, y, stEdge.Cell(g.Vertical))
-		buf.SetCell(r.Right()-1, y, stEdge.Cell(g.Vertical))
-	}
-	buf.SetCell(r.X, r.Y, stEdge.Cell(g.TopLeft))
-	buf.SetCell(r.Right()-1, r.Y, stEdge.Cell(g.TopRight))
-	buf.SetCell(r.X, r.Bottom()-1, stEdge.Cell(g.BottomLeft))
-	buf.SetCell(r.Right()-1, r.Bottom()-1, stEdge.Cell(g.BottomRight))
-}
-
-// drawTitle paints the inset title over the top border.
-//
-// The title sits on the border row and overwrites it, with one space each side
-// and never spilling past the second corner: SetSpans bounds-checks per cell, so
-// a title wider than the box simply stops rather than overrunning the border.
-// Because the title never changes there is nothing here for ADR 0008 §4 to
-// forbid — a widget with reflowing text would build these spans once and cache
-// them against the rect instead.
-func (h *hello) drawTitle(buf *buffer.Buffer, r buffer.Rect) {
-	const pad = 2 // one space each side, so the glyph run is inset by two
-	if r.W < minTitleW {
-		return
-	}
-	buf.SetSpans(r.X+pad, r.Y, []buffer.Span{
-		buffer.NewSpan(" ", stTitle),
-		buffer.NewSpan("termmosaic", stTitle),
-		buffer.NewSpan(" ", stTitle),
-	})
+	// The body draws into the Block's interior, so it cannot touch the border, the
+	// title or the padding however the block is resized.
+	h.drawBody(buf, h.blk.Interior())
 }
 
 // drawBody paints the label/value rows. It only indexes, writes a small number
@@ -190,21 +152,27 @@ func (h *hello) drawBody(buf *buffer.Buffer, r buffer.Rect) {
 		{"quit", "press q", stAccent},
 	}
 	for i, row := range rows {
-		y := r.Y + 2 + i
-		if y >= r.Bottom()-1 || r.X+18 >= r.Right() {
-			break
-		}
-		buf.SetString(r.X+2, y, row.label, stMuted)
-		if i == 0 {
-			// The frame counter is written digit by digit rather than formatted
-			// into a string. fmt.Sprintf allocates, and one allocation per frame
-			// is exactly what the 0-allocs draw path forbids; this is the same
-			// hazard ADR 0008 §4 names for Wrap and Truncate, one function call
-			// earlier in the pipeline.
-			h.writeInt(buf, r.X+12, y, h.ticks)
+		// labelCol and valueCol are the body's own columns inside the block's
+		// interior, so the border, the title and the padding are all handled by the
+		// Block and none of this arithmetic knows they exist.
+		const labelCol, valueCol = 0, 10
+		if r.W <= valueCol || r.H <= i {
+			// Too narrow for a value, or too short for this row: skip it and keep
+			// the rest. Clipping, never blanking.
 			continue
 		}
-		buf.SetString(r.X+12, y, row.value, row.st)
+		y := r.Y + i
+		buf.SetString(r.X+labelCol, y, row.label, stMuted)
+		if i == 0 {
+			// The frame counter is written digit by digit rather than formatted
+			// into a string. fmt.Sprintf allocates, and one allocation per frame is
+			// exactly what the 0-allocs draw path forbids; this is the same hazard
+			// ADR 0008 §4 names for Wrap and Truncate, one function call earlier in
+			// the pipeline.
+			h.writeInt(buf, r.X+valueCol, y, h.ticks)
+			continue
+		}
+		buf.SetString(r.X+valueCol, y, row.value, row.st)
 	}
 }
 
@@ -287,7 +255,7 @@ func run() error {
 	// positions it, it is just never visible.
 	r.SetCursor(render.Cursor{Valid: true, Visible: false})
 
-	root := &hello{depth: caps.ColourDepth(), bounds: centred(w, h, blockW, blockH)}
+	root := newHello(centred(w, h, blockW, blockH), caps.ColourDepth())
 	r.SetRoot(root)
 
 	if err := t.EnterRawMode(); err != nil {

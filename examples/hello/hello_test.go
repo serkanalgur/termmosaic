@@ -13,6 +13,7 @@ import (
 	"github.com/serkanalgur/termmosaic/buffer"
 	"github.com/serkanalgur/termmosaic/headless"
 	"github.com/serkanalgur/termmosaic/render"
+	"github.com/serkanalgur/termmosaic/widgets/block"
 )
 
 // update is set by -update to rewrite the golden files.
@@ -38,10 +39,7 @@ func renderGolden(t *testing.T, frames int) *headless.MemorySink {
 		Height: goldenH,
 		Caps:   termmosaic.DefaultCaps(),
 	})
-	root := &hello{
-		depth:  buffer.DepthTrueColor,
-		bounds: centred(goldenW, goldenH, blockW, blockH),
-	}
+	root := newHello(centred(goldenW, goldenH, blockW, blockH), buffer.DepthTrueColor)
 	r.SetRoot(root)
 	for i := 0; i < frames; i++ {
 		if _, err := r.Render(); err != nil {
@@ -124,7 +122,7 @@ func TestSecondFrameChangesOnlyTheCounter(t *testing.T) {
 	r := render.New(sink, render.Config{
 		Width: goldenW, Height: goldenH, Caps: termmosaic.DefaultCaps(),
 	})
-	r.SetRoot(&hello{depth: buffer.DepthTrueColor, bounds: centred(goldenW, goldenH, blockW, blockH)})
+	r.SetRoot(newHello(centred(goldenW, goldenH, blockW, blockH), buffer.DepthTrueColor))
 
 	if _, err := r.Render(); err != nil {
 		t.Fatal(err)
@@ -157,7 +155,7 @@ func TestIdleFrameWritesNothing(t *testing.T) {
 	r := render.New(sink, render.Config{
 		Width: goldenW, Height: goldenH, Caps: termmosaic.DefaultCaps(),
 	})
-	r.SetRoot(&hello{depth: buffer.DepthTrueColor, bounds: centred(goldenW, goldenH, blockW, blockH)})
+	r.SetRoot(newHello(centred(goldenW, goldenH, blockW, blockH), buffer.DepthTrueColor))
 	if _, err := r.Render(); err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +192,7 @@ func TestDegradedColourGolden(t *testing.T) {
 			r := render.New(sink, render.Config{
 				Width: goldenW, Height: goldenH, Caps: tc.caps,
 			})
-			root := &hello{depth: tc.caps.ColourDepth(), bounds: centred(goldenW, goldenH, blockW, blockH)}
+			root := newHello(centred(goldenW, goldenH, blockW, blockH), tc.caps.ColourDepth())
 			r.SetRoot(root)
 			if _, err := r.Render(); err != nil {
 				t.Fatal(err)
@@ -214,7 +212,7 @@ func TestNoColorGolden(t *testing.T) {
 	r1 := render.New(withColor, render.Config{
 		Width: goldenW, Height: goldenH, Caps: termmosaic.DefaultCaps(),
 	})
-	r1.SetRoot(&hello{depth: buffer.DepthTrueColor, bounds: centred(goldenW, goldenH, blockW, blockH)})
+	r1.SetRoot(newHello(centred(goldenW, goldenH, blockW, blockH), buffer.DepthTrueColor))
 	if _, err := r1.Render(); err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +221,7 @@ func TestNoColorGolden(t *testing.T) {
 	r2 := render.New(noColor, render.Config{
 		Width: goldenW, Height: goldenH, Caps: termmosaic.DefaultCaps(), NoColor: true,
 	})
-	r2.SetRoot(&hello{depth: buffer.DepthTrueColor, bounds: centred(goldenW, goldenH, blockW, blockH)})
+	r2.SetRoot(newHello(centred(goldenW, goldenH, blockW, blockH), buffer.DepthTrueColor))
 	if _, err := r2.Render(); err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +244,7 @@ func TestResizeGolden(t *testing.T) {
 	r := render.New(sink, render.Config{
 		Width: goldenW, Height: goldenH, Caps: termmosaic.DefaultCaps(),
 	})
-	root := &hello{depth: buffer.DepthTrueColor, bounds: centred(goldenW, goldenH, blockW, blockH)}
+	root := newHello(centred(goldenW, goldenH, blockW, blockH), buffer.DepthTrueColor)
 	r.SetRoot(root)
 	if _, err := r.Render(); err != nil {
 		t.Fatal(err)
@@ -316,29 +314,60 @@ func TestGoldenFilesExist(t *testing.T) {
 	}
 }
 
-// TestExampleBorderThresholdsMatchTheAgreedValues pins the two numbers ADR 0008
-// §2 fixes for borders and titles: a border needs two cells on each axis, and a
-// title additionally needs five.
+// TestExampleBorderThresholdsMatchTheAgreedValues pins the two numbers ADR 0008 §2
+// fixes for borders and titles: a border needs two cells on each axis, and a title
+// additionally needs five.
 //
-// ADR 0007 §1 rule 5 says thresholds are local named constants rather than
-// framework vocabulary, so these constants live here rather than in the
-// framework. But ADR 0008's reconciliation says the box-drawing thresholds are
-// decided once for the whole catalog, precisely because three authors would each
-// pick their own. The catalog's Block will own them; until it exists the example
-// stands in for it, and this test is what stops the example from quietly drifting
-// away from the agreed numbers.
+// The constants used to live in this file, because the example drew its own border.
+// It no longer does — it composes a block.Block, the catalog's only owner of borders
+// and titles — so the assertion has moved to where the thresholds now live. It is
+// the same assertion at the same strength: the VALUES are still pinned here, and a
+// change to them still fails this test rather than silently changing the catalog.
 func TestExampleBorderThresholdsMatchTheAgreedValues(t *testing.T) {
-	if minBorderW != 2 || minBorderH != 2 {
+	if block.MinBorderW != 2 || block.MinBorderH != 2 {
 		t.Errorf("border threshold = %dx%d, want 2x2: two cells per axis, one per corner",
-			minBorderW, minBorderH)
+			block.MinBorderW, block.MinBorderH)
 	}
 	// A title needs two corners plus a space, a glyph and a space.
-	const (
-		titlePad = 2 // one space each side
-		titleMin = minBorderW + titlePad + 1
-	)
-	if titleMin != 5 || minTitleW != 5 {
-		t.Errorf("title threshold = %d (derived %d), want 5", minTitleW, titleMin)
+	const titlePad = 2 // one space each side, inserted by Block
+	if titleMin := block.MinBorderW + titlePad + 1; titleMin != 5 || block.MinTitleW != 5 {
+		t.Errorf("title threshold = %d (derived %d), want 5", block.MinTitleW, titleMin)
+	}
+}
+
+// TestExampleOwnsNoBorderVocabulary is the structural half of the same change: the
+// example must contain no border glyph lookup and no title threshold of its own,
+// because those are the two things three parallel authors each reinvented.
+// TestBoxDrawingRunesLiveInOneFile enforces the rune half across the whole module;
+// this asserts the threshold half at the file where the duplication used to be.
+func TestExampleOwnsNoBorderVocabulary(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"minBorderW", "minBorderH", "minTitleW", "Glyphs("} {
+		if strings.Contains(string(src), forbidden) {
+			t.Errorf("main.go mentions %q; the border, the title and its thresholds belong to "+
+				"widgets/block now", forbidden)
+		}
+	}
+}
+
+// TestExampleTitleAppearsAtExactlyTheTitleThreshold is the functional counterpart:
+// the example's Block shows its title at width 5 and drops it at width 4, which is
+// what the constants above claim.
+func TestExampleTitleAppearsAtExactlyTheTitleThreshold(t *testing.T) {
+	showsTitle := func(w int) bool {
+		b := newHello(buffer.Rect{W: w, H: 3}, buffer.DepthTrueColor)
+		buf := buffer.NewBuffer(w, 3)
+		b.Draw(buf)
+		return strings.Contains(rowText(buf, w), "t")
+	}
+	if !showsTitle(block.MinTitleW) {
+		t.Errorf("the title must be drawn at width %d", block.MinTitleW)
+	}
+	if showsTitle(block.MinTitleW - 1) {
+		t.Errorf("the title must be dropped at width %d", block.MinTitleW-1)
 	}
 }
 
@@ -349,7 +378,7 @@ func TestExampleBorderThresholdsMatchTheAgreedValues(t *testing.T) {
 func TestDrawIsTotalAtEverySize(t *testing.T) {
 	for w := 0; w <= 12; w++ {
 		for h := 0; h <= 12; h++ {
-			widget := &hello{depth: buffer.DepthTrueColor, bounds: buffer.Rect{W: w, H: h}}
+			widget := newHello(buffer.Rect{W: w, H: h}, buffer.DepthTrueColor)
 			b := buffer.NewBuffer(atLeast1(w), atLeast1(h))
 			widget.Draw(b) // must not panic for any size, including 0x0
 		}
@@ -359,14 +388,14 @@ func TestDrawIsTotalAtEverySize(t *testing.T) {
 // TestDrawIsAllocationFree is the widget-side half of ADR 0008 §4: a Draw that
 // builds nothing derived from its size allocates nothing.
 //
-// The title's span slice is constant, so it stays on the stack; the body formats
-// one integer, which for these small values does not escape. If a future change
-// makes Draw call Wrap or Truncate, this fails — which is the point, because that
-// is the most likely performance regression in the catalog and documentation alone
-// does not catch it.
+// The Block's title is built once in newHello and its truncation cached per rect;
+// the body writes one integer digit by digit, which for these small values does not
+// escape. If a future change makes Draw call Wrap or Truncate, this fails — which is
+// the point, because that is the most likely performance regression in the catalog
+// and documentation alone does not catch it.
 func TestDrawIsAllocationFree(t *testing.T) {
 	b := buffer.NewBuffer(60, 14)
-	h := &hello{depth: buffer.DepthTrueColor, bounds: centred(60, 14, blockW, blockH)}
+	h := newHello(centred(60, 14, blockW, blockH), buffer.DepthTrueColor)
 	h.Draw(b) // warm any lazily-initialised state
 
 	if got := testing.AllocsPerRun(100, func() { h.Draw(b) }); got != 0 {

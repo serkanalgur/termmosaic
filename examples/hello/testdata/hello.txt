@@ -1,6 +1,6 @@
 
 
-       ┌─ termmosaic ───────────────────────────────┐
+       ┌ termmosaic ────────────────────────────────┐
        │                                            │
        │ frame     1                                │
        │ depth     truecolor                        │

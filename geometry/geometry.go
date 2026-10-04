@@ -89,6 +89,29 @@ type Size struct {
 	W, H int
 }
 
+// ClampCount returns how many content units of n fit in available cells.
+//
+// It never returns a negative number and never more than n. This one function IS
+// "show 3 rows at small sizes and 10 at large ones": pass the full content height
+// and the available height.
+//
+// It counts CELLS, not glyphs: a double-width rune occupies two cells, so a row
+// budget computed here can be one row optimistic once wide characters are in
+// play. That is a recorded limitation, not an oversight.
+//
+// A negative n counts as zero content and a negative available counts as no space,
+// because both are reachable from a layout under overflow (ADR 0007 §1 rule 2
+// clips rects, and a clipped rect can be empty on one axis only).
+func ClampCount(n, available int) int {
+	if n <= 0 || available <= 0 {
+		return 0
+	}
+	if n > available {
+		return available
+	}
+	return n
+}
+
 // Touches reports whether two rectangles overlap or share an edge. The
 // dirty-rect coalescer uses it, because two rectangles sharing a column are
 // contiguous on screen and cheaper as one diff region than as two.

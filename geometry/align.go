@@ -21,6 +21,37 @@ const (
 	AlignRight
 )
 
+// Offset returns the x offset, within a span of avail cells, at which content of
+// cell width w begins.
+//
+// It is the shared answer to "where does this go", so that a Block's title and a
+// Paragraph's line cannot round differently and leave a composed screen visibly
+// misaligned. Three widget authors would otherwise each write the switch.
+//
+// Rules:
+//   - w >= avail gives 0, which clips rather than scrolling content off the left.
+//   - AlignCenter leaves any odd cell on the left, which is the reading that
+//     matches the glyph tables' own geometry and keeps the arithmetic symmetric
+//     with AlignRight.
+//   - An out-of-range Align is treated as AlignLeft, matching String: it is
+//     layout-derived data and must not panic.
+func (a Align) Offset(avail, w int) int {
+	if avail <= 0 || w <= 0 {
+		return 0
+	}
+	switch a {
+	case AlignCenter:
+		return (avail - w) / 2
+	case AlignRight:
+		if avail-w < 0 {
+			return 0
+		}
+		return avail - w
+	default:
+		return 0
+	}
+}
+
 // String returns the alignment's name, for diagnostics and golden-test failure
 // messages: "left", "center", "right". An out-of-range value renders in decimal
 // rather than panicking, because an Align is layout-derived data and a TUI that
