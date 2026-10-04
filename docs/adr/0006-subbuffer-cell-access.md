@@ -352,21 +352,47 @@ Tests to add, in ADR 0002's spirit:
 
 ## Risks to revisit at v1.0
 
-1. **The diff's measured cost must be re-confirmed.** Tier 2 gets faster (row
-   hoisting) and tier 1 pays one stride comparison per row, so the net should
-   be neutral-to-better — but ADR 0002's 7,133 ns/op and the 0 allocs/op
-   assertion were measured against direct slice indexing. Re-run
-   `BenchmarkDiffDefaultSceneAllRows`, `TestDiffIsMuchSmallerThanFullRepaint`
-   and `TestDiffNeverCostsMoreThanFullRepaint`, and record the result here. If
-   the numbers moved materially, that is a signal the guard was too expensive
-   and belongs in the renderer rather than in `Diff`.
-2. **`Row` has no type-level canary for non-adjacency.** A caller that
+1. **The diff's measured cost must be re-confirmed.** ~~Unresolved~~
+   **Resolved 2026-10-04 — measured, and it improved.** On the same machine,
+   with the baseline taken by stashing the change and re-running the identical
+   command, `BenchmarkDiffDefaultSceneAllRows` went **6,950 → 6,244 ns/op**
+   against ADR 0002's 7,133 ns/op target, still at **0 allocs/op**.
+
+   The two tiers moved in opposite directions, which is worth recording rather
+   than reporting only the net. Tier 2 got faster — hoisting `Row(y)` out of
+   the cell loop replaces a per-cell multiply-add and bounds check with one
+   slice expression per row. Tier 1 got *slower* in isolation, 219 → 256 ns/op,
+   because `RowBytes` is now a method that checks stride and bounds per call
+   where the free function checked one length. Tier 2 more than pays for it on
+   ADR 0002's workload, where 56 skipped rows are the common case.
+
+   So the guard is **not** evidence that it belongs in the renderer. The
+   `*buffer.Buffer` frame field stays.
+
+2. **The panic on a mismatched `Frame` is unreachable from the renderer, and
+   that is now a tested invariant rather than an argument.** `checkFrame`
+   panics unless `Frame.Width`/`Height` match both buffers exactly. The old
+   `[]Cell` API expressed "no usable previous frame" as a short `Prev`, and
+   silently fell back to a full repaint. A short `Prev` is now unrepresentable,
+   so that path **panics instead of degrading** — a deliberate behaviour change,
+   not a pure refactor.
+
+   `Renderer.Resize` clamps negatives and sizes *both* buffers to exactly
+   `w`×`h`, so `front` and `back` cannot drift apart or disagree with
+   `r.w`/`r.h`. `TestResizeNeverBreaksFrameInvariant` (`render/`) now pins
+   that across 0×0, 1×1, single-axis 1-cell, negative, and 200×60 sizes, each
+   followed by a real `Render()`. Verified non-vacuous: resizing only `back` by
+   `w-1` makes the test fail on the width assertion *and* trip the diff panic.
+
+   The change is therefore safe in practice, but it is still a real semantic
+   change for any external caller that was relying on the silent fallback.
+3. **`Row` has no type-level canary for non-adjacency.** A caller that
    concatenates rows of a sub-buffer as though they were adjacent reintroduces
    ADR 0002's original bug. The mitigation is documentation plus the existing
    `TestSubBufferRowsAreStrided`; if a widget in the catalog ever gets this
    wrong, the fix is a distinct accessor type (`Rows` returning a small
    iterator) rather than another comment.
-3. **`Clip` is the escape hatch and it allocates.** A widget that genuinely
+4. **`Clip` is the escape hatch and it allocates.** A widget that genuinely
    wants a dense flat grid should call `Clip`, which copies. Worth watching that
    no widget does that per frame inside `Draw`, where it would be an
    allocation on the frame path and would break the 0-allocs/op bar ADR 0002

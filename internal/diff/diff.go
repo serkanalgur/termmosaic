@@ -4,7 +4,7 @@
 // This is the single most important code in the project. ADR 0003's argument for
 // the hybrid renderer is entirely this package's numbers, and ADR 0002's are a
 // direct measurement of it: on a 200x60 scene that is 99% static chrome, the
-// diff writes 107 bytes against 23,240 for a full repaint.
+// diff writes 141 bytes against 19,979 for a full repaint, a ~141x reduction.
 //
 // The two tiers:
 //
