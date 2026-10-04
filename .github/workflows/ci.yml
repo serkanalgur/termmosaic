@@ -66,18 +66,29 @@ jobs:
   # dependency that needs cgo, this fails rather than silently breaking
   # cross-compilation for every user.
   cross-compile:
-    name: cross-compile ${{ matrix.target }}
+    name: cross-compile ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # goos/goarch are separate matrix keys rather than one "linux/amd64"
+      # string split with matrix.target.split('/'). GitHub rejects a method
+      # call in that position: the whole workflow fails to produce jobs, in
+      # zero seconds, with no annotation -- so it fails silently and the badge
+      # is red for a reason nobody can find. Keep these as plain values.
       matrix:
-        target:
-          - linux/amd64
-          - linux/arm64
-          - darwin/amd64
-          - darwin/arm64
-          - windows/amd64
-          - windows/arm64
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -85,7 +96,7 @@ jobs:
           go-version: "1.23"
       - name: Build with CGO disabled
         env:
-          GOOS: ${{ matrix.target.split('/')[0] }}
-          GOARCH: ${{ matrix.target.split('/')[1] }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: go build ./...
