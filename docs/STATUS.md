@@ -38,6 +38,7 @@ break without notice until v1.0.0.**
 | Color model and degradation ladder | **PROPOSED** | Built and working: `Colour` is truecolor/named-16/256 with a redmean quantiser and a `ColourDepth` rung, plus `NO_COLOR`. **Not yet validated.** Nobody has checked the redmean mapping is perceptually acceptable, so treat the 256 and 16 rungs as provisional. The `buffer.Quantiser` interface is the escape hatch for a Lab-space replacement. |
 | Theme and styling system | **DECIDED** — **no theme in v1**; widgets carry `Style` fields, framework defaults are the terminal's own colours plus named attribute styles | One `buffer.Style` value (fg/bg/attr, by value, 12 bytes, 0 allocs) replaces the loose-argument write API; `ansi.Style` becomes an alias of it. Trigger for a theme: the first role two widgets must share. [ADR 0008](adr/0008-style-and-text.md) |
 | Text and span rendering | **DECIDED** — `Span` + `Buffer.SetSpans`, parsed once, wrapped outside `Draw` | A wide glyph's continuation cell takes its **owning span's** style or the row flickers forever. `Wrap`/`Truncate` allocate and are banned from `Draw`. Borders and titles have one vocabulary (`BorderPlain`/`Rounded`/`Double`/`Thick`/`ASCII`, one `Block`). [ADR 0008](adr/0008-style-and-text.md) |
+| Documentation site | **PROPOSED** — Hugo + Pagefind on GitHub Pages; captures generated in Go from `MemorySink` cells, not screenshots | No browser TTY exists, so the only truthful picture of a widget is the cell grid the renderer produced — which is what `widgets/widgettest` already builds and what the golden tests assert on, so the docs cannot drift from behaviour. **Not built.** A live WASM playground is rejected: `docs/ARCHITECTURE.md` lists "no WASM build" as a written non-goal and `term/terminal_windows.go` is a stub, so there is no seam to port. Plan, page tree, per-widget template and effort: [docs/SITE-PLAN.md](SITE-PLAN.md). |
 
 ### Decisions
 
@@ -96,13 +97,16 @@ rather than rewritten.
 
 ## Widget catalog
 
-**24 exported constructors, built and tested.** Flat per-frame cost is the
+**22 widgets, built and tested.** (`buffer.Buffer` is deliberately not counted:
+it has `Invalidate()` but no `Bounds`/`Draw`/`Handle`, so it is not a `Widget`
+— it is what widgets draw into.) Flat per-frame cost is the
 claim that matters and it is asserted: List renders 10k items in 13,320 ns and
 100k in 14,242 — 7% for ten times the data — and Table likewise, both at zero
 allocations.
 
-**Core** — `Buffer`, `Layout`, `Block`/`Border`, `Text`, `Paragraph`, `Split`,
-`Span`. `Block` is the only thing in the catalog that draws a border or a title.
+**Core** — `Block`, `Text`, `Paragraph`, `Split`. Plus the non-widget
+primitives they build on: `buffer.Buffer`, `layout`, `buffer.Span`.
+`Block` is the only thing in the catalog that draws a border or a title.
 
 **Forms** — `TextInput`, `TextArea`, `Select`, `Checkbox`, `Radio`, `Toggle`,
 `Tabs`, `Button`, `KeyHint`. A `Form` container was **not** built; ADR 0004's

@@ -65,14 +65,17 @@ go get github.com/serkanalgur/termmosaic
 
 ## What's in the box
 
-24 widget constructors, built and tested:
+**22 widgets**, built and tested:
 
 | | |
 |---|---|
-| **Core** | `Buffer` `Block` `Text` `Paragraph` `Split` |
+| **Core** | `Block` `Text` `Paragraph` `Split` |
 | **Forms** | `TextInput` `TextArea` `Select` `Checkbox` `Radio` `Toggle` `Tabs` `Button` `KeyHint` |
 | **Data** | `List` `Table` `Tree` `Pager` + the `virtual/` engine |
 | **Visualization** | `ProgressBar` `Gauge` `Meter` `Sparkline` `BarChart` |
+
+`buffer.Buffer` is not on that list and is not a `Widget` — it has no `Bounds`,
+`Draw` or `Handle`. It is what widgets draw into.
 
 Per-frame cost is flat in item count — this is the claim the catalog exists to
 back up:
@@ -97,6 +100,7 @@ go run ./examples/dashboard   # a live dashboard: list, table, log, meters
 - [docs/STATUS.md](docs/STATUS.md) — current state of the design
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — architecture decisions
 - [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) — how to help
+- [docs/SITE-PLAN.md](docs/SITE-PLAN.md) — plan for the documentation site (not built yet)
 
 ## License
 
