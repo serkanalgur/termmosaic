@@ -3,9 +3,11 @@
 A terminal UI framework for Go: a cell-buffer renderer plus a catalog of
 ready-to-use widgets.
 
-> **Status: pre-alpha.** This is an active design effort. Nothing below is a
-> promise yet — see [docs/STATUS.md](docs/STATUS.md) for what is decided,
-> what is proposed, and what is undecided.
+> **Status: pre-alpha.** The renderer, input layer and the full widget catalog
+> are built and tested — 19 packages, 650+ tests, zero-allocation frame path —
+> but the API is **not stable** and may break before v1.0. See
+> [docs/STATUS.md](docs/STATUS.md) for what is decided, proposed and open, and
+> [docs/adr/](docs/adr/) for the reasoning behind each decision.
 
 ## Why this exists
 
@@ -36,17 +38,53 @@ elegant its renderer is.
    (row-level skip, then per-cell), dirty-region tracking, and a 30–60 fps
    frame budget. No full-screen clears in the hot path.
 4. **Graceful degradation.** Truecolor → 256 → 16 color. Unicode borders →
-   ASCII. `NO_COLOR` respected. Works over SSH and inside tmux.
+   ASCII. `NO_COLOR` respected. Mouse capture is **off by default** because it
+   steals selection and scrollback from your shell. tmux DCS passthrough is a
+   known gap — see [docs/STATUS.md](docs/STATUS.md).
 5. **Testable without a terminal.** A headless memory-sink backend means the
    renderer and every widget are unit-testable in CI.
 6. **Accessible by construction.** Color is never the only signal. Visible
-   focus. Full keyboard operation. Reduced-motion flag.
+   focus. Full keyboard operation. (A reduced-motion flag is **not** built
+   yet — the catalog animates nothing today, so there is nothing to gate.)
 7. **Documented limits.** Known limitations are written down, not discovered
    by users. If we have no IME support, the README says so.
 
 ## Installation
 
-Not yet available. See [docs/STATUS.md](docs/STATUS.md).
+Not yet released as a module version. From a checkout:
+
+```
+go get github.com/serkanalgur/termmosaic
+```
+
+## What's in the box
+
+24 widget constructors, built and tested:
+
+| | |
+|---|---|
+| **Core** | `Buffer` `Block` `Text` `Paragraph` `Split` |
+| **Forms** | `TextInput` `TextArea` `Select` `Checkbox` `Radio` `Toggle` `Tabs` `Button` `KeyHint` |
+| **Data** | `List` `Table` `Tree` `Pager` + the `virtual/` engine |
+| **Visualization** | `ProgressBar` `Gauge` `Meter` `Sparkline` `BarChart` |
+
+Per-frame cost is flat in item count — this is the claim the catalog exists to
+back up:
+
+| Items | `List` | `Table` |
+|---|---|---|
+| 10,000 | 13,320 ns | 16,801 ns |
+| 100,000 | 14,242 ns | 17,885 ns |
+
+Ten times the data for seven percent more time, at zero allocations. Run
+`examples/dashboard` to see it.
+
+## Examples
+
+```
+go run ./examples/hello       # a bordered panel, resize-aware
+go run ./examples/dashboard   # a live dashboard: list, table, log, meters
+```
 
 ## Documentation
 

@@ -35,7 +35,7 @@ break without notice until v1.0.0.**
 | Input decoding (where the parser lives, what it decodes) | **DECIDED** — a pure `Decode` under a resumable `Parser` in a new `input` package | Kitty keyboard **in** (progressive enhancement, `disambiguate` only); paste **in** and always **one `EventPaste` carrying the whole payload**; mouse decoding **in** (SGR 1006 / urxvt 1015 / X10) but **capture off by default**; focus decoding **in**, reporting off by default; **IME scoped out and deferred**, with `EventCompose` reserved. [ADR 0005](adr/0005-input-decoding.md) |
 | Cell access on sub-buffers (`Cells()`, `RowBytes`) | **DECIDED** — `Row(y) []Cell` replaces `Cells()`; `RowBytes` is a `*Buffer` method that panics on a view | The flat slice `Cells()` returns is silently wrong for a sub-buffer. The stride never leaves `buffer`. Closes ADR 0002's v1.0 risk 1b now. [ADR 0006](adr/0006-subbuffer-cell-access.md) |
 | Responsive screen composition | **DECIDED** — a **budget, not a reflow**; no size classes, no framework breakpoints | Framework shares the arithmetic (`geometry.ClampCount`, `geometry.Budget` + `Priority`, optional `termmosaic.Minimizable`); policy stays per widget. **`Widget` is unchanged.** Degenerate sizes are a contract: **no panic ever, clip never blank**; a resize always repaints the whole screen because `buffer.Resize` discards the cells. [ADR 0007](adr/0007-responsive-screens.md) |
-| Color model and degradation ladder | **OPEN** | |
+| Color model and degradation ladder | **PROPOSED** | Built and working: `Colour` is truecolor/named-16/256 with a redmean quantiser and a `ColourDepth` rung, plus `NO_COLOR`. **Not yet validated.** Nobody has checked the redmean mapping is perceptually acceptable, so treat the 256 and 16 rungs as provisional. The `buffer.Quantiser` interface is the escape hatch for a Lab-space replacement. |
 | Theme and styling system | **DECIDED** — **no theme in v1**; widgets carry `Style` fields, framework defaults are the terminal's own colours plus named attribute styles | One `buffer.Style` value (fg/bg/attr, by value, 12 bytes, 0 allocs) replaces the loose-argument write API; `ansi.Style` becomes an alias of it. Trigger for a theme: the first role two widgets must share. [ADR 0008](adr/0008-style-and-text.md) |
 | Text and span rendering | **DECIDED** — `Span` + `Buffer.SetSpans`, parsed once, wrapped outside `Draw` | A wide glyph's continuation cell takes its **owning span's** style or the row flickers forever. `Wrap`/`Truncate` allocate and are banned from `Draw`. Borders and titles have one vocabulary (`BorderPlain`/`Rounded`/`Double`/`Thick`/`ASCII`, one `Block`). [ADR 0008](adr/0008-style-and-text.md) |
 
@@ -96,21 +96,30 @@ rather than rewritten.
 
 ## Widget catalog
 
-All **OPEN** pending implementation. The intended catalog is:
+**24 exported constructors, built and tested.** Flat per-frame cost is the
+claim that matters and it is asserted: List renders 10k items in 13,320 ns and
+100k in 14,242 — 7% for ten times the data — and Table likewise, both at zero
+allocations.
 
-**Core** — Buffer, Canvas, Layout, Block/Border, Text, Line, Span.
+**Core** — `Buffer`, `Layout`, `Block`/`Border`, `Text`, `Paragraph`, `Split`,
+`Span`. `Block` is the only thing in the catalog that draws a border or a title.
 
-**Forms** — TextInput, TextArea, Select, Checkbox, Radio, Toggle, Tabs,
-Button, KeyHint, Form.
+**Forms** — `TextInput`, `TextArea`, `Select`, `Checkbox`, `Radio`, `Toggle`,
+`Tabs`, `Button`, `KeyHint`. A `Form` container was **not** built; ADR 0004's
+solver plus `layout` covers composition, and a `Form` type would have been a
+second way to do the same thing.
 
-**Data** — List, Table, Tree, Virtual Scroll, Pager.
+**Data** — `List`, `Table`, `Tree`, `Pager`, plus the `virtual/` engine they
+share (flat cost from 10 to 1,000,000 items, asserted).
 
-**Visualization** — ProgressBar, Gauge, Meter, Sparkline, BarChart.
+**Visualization** — `ProgressBar`, `Gauge`, `Meter`, `Sparkline`, `BarChart`.
+`Sparkline` and `Gauge` use Braille for sub-cell resolution; `Gauge` degrades
+to a bar when the rect or terminal cannot hold a dial. These five are the gap in
+every comparable framework — OpenTUI has 13.4k stars and ships none of them.
 
-**Responsiveness is decided before implementation**, in
-[ADR 0007](adr/0007-responsive-screens.md), because three coders are about to
-build independent widget sets against a shared vocabulary. This closes the
-question the catalog previously left open — *should the framework define
+**Responsiveness is decided**, in [ADR 0007](adr/0007-responsive-screens.md),
+because three coders build independent widget sets against a shared vocabulary.
+This closes the question the catalog previously left open — *should the framework define
 breakpoints or size classes?* — with a **no**: a size class is a lossy function
 of two numbers and a product decision in the wrong layer, so each widget's
 threshold is a local named constant beside its own `Draw`. What is shared is
@@ -195,9 +204,26 @@ Answered questions have been removed; the reasoning is preserved in
   `linux/arm64`, so the packaging half of the risk is closed — but the Windows
   backend is a **stub that returns a loud error** from every console operation,
   not a working console. The remaining risk is entirely the runtime half.
-- **Color model and degradation ladder** — still OPEN; see the OPEN row above.
+- **Color model and degradation ladder** — moved from OPEN to **PROPOSED**;
+  see the table row above. Built and working, not yet perceptually validated.
   The **theme/styling system** is no longer in this list:
   [ADR 0008](adr/0008-style-and-text.md) decides it as "no theme in v1".
+- **A cache-poisoning debug mode, and the four ADR 0007 §3 tests still
+  unwritten.** The catalog surfaced that a rect-keyed cache is only half the
+  contract — see ADR 0007's 2026-10-04 amendment. The cheap half is now a
+  stated convention; the mechanical check is not built. A debug mode that
+  corrupts a widget's cache after `Draw` and asserts the next frame is
+  identical would catch that whole class instead of by review.
+  `TestRenderAtZeroSizeWritesNothing`, `TestResizeShrinksAndRepaintsWholeRect`,
+  `TestResizeCoalescedToOneRepaintPerTick` and `TestRootBoundsClippedToScreen`
+  are named in ADR 0007 and still do not exist — they are renderer and
+  application level, not widget level. The 0×0 half is verified indirectly
+  (0×0, 0×24 and 24×0 each write zero bytes) but has no test of its own.
+- **`SetSpansWindowIn`'s `skip` path is unreachable from `Table` today.**
+  `scrollCols` always positions on a column start, so the partially-visible-
+  column case cannot arise. The primitive is correct and covered in `buffer`
+  (12+ cases), but its only real user does not reach it. Trigger: a widget that
+  scrolls by cell rather than by column.
 
 ## Definition of "usable library"
 

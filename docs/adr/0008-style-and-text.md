@@ -466,6 +466,20 @@ type Wrapped struct {
 	Lines [][]Span
 	// Width is the column width Wrap was given.
 	Width int
+	// Ranges[i] is the rune range in the input text that Lines[i] displays.
+	// len(Ranges) == len(Lines) and they share an index. Added 2026-10-04.
+	Ranges []LineRange
+}
+
+// LineRange addresses one line's text within the caller's input. Added
+// 2026-10-04; see the amendment at the end of this ADR.
+//
+// The offset basis is a RUNE INDEX into the input text — the concatenation of
+// every Span.Text, walked as runes — counting EVERY input rune including the
+// zero-width ones that appear in no rendered span. It is neither a cell column
+// nor a byte offset, and text[r.Start:r.End] is the line's own text.
+type LineRange struct {
+	Start, End int
 }
 
 // Wrap breaks spans into lines of at most width cells, preserving each rune's
@@ -473,6 +487,10 @@ type Wrapped struct {
 // it, per ADR 0007 §3.
 //
 // The rules, all of which are the contract:
+//   - U+000A LF is a HARD BREAK (amended 2026-10-04). It splits lines
+//     unconditionally, is consumed, and appears in no line's spans. A blank
+//     logical line is one empty line; a trailing newline opens a final empty
+//     line, matching strings.Split.
 //   - The ONLY break opportunity in v1 is U+0020 SPACE. No hyphen breaks, no
 //     CJK boundary breaks, no slash breaks.
 //   - A span boundary is NOT a break opportunity. A word may straddle two spans
@@ -951,3 +969,75 @@ Tests to add, in ADR 0002/0007's spirit:
    `term/caps.go:56-60` already admits it is not (a terminal configured out of
    band). The first honest test is a golden sweep rendering every border style
    and a mixed-style paragraph under `Unicode: true` and `Unicode: false`.
+## Amendment 2026-10-04 — the vocabulary grew while the catalog was built
+
+Building the widget catalog exposed three places where this ADR under-described
+the code it produced. All three were found by widget authors, reported rather
+than worked around, and fixed at the source. Original reasoning is preserved
+above; this section records what changed and why.
+
+**1. `Wrap` is newline-aware, and there is deliberately no `WrapLines`.**
+`RuneWidth('\n') == 0`, so flattening silently discarded newlines and a
+multi-line paragraph came back as one unwrapped block. A mode flag was rejected
+as unreadable at the call site — nothing in the argument says which value is
+correct, which makes the wrong choice a one-character slip. A separate
+`WrapLines` was rejected for the same reason this ADR's §1 rule 4 rejects
+duplicated vocabulary: it leaves `Wrap(spans, w)` reachable with identical
+silent mangling, which is two names for one job. Since `RuneWidth('\n') == 0`
+is a fact about the width table and not about text, there is no correct reading
+in which a newline is dropped, so the rule moved **into** `Wrap`. Single-line
+callers are unchanged bit-for-bit.
+
+**2. `Wrapped.Ranges` and `LineRange` are new.** §1's `Wrapped` had no
+rune-index mapping, so every editable wrapped text re-derived line→rune offsets
+from the consumed-space rule — `TextArea` carried a private `lineBounds` doing
+exactly that. The basis is specified above and is load-bearing: **rune index into
+the input, counting zero-width runes**, so `text[r.Start:r.End]` is the line's
+own text. A cell-column or byte-offset basis would both have been wrong, and
+wrong *quietly*.
+
+Exposing the mapping found a real bug: the old `lineBounds` counted only runes
+that reached a cell, so one combining mark shifted every caret position after it
+by one.
+
+**3. Four range-clipped writers are new vocabulary in `buffer`.** `SetSpans`
+clips to the *buffer* edge, so any widget with a column or a right-hand text
+region had to pre-truncate (allocating) or re-derive the wide-glyph rules. Two
+widget packages each wrote their own, and `Table` needed a `skip` variant on
+top. All four are now methods on `*Buffer`, zero-allocation, and the duplicates
+are deleted:
+
+```go
+func (b *Buffer) SetSpansIn(x0, x1, y int, spans []Span) int
+func (b *Buffer) SetStringIn(x0, x1, y int, s string, st Style) int
+func (b *Buffer) SetSpansCappedIn(x0, x1, y int, spans []Span, mark rune) int
+func (b *Buffer) SetSpansWindowIn(x0, x1, y int, spans []Span, skip int, mark rune) int
+```
+
+`x1` is exclusive; each returns the column just past what was written. The
+`int`-versus-void difference between the two original copies was reconciled
+rather than picked: the code was behaviourally identical, `int` is strictly more
+informative, Go lets a caller ignore it, and one caller needs it. `skip` stayed
+a separate function because `skip == 0` is **not** the capped rule.
+
+Two findings from consolidating rather than copying are recorded because both
+were latent bugs in both copies:
+
+- A window can fill its range **exactly**, leaving the marker on a wide glyph's
+  continuation cell. Both copies overwrote only that half, leaving an unpaired
+  glyph — junk on screen and permanent flicker, which is the failure mode §1's
+  continuation-cell rule exists to prevent.
+- The marker takes the last **non-empty input** span's style, not the last
+  **kept** span's. The latter is unknowable without allocating the truncated
+  slice, which is what these functions exist to avoid. The original doc comment
+  claimed the opposite; the code was right and the comment was wrong.
+
+**What did not move:** `paintRow` is still a four-line helper duplicated in
+`widgets/data` and `widgets/viz`. It expresses ADR 0007 §1 rule 3 ("repaint the
+row first") and takes a lead-cell count, which is layout policy. Putting it in
+`buffer` would put a layout decision in the cell layer, so the duplication stays
+deliberately. The span writing inside it is now shared.
+
+**Still open, unchanged:** risk 5 above stands. None of this has been
+benchmarked with wide characters, and the affected surface is now wider — `Wrap`
+and four range-clipped writers. Risk 6 also stands.

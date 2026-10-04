@@ -92,7 +92,13 @@ original stays and a new one supersedes it, so the reasoning history survives.
   zero bytes. A resize always repaints the whole screen, because
   `buffer.Resize` discards the cells a partial diff would need; and drag-resize
   coalescing is **free**, because an app that calls `r.Resize` per event and
-  lets the pacer decide when to paint already gets it.
+  lets the pacer decide when to paint already gets it. **Amended 2026-10-04:**
+  the rect is not the only thing a size-derived cache depends on. A widget that
+  caches column widths on `Bounds()` and is then handed `Header = true` renders
+  the old layout *permanently* — nothing will produce a different rect to
+  repair it. So `Invalidate()` now also means **drop every value the widget has
+  cached**, and a widget exposing a setter for anything `Draw` reads must
+  invalidate in that setter.
 
 - **0008 — Style, theme, and text: one `Style` value, one `Span` type, one
   border vocabulary, and deliberately no theme in v1.** `buffer.Style` bundles
@@ -116,6 +122,15 @@ original stays and a new one supersedes it, so the reasoning history survives.
   and the 16-colour rung stay **encode-time only**; nothing in the widget path
   knows about them. `ansi.Style` becomes an alias of `buffer.Style`, removing a
   two-types-one-name collision already present in the tree.
+  **Amended 2026-10-04:** `Wrap` now treats LF as a hard break (there is
+  deliberately no `WrapLines` variant — a mode flag is a one-character slip and
+  a second function leaves the broken one reachable); `Wrapped` gained
+  `Ranges []LineRange` so editable text stops re-deriving line→rune offsets,
+  on a **rune-index-into-the-input** basis counting zero-width runes; and four
+  zero-allocation **range-clipped** writers (`SetSpansIn`, `SetStringIn`,
+  `SetSpansCappedIn`, `SetSpansWindowIn`) replace the span writers two widget
+  packages had each written for themselves, which also fixed a marker landing on
+  a wide glyph's continuation cell and leaving an unpaired glyph flickering.
 
 ## How these were decided
 

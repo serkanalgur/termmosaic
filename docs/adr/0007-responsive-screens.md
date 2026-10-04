@@ -324,6 +324,41 @@ contract-tightening only, and it is this sentence: **`Bounds()` must reflect the
 new rectangle before the next `Draw`, and `Draw` must read `Bounds()` rather than
 any cached copy of it.**
 
+#### Amendment 2026-10-04 — a rect key is not the only thing a cache depends on
+
+Building the widget catalog exposed a gap in the rule above. It describes the
+cache key as the rect, and it is silent about every **other** input the cached
+value depends on. A widget that caches column widths keyed on `Bounds()` is
+correct as long as nothing but the size changes. Then someone toggles
+`Scrollbar`, `Header`, `Status`, `Zone`, a theme colour or a selection-dependent
+layout, the rect is unchanged, the cache hits, and the widget renders the old
+layout — **permanently**, not for one frame, because nothing will ever produce a
+different rect to invalidate it.
+
+This is the failure mode §3's own argument was designed to exclude: "broken in
+exactly one frame and the very next one repairs it" holds only for a rect change.
+For a field change there is no repair.
+
+Both widget coders hit this independently and resolved it the same way, which is
+evidence the rule was under-specified rather than merely unimplemented:
+
+> **`Invalidate()` drops every value the widget has cached, including the layout
+> cache.** A widget that exposes a setter for anything its `Draw` reads —
+> content, options, visibility flags, styles, thresholds — must invalidate in
+> that setter. `Invalidate()` means "your cached derivation may now be wrong",
+> not merely "these cells need repainting".
+
+The cheap half is a convention on the widget author. The expensive half belongs
+to the renderer, and is **deferred**: a debug mode that corrupts a widget's cache
+after a `Draw` and asserts the next frame is identical would catch the whole
+class mechanically instead of by review. That is a v0.5-or-later item; it is
+recorded here so it is not rediscovered as a bug report.
+
+What is **not** deferred is the asymmetry this exposes: `Draw` is required to be
+allocation-free and idempotent, but nothing requires it to be *pure with respect
+to fields*. A widget that reads `w.header` inside `Draw` while caching against
+only `Bounds()` is correct by accident, not by construction.
+
 ### 4. Degenerate sizes — a decided contract, identical for every widget
 
 **No panic, ever. Clip, never blank.** Restating the distinction ADR 0006 already
