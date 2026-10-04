@@ -1,0 +1,16 @@
+# Normalise line endings on checkout so a Windows CI runner sees exactly what a
+# Linux or macOS runner sees. Without this, git checks out CRLF on Windows,
+# gofmt then reports every file as unformatted, and the formatting gate fails on
+# one platform only — for a reason that has nothing to do with formatting.
+* text=auto eol=lf
+
+*.go   text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# Binary assets are never line-ending translated.
+*.png  binary
+*.jpg  binary
+*.gif  binary
+*.svg  text eol=lf
