@@ -36,14 +36,15 @@ break without notice until v1.0.0.**
 | Cell access on sub-buffers (`Cells()`, `RowBytes`) | **DECIDED** — `Row(y) []Cell` replaces `Cells()`; `RowBytes` is a `*Buffer` method that panics on a view | The flat slice `Cells()` returns is silently wrong for a sub-buffer. The stride never leaves `buffer`. Closes ADR 0002's v1.0 risk 1b now. [ADR 0006](adr/0006-subbuffer-cell-access.md) |
 | Responsive screen composition | **DECIDED** — a **budget, not a reflow**; no size classes, no framework breakpoints | Framework shares the arithmetic (`geometry.ClampCount`, `geometry.Budget` + `Priority`, optional `termmosaic.Minimizable`); policy stays per widget. **`Widget` is unchanged.** Degenerate sizes are a contract: **no panic ever, clip never blank**; a resize always repaints the whole screen because `buffer.Resize` discards the cells. [ADR 0007](adr/0007-responsive-screens.md) |
 | Color model and degradation ladder | **OPEN** | |
-| Theme and styling system | **OPEN** | |
+| Theme and styling system | **DECIDED** — **no theme in v1**; widgets carry `Style` fields, framework defaults are the terminal's own colours plus named attribute styles | One `buffer.Style` value (fg/bg/attr, by value, 12 bytes, 0 allocs) replaces the loose-argument write API; `ansi.Style` becomes an alias of it. Trigger for a theme: the first role two widgets must share. [ADR 0008](adr/0008-style-and-text.md) |
+| Text and span rendering | **DECIDED** — `Span` + `Buffer.SetSpans`, parsed once, wrapped outside `Draw` | A wide glyph's continuation cell takes its **owning span's** style or the row flickers forever. `Wrap`/`Truncate` allocate and are banned from `Draw`. Borders and titles have one vocabulary (`BorderPlain`/`Rounded`/`Double`/`Thick`/`ASCII`, one `Block`). [ADR 0008](adr/0008-style-and-text.md) |
 
 ### Decisions
 
 The seven core architecture rows above are **DECIDED** — the first four on
-2026-10-03, input decoding, sub-buffer cell access and responsive screen
-composition on 2026-10-04 — and are recorded in full, with rejected
-alternatives, in [docs/adr/](adr/README.md).
+2026-10-03, input decoding, sub-buffer cell access, responsive screen
+composition and style/theme/text on 2026-10-04 — and are recorded in full, with
+rejected alternatives, in [docs/adr/](adr/README.md).
 
 Decisions 1 and 2 were made **empirically** — a scratch benchmark module was
 built outside the repo and measured on darwin/arm64 (Apple M1). The headline
@@ -120,6 +121,16 @@ inherit directly and are non-negotiable: **a widget's available space is
 before drawing content into it**, or shrinking leaves stale cells. `Widget` is
 unchanged.
 
+**Styling and text are also decided before implementation**, in
+[ADR 0008](adr/0008-style-and-text.md), on the same reasoning and against the
+same collision: every one of the thirty widgets will style text and draw a
+border. One `buffer.Style` value, one `Span` type, one border glyph vocabulary
+owned by `buffer`, and one `Block` as the only thing that draws a border or a
+title. There is **no theme in v1** — widgets carry `Style` fields and the
+framework's defaults are the terminal's own colours plus named attribute styles.
+`NO_COLOR` and the 16-colour rung stay encode-time only, so no widget path
+consults them.
+
 ## Known gaps in comparable frameworks
 
 Recorded because they define our opportunity. Sources verified 2026-10.
@@ -184,8 +195,9 @@ Answered questions have been removed; the reasoning is preserved in
   `linux/arm64`, so the packaging half of the risk is closed — but the Windows
   backend is a **stub that returns a loud error** from every console operation,
   not a working console. The remaining risk is entirely the runtime half.
-- **Color model and degradation ladder**, and the **theme/styling system** — see
-  the OPEN rows above.
+- **Color model and degradation ladder** — still OPEN; see the OPEN row above.
+  The **theme/styling system** is no longer in this list:
+  [ADR 0008](adr/0008-style-and-text.md) decides it as "no theme in v1".
 
 ## Definition of "usable library"
 

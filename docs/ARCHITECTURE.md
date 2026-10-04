@@ -134,10 +134,18 @@ perceptual mapping, not naive truncation.
 
 ## Decision 6: Theme and styling system
 
-**State: OPEN**
+**DECIDED** — see [ADR 0008](adr/0008-style-and-text.md).
 
-Styling stays plain Go values — no layout-in-CSS (see Non-goals). The theme
-model and its relationship to the degradation ladder are not yet settled.
+A `buffer.Style{FG, BG, Attr}` passed by value replaces loose colour/attribute
+arguments at the write API, and styled text arrives as `Span` values parsed **once
+at construction** rather than per frame. **No theme in v1:** widgets carry
+`Style` fields, and the framework ships *no* default colours at all — the
+terminal's own, plus named attribute styles. The dangerous version of "no theme"
+is hard-coded colours, so the rule is stated as a prohibition rather than a
+default. The trigger for a theme is the first style role two widgets must share.
+
+Degradation (`NO_COLOR`, the 16-colour rung) is **encode-time only**; nothing in
+the widget path reads caps or the environment.
 
 ## Decision 7: Input decoding — DECIDED
 

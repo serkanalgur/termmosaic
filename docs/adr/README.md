@@ -17,6 +17,7 @@ original stays and a new one supersedes it, so the reasoning history survives.
 | [0005](0005-input-decoding.md) | Input decoding | Accepted | 2026-10-04 |
 | [0006](0006-subbuffer-cell-access.md) | Sub-buffer cell access | Accepted | 2026-10-04 |
 | [0007](0007-responsive-screens.md) | Responsive screen composition | Accepted | 2026-10-04 |
+| [0008](0008-style-and-text.md) | Style, theme, and text | Accepted | 2026-10-04 |
 
 ## Decisions at a glance
 
@@ -93,6 +94,29 @@ original stays and a new one supersedes it, so the reasoning history survives.
   coalescing is **free**, because an app that calls `r.Resize` per event and
   lets the pacer decide when to paint already gets it.
 
+- **0008 — Style, theme, and text: one `Style` value, one `Span` type, one
+  border vocabulary, and deliberately no theme in v1.** `buffer.Style` bundles
+  fg/bg/attr and is passed **by value** — 12 bytes, three registers, no
+  allocation, so it costs exactly what the three loose arguments it replaces cost
+  and keeps ADR 0002's 0-allocs frame path. It lives in `buffer` because
+  `geometry` cannot hold it without an import cycle (`buffer` imports
+  `geometry`; `Style` needs `Colour`), which is the same cycle-exclusion
+  reasoning that put ADR 0007's vocabulary in the leaf. Styled text goes through
+  `Span` + `Buffer.SetSpans`, whose load-bearing rule is that **a wide glyph's
+  continuation cell takes its owning span's style** — a mismatched one never
+  compares equal and flickers that row forever. `Wrap`/`Truncate` **allocate
+  and are therefore never called from `Draw`**; they are built on the
+  size-change check ADR 0007 §3 already established. **There is no theme in
+  v1**: widgets carry `Style` fields, the framework's defaults are the terminal's
+  own colours plus named attribute styles, and a theme is triggered by the first
+  role two widgets must share. Borders are one set of names —
+  `BorderPlain`/`Rounded`/`Double`/`Thick`/`ASCII` — with the glyph tables in
+  `buffer` and one `Block` as the only thing in the catalog that draws one. The
+  ASCII rung is a single boolean passed to `BorderStyle.Glyphs(ascii)`. `NO_COLOR`
+  and the 16-colour rung stay **encode-time only**; nothing in the widget path
+  knows about them. `ansi.Style` becomes an alias of `buffer.Style`, removing a
+  two-types-one-name collision already present in the tree.
+
 ## How these were decided
 
 Decisions 1 and 2 were made **empirically**. A scratch Go module was built
@@ -126,6 +150,13 @@ ADR 0002/0003's measurements**, not from an observed resize. It has never run
 against a real terminal being dragged, and it names the scripted resize sweep
 that should be written before the catalog is finished.
 
+Decision 8 follows the same pattern for a partly-different reason: the `Style`
+size question was settled by reading Go's register ABI against ADR 0002's
+existing measurements rather than by a new benchmark, and its wide-character and
+ASCII-rung claims are **inherited** from `buffer/width.go` and `term/caps.go`,
+both of which already document their own limits. Its risk section names which of
+its claims are unbenchmarked.
+
 **Caveat worth repeating:** OpenTUI is a Zig core with TypeScript FFI bindings.
 Its numbers do not transfer to Go, and ADR 0002 exists precisely because we
 checked that assumption instead of inheriting it.
@@ -135,7 +166,6 @@ checked that assumption instead of inheriting it.
 These are tracked in [STATUS.md](../STATUS.md) and are **not** decided:
 
 - Colour model and degradation ladder
-- Theme and styling system
 - Headless backend as v1 vs v0.5 — largely settled by ADR 0001 in favour of
   v1, but the assertion surface is still open
 - Kitty **graphics** in v1 (the kitty *keyboard* protocol is decided by ADR 0005)
