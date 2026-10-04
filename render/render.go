@@ -280,6 +280,20 @@ func (r *Renderer) NeedsFrame() bool {
 // change is exactly what a focused text input produces on every keystroke it
 // rejects. Treating that as idle would leave the cursor stuck.
 func (r *Renderer) needsFrameLocked() bool {
+	// A queued callback is pending work, and it is work that only runs INSIDE
+	// Render. Without this, an app that mutates widget state from Post — which
+	// ADR 0003 documents as the way to do it — deadlocks: Post queues work,
+	// Render is what would run it, and Render is gated on NeedsFrame, which
+	// cannot be true until the callback runs. The renderer painted one frame
+	// and idled forever, so anything driven by Post (a fetch on a timer, an
+	// event source, a heartbeat) silently stopped updating.
+	//
+	// By the time Render reaches its own needsFrameLocked check, runPosted has
+	// already drained the queue, so this costs a frame only when a callback
+	// genuinely has something to do.
+	if len(r.posted) > 0 {
+		return true
+	}
 	if r.forceAll || r.back.IsDirty() {
 		return true
 	}
