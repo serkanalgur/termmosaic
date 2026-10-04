@@ -523,7 +523,7 @@ func (p *Pager) drawStatus(buf *buffer.Buffer, in buffer.Rect) {
 	st := p.StatusStyle
 	buf.FillRect(row, st.Resolved().Blank())
 	x := row.X
-	x = drawText(buf, x, row.Right(), row.Y, statusPrefix, st)
+	x = buf.SetStringIn(x, row.Right(), row.Y, statusPrefix, st)
 
 	var digits [24]byte
 	d := intDigits(digits[:0], p.topLine+1)
@@ -535,7 +535,7 @@ func (p *Pager) drawStatus(buf *buffer.Buffer, in buffer.Rect) {
 		buf.SetCell(x+1, row.Y, st.Resolved().Cell(matchGlyph))
 		var q [1]buffer.Span
 		q[0] = buffer.NewSpan(p.query, st)
-		drawSpansCapped(buf, x+2, row.Right(), row.Y, q[:], truncMark(p.blk.Ascii))
+		buf.SetSpansCappedIn(x+2, row.Right(), row.Y, q[:], truncMark(p.blk.Ascii))
 	}
 }
 
@@ -585,7 +585,7 @@ func (p *Pager) drawRow(buf *buffer.Buffer, y int, line string, row textRow, st 
 		to = from
 	}
 	if p.query == "" {
-		drawText(buf, p.body.X, p.body.Right(), y, line[from:to], st)
+		buf.SetStringIn(p.body.X, p.body.Right(), y, line[from:to], st)
 		return
 	}
 	// A hit that straddles the row boundary is drawn on the rows it covers: the
@@ -595,7 +595,7 @@ func (p *Pager) drawRow(buf *buffer.Buffer, y int, line string, row textRow, st 
 	if match.IsUnset() {
 		match = buffer.ReverseStyle
 	}
-	// Each segment continues where the previous one ended: every drawText starts at
+	// Each segment continues where the previous one ended: every SetStringIn starts at
 	// the body's left edge, so writing all of them there would draw the last segment
 	// over the first.
 	pos, x := from, p.body.X
@@ -605,7 +605,7 @@ func (p *Pager) drawRow(buf *buffer.Buffer, y int, line string, row textRow, st 
 			break
 		}
 		hit := pos + k
-		x = drawText(buf, x, p.body.Right(), y, line[pos:hit], st)
+		x = buf.SetStringIn(x, p.body.Right(), y, line[pos:hit], st)
 		end := hit + len(p.query)
 		if end > to {
 			end = to
@@ -613,11 +613,11 @@ func (p *Pager) drawRow(buf *buffer.Buffer, y int, line string, row textRow, st 
 		if end <= hit {
 			break
 		}
-		x = drawText(buf, x, p.body.Right(), y, line[hit:end], match)
+		x = buf.SetStringIn(x, p.body.Right(), y, line[hit:end], match)
 		pos = end
 	}
 	if pos < to {
-		x = drawText(buf, x, p.body.Right(), y, line[pos:to], st)
+		x = buf.SetStringIn(x, p.body.Right(), y, line[pos:to], st)
 	}
 	// A wrapped row carries NO truncation marker: the next row continues it, so an
 	// ellipsis would claim text had been lost when none had. That is the difference

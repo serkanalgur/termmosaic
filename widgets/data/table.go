@@ -711,7 +711,7 @@ func (t *Table) drawCell(buf *buffer.Buffer, row buffer.Rect, c int, spans []buf
 		content = 0
 	}
 	x := start + t.cols[c].Align.Offset(visW, content)
-	drawSpansWindow(buf, x, end, row.Y, spans, skip, t.mark)
+	buf.SetSpansWindowIn(x, end, row.Y, spans, skip, t.mark)
 }
 
 // drawScrollbar paints the vertical position thumb over the body rows, as in

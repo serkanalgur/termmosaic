@@ -428,7 +428,7 @@ func (g *Gauge) drawText(buf *buffer.Buffer) {
 	fillRow(buf, t, g.TrackStyle)
 	x := t.X
 	if g.ShowLabel {
-		x = drawSpansCapped(buf, x, t.Right(), t.Y, g.Label, g.mark)
+		x = buf.SetSpansCappedIn(x, t.Right(), t.Y, g.Label, g.mark)
 		x++
 	}
 	if g.ShowValue {

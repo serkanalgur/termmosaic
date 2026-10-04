@@ -65,13 +65,13 @@ type TextArea struct {
 	// once per pasted character.
 	OnChange func(string)
 
-	// starts is the rune index of each wrapped line's first rune, derived from
-	// wrapped by lineStarts.
+	// starts is the rune index of each wrapped line's first rune and ends the
+	// index just past its last rune, both copied from buffer.Wrap's LineRange
+	// result. They are kept as two slices because the caret arithmetic below reads
+	// one or the other on its own: ends[i] is NOT starts[i+1], since the space Wrap
+	// consumed at a break sits between them.
 	starts []int
-	// ends is the rune index just past each wrapped line's last rune. It is NOT
-	// starts[i+1]: the space Wrap consumed at a break sits between the two, so
-	// taking starts[i+1] as the end would splice that space into the line above.
-	ends []int
+	ends   []int
 	// lines holds the cached display runs for each wrapped line, each already
 	// carrying the caret style where the caret is.
 	lines [][]buffer.Span
@@ -240,38 +240,33 @@ func (a *TextArea) Draw(buf *buffer.Buffer) {
 // rebuild re-wraps the content and recomputes the display runs. It is the only
 // allocating operation in TextArea.
 //
-// Each LOGICAL line — the run of runes between two newlines — is wrapped
-// separately by buffer.Wrap and the results are concatenated. Newlines cannot be
-// part of what Wrap sees, and the reason is concrete rather than stylistic:
-// buffer.RuneWidth reports zero for a newline, so Wrap drops it while
-// flattening, and a multi-line paragraph handed to Wrap whole comes back as one
-// unbroken block of wrapped text with its line structure gone. Wrapping each
-// logical line on its own keeps buffer.Wrap as the one owner of the breaking
-// rules — which is what ADR 0008 §2 requires — while leaving the line structure,
-// which is the whole point of a text area, to this widget.
+// The whole content is handed to buffer.Wrap in one call and the line→rune
+// mapping comes back with the result, as buffer.LineRange. This widget used to
+// split the text on newlines itself, wrap each logical line separately and
+// re-derive each line's rune bounds from the consumed-space rule; that was a
+// second implementation of Wrap's breaking rules living in a widget, which is
+// the drift ADR 0008 §2 forbids, and it was wrong in a way only the second kind
+// of input exposed: the derivation counted the runes that reached a cell, so one
+// combining mark shifted every caret position after it by one. Wrap counts
+// zero-width runes in its offsets precisely so this widget does not have to
+// think about it.
 func (a *TextArea) rebuild(r buffer.Rect, styles areaStyles) {
 	a.starts = nil
 	a.ends = nil
 	a.lines = nil
 
-	for _, seg := range logicalLines(a.ed.text) {
-		text := a.ed.text[seg[0]:seg[1]]
-		w := buffer.Wrap([]buffer.Span{buffer.NewSpan(string(text), styles.text)}, r.W)
-		if len(w.Lines) == 0 {
-			// An empty logical line still occupies a row: a paragraph of blank
-			// lines is content, and dropping them would silently delete the user's
-			// paragraph breaks.
-			a.starts = append(a.starts, seg[0])
-			a.ends = append(a.ends, seg[0])
-			a.lines = append(a.lines, nil)
-			continue
-		}
-		starts, ends := lineBounds(w.Lines, seg[0], seg[1], a.ed.text)
-		a.starts = append(a.starts, starts...)
-		a.ends = append(a.ends, ends...)
-		for range w.Lines {
-			a.lines = append(a.lines, nil)
-		}
+	wrapped := buffer.Wrap([]buffer.Span{buffer.NewSpan(string(a.ed.text), styles.text)}, r.W)
+	ranges := wrapped.Ranges
+	if len(ranges) == 0 {
+		// An empty area still occupies a row, and that row is where the caret
+		// is. Wrap returns no lines for text with nothing in it, which is right
+		// for a paragraph and wrong for an editable one.
+		ranges = []buffer.LineRange{{}}
+	}
+	for _, rg := range ranges {
+		a.starts = append(a.starts, rg.Start)
+		a.ends = append(a.ends, rg.End)
+		a.lines = append(a.lines, nil)
 	}
 
 	for i := range a.lines {
@@ -300,25 +295,6 @@ func (a *TextArea) rebuild(r buffer.Rect, styles areaStyles) {
 			a.lines[last] = append(a.lines[last], buffer.NewSpan(" ", styles.cursor))
 		}
 	}
-}
-
-// logicalLines splits text at every newline and returns the rune range of each
-// piece between them, as [start, end) pairs.
-//
-// The ranges are what lets every other operation in this widget speak in rune
-// indices while the display speaks in visual lines: a wrapped line is found by
-// locating the logical line containing the caret and then counting wrapped
-// sub-lines within it.
-func logicalLines(text []rune) [][2]int {
-	var out [][2]int
-	start := 0
-	for i, r := range text {
-		if r == '\n' {
-			out = append(out, [2]int{start, i})
-			start = i + 1
-		}
-	}
-	return append(out, [2]int{start, len(text)})
 }
 
 // lineEnd returns the rune index just past line i's content, which is where the
@@ -619,57 +595,6 @@ func (a *TextArea) pageTarget(delta int) int {
 		return 0
 	}
 	return a.runeAt(target, col)
-}
-
-// lineBounds derives, for each wrapped line, the rune index it starts at and the
-// index just past its last rune — without re-implementing Wrap's breaking rules.
-//
-// It works from the one property Wrap's contract guarantees: the only runes Wrap
-// ever omits are the single space it consumes at a break, and that space
-// therefore sits exactly at the boundary between two lines. So line i covers
-// runes [starts[i], ends[i]), and the next line starts after that, plus one more
-// rune if the rune at the boundary is a space.
-//
-// Both slices are returned rather than one because ends[i] is NOT starts[i+1]:
-// the consumed space lies between them, and a line drawn from the full span
-// would show a trailing space the wrap had deliberately removed.
-//
-// Deriving the mapping this way rather than re-wrapping the prefix up to the
-// caret is what keeps TextArea honest: a second implementation of the breaking
-// rules is precisely the drift ADR 0008 §2 forbids, and it would disagree with
-// Wrap the first time Wrap changed.
-//
-// Zero-width runes are not counted, because Wrap drops them while flattening —
-// so the count taken from the lines and the index taken from the text stay in
-// step even for text carrying combining marks.
-func lineBounds(lines [][]buffer.Span, segStart, segEnd int, text []rune) (starts, ends []int) {
-	starts = make([]int, len(lines))
-	ends = make([]int, len(lines))
-	pos := segStart
-	for i, line := range lines {
-		n := lineRuneCount(line)
-		starts[i] = pos
-		ends[i] = pos + n
-		pos += n
-		if i+1 < len(lines) && pos < segEnd && text[pos] == ' ' {
-			pos++
-		}
-	}
-	return starts, ends
-}
-
-// lineRuneCount returns how many runes of the original text a wrapped line
-// accounts for, counting only the ones that occupy a cell.
-func lineRuneCount(line []buffer.Span) int {
-	n := 0
-	for i := range line {
-		for _, r := range line[i].Text {
-			if buffer.RuneWidth(r) > 0 {
-				n++
-			}
-		}
-	}
-	return n
 }
 
 // TextArea is a Widget, a Focusable and a Minimizable.

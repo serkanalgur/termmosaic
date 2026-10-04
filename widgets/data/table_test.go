@@ -386,3 +386,40 @@ func (t *Table) maxColOffsetForTest() int { return t.maxColOffset }
 // maxCellsForTest exposes the same ceiling in CELL terms, which is the unit that
 // decides how much of the content is reachable.
 func (t *Table) maxCellsForTest() int { return t.maxCells }
+
+// TestTableWideColumnIsMarkedRatherThanBleedingIntoTheFrame is the range-clip
+// contract end to end for a column wider than the whole viewport: the column is
+// drawn inside its own range with the marker in the last cell of that range, and
+// nothing lands on the scrollbar or the border beside it.
+//
+// It goes through buffer.SetSpansWindowIn — the writer a horizontally scrolled
+// column uses — and the scrolled-skip case it also serves is covered in buffer's
+// own tests, because the Table's cell offset always lands on a column start, so a
+// partially scrolled column is not reachable from here.
+func TestTableWideColumnIsMarkedRatherThanBleedingIntoTheFrame(t *testing.T) {
+	tb := NewTable(buffer.Rect{X: 0, Y: 0, W: 18, H: 5}, named("ID", 4), sized("STATE"))
+	tb.Header = true
+	body := make([]Row, 2)
+	for i := range body {
+		body[i] = Row{Cells: []Cell{
+			{Text: fmt.Sprintf("r%d", i)},
+			{Text: "state-running-long-and-then-some"},
+		}}
+	}
+	tb.SetRows(body)
+	tb.Block().SetBorder(buffer.BorderPlain)
+
+	got := rows(t, 18, 5, tb)
+	for _, y := range []int{2, 3} {
+		line := inner(got, y)
+		if !strings.Contains(line, buffer.TruncSuffix) {
+			t.Errorf("row %d shows no truncation marker although the column is wider than the viewport: %q", y, line)
+		}
+		if strings.Contains(line, "state-running-long-and-then-some") {
+			t.Errorf("row %d shows the whole value although the column is cut: %q", y, line)
+		}
+		// The frame survives: a marker painted over the border would be the bug
+		// this test exists for.
+		wantFramed(t, got, y)
+	}
+}

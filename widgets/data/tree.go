@@ -681,7 +681,7 @@ func (t *Tree) drawRow(dst *buffer.Buffer, row buffer.Rect, i int) {
 		}
 	}
 	dst.SetCell(x, row.Y, st.Resolved().Cell(glyph))
-	drawSpansCapped(dst, x+expanderW, row.Right(), row.Y, t.labels[node], t.mark)
+	dst.SetSpansCappedIn(x+expanderW, row.Right(), row.Y, t.labels[node], t.mark)
 }
 
 // drawScrollbar paints the vertical position thumb, as in List and Table.

@@ -297,3 +297,90 @@ func TestTextAreaMinSizeIsIndependentOfState(t *testing.T) {
 		t.Errorf("MinSize = %+v, want at least 1x1", empty)
 	}
 }
+
+// TestTextAreaBlankLinesAndTrailingNewlineOccupyRows is the line-structure half of
+// the wrap contract, end to end. A paragraph break the reader typed is content: it
+// takes a row, and the row after a trailing newline is where the caret sits. A
+// wrap that dropped either would silently delete the user's paragraph breaks and
+// pull the caret back onto the line above.
+//
+// The wrap is buffer.Wrap's, not this widget's: the area hands the whole text over
+// and reads the line→rune mapping back out of buffer.Wrapped.Ranges.
+func TestTextAreaBlankLinesAndTrailingNewlineOccupyRows(t *testing.T) {
+	t.Run("blank line between text", func(t *testing.T) {
+		area := NewTextAreaString(buffer.Rect{W: 10, H: 4}, "ab\n\ncd")
+		got := screenRows(t, 10, 4, area)
+		wantRow(t, got, 0, "ab")
+		wantRow(t, got, 1, "")
+		wantRow(t, got, 2, "cd")
+		if n := area.LineCount(); n != 3 {
+			t.Errorf("LineCount = %d, want 3: a blank line is a row", n)
+		}
+	})
+
+	t.Run("trailing newline opens a row", func(t *testing.T) {
+		area := NewTextAreaString(buffer.Rect{W: 10, H: 4}, "ab\n")
+		area.SetFocused(true)
+		got := screenRows(t, 10, 4, area)
+		wantRow(t, got, 0, "ab")
+		wantRow(t, got, 1, "")
+		if n := area.LineCount(); n != 2 {
+			t.Fatalf("LineCount = %d, want 2: the caret sits on the row the newline opened", n)
+		}
+		area.SetCursor(3) // the end of the text, on the row the newline opened
+		if got := area.Cursor(); got != 3 {
+			t.Errorf("cursor = %d, want 3, the end of the text", got)
+		}
+		// Home from that row goes to the row's own start, which is the index just
+		// after the newline — the mapping has to place it there and not on the
+		// line above.
+		press(t, area, "\x1b[H") // home
+		if got := area.Cursor(); got != 3 {
+			t.Errorf("after home on the last line: cursor = %d, want 3", got)
+		}
+		press(t, area, "\x1b[A") // up
+		if got := area.Cursor(); got != 0 {
+			t.Errorf("after up from the blank row: cursor = %d, want 0", got)
+		}
+	})
+
+	t.Run("an empty area still has a row", func(t *testing.T) {
+		area := NewTextArea(buffer.Rect{W: 10, H: 3})
+		got := screenRows(t, 10, 3, area)
+		wantRow(t, got, 0, "")
+		if n := area.LineCount(); n != 1 {
+			t.Errorf("LineCount = %d, want 1: the caret needs a row to sit on", n)
+		}
+	})
+}
+
+// TestTextAreaCaretMappingCountsZeroWidthRunes is the reason the wrap owns the
+// line→rune mapping. A combining mark occupies no cell, so a derivation that
+// counted the runes that reached a cell would be one short from the mark onwards
+// and every caret position after it would be wrong.
+func TestTextAreaCaretMappingCountsZeroWidthRunes(t *testing.T) {
+	const text = "ab́ cd" // "ab", a combining acute, " cd"
+	area := NewTextAreaString(buffer.Rect{W: 10, H: 2}, text)
+	area.SetFocused(true)
+	area.Draw(buffer.NewBuffer(10, 2)) // build the wrap cache
+
+	if got := area.Len(); got != 6 {
+		t.Fatalf("Len = %d, want 6: the combining mark is a rune of the content", got)
+	}
+	// The line is the whole text, so End-of-line is the end of the content — five
+	// runes in, not four.
+	area.SetCursor(area.Len())
+	press(t, area, "\x1b[F") // end
+	if got := area.Cursor(); got != area.Len() {
+		t.Errorf("after end: cursor = %d, want %d", got, area.Len())
+	}
+	// The mark is inside the line's range, so backspace removes the mark rather
+	// than the character before it.
+	if got := area.Text(); got != text {
+		t.Fatalf("setup: text = %q, want %q", got, text)
+	}
+	press(t, area, "\x7f") // backspace
+	if got, want := area.Text(), "ab́ c"; got != want {
+		t.Errorf("after one backspace: text = %q, want %q", got, want)
+	}
+}

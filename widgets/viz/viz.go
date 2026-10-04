@@ -113,96 +113,20 @@ const (
 	minBarH = 1
 )
 
-// drawSpans writes spans left to right on row y between x0 and x1, stopping
-// before x1, and returns the column it stopped at.
-//
-// It is the clipped, allocation-free counterpart of buffer.SetSpans, which stops
-// at the BUFFER's right edge rather than at a widget's. A measurement widget's
-// label must not be able to spill into its neighbour, and buffer.SetSpans cannot
-// express that.
-//
-// The wide-glyph rules are buffer's: zero-width runes are dropped, a double-width
-// rune is written as a glyph cell plus a buffer.ContinuationCell in the SAME
-// style, and a rune that does not fit ends the run.
-func drawSpans(buf *buffer.Buffer, x0, x1, y int, spans []buffer.Span) int {
-	if x1 <= x0 {
-		return x0
-	}
-	x := x0
-	for i := range spans {
-		if x >= x1 {
-			return x
-		}
-		st := spans[i].Style.Resolved()
-		for _, r := range spans[i].Text {
-			w := buffer.RuneWidth(r)
-			switch {
-			case w == 0:
-			case x+w > x1:
-				return x
-			case w == 2:
-				buf.SetCell(x, y, st.Cell(r))
-				buf.SetCell(x+1, y, buffer.ContinuationCell(st))
-			default:
-				buf.SetCell(x, y, st.Cell(r))
-			}
-			x += w
-		}
-	}
-	return x
-}
-
-// drawSpansCapped writes spans into the cells [x0, x1) and, when the content is
-// wider, ends with the one-cell truncation marker in the final cell. It returns the
-// column just past what it wrote, so a caller can continue after a clipped run.
-//
-// It is the allocation-free counterpart of buffer.Truncate for the frame path,
-// with the same rules: the marker takes the style of the last span, content that
-// already fits is drawn whole, and a double-width rune is never split.
-func drawSpansCapped(buf *buffer.Buffer, x0, x1, y int, spans []buffer.Span, mark rune) int {
-	if x1 <= x0 {
-		return x0
-	}
-	if buffer.SpansWidth(spans) <= x1-x0 {
-		return drawSpans(buf, x0, x1, y, spans)
-	}
-	if x1-x0 == 1 {
-		buf.SetCell(x0, y, lastSpanStyle(spans).Resolved().Cell(mark))
-		return x1
-	}
-	drawSpans(buf, x0, x1-1, y, spans)
-	buf.SetCell(x1-1, y, lastSpanStyle(spans).Resolved().Cell(mark))
-	return x1
-}
-
-// drawText writes s into the cells [x0, x1) on row y in st and returns the column
-// it stopped at.
-func drawText(buf *buffer.Buffer, x0, x1, y int, s string, st buffer.Style) int {
-	var one [1]buffer.Span
-	one[0] = buffer.NewSpan(s, st)
-	return drawSpans(buf, x0, x1, y, one[:])
-}
-
-// lastSpanStyle returns the style a truncation marker wears: that of the last
-// non-empty input span.
-func lastSpanStyle(spans []buffer.Span) buffer.Style {
-	for i := len(spans) - 1; i >= 0; i-- {
-		if spans[i].Text != "" {
-			return spans[i].Style
-		}
-	}
-	return buffer.DefaultStyle
-}
-
 // paintRow fills row in bg and then writes spans into it, offset by lead cells.
 // Every row-shaped widget in this package starts here, because ADR 0007 §1 rule 3
 // requires the whole rect to be repainted before content goes into it.
+//
+// The writing is buffer's SetSpansCappedIn: this function decides the row and the
+// lead cells, not how a glyph is placed. A measurement widget's label must not be
+// able to spill into its neighbour, which is why the range-clipped writers live in
+// buffer at all — they used to be copied here, once per package that needed them.
 func paintRow(buf *buffer.Buffer, row buffer.Rect, spans []buffer.Span, lead int, mark rune, bg buffer.Style) {
 	if row.Empty() {
 		return
 	}
 	buf.FillRect(row, bg.Resolved().Blank())
-	drawSpansCapped(buf, row.X+lead, row.Right(), row.Y, spans, mark)
+	buf.SetSpansCappedIn(row.X+lead, row.Right(), row.Y, spans, mark)
 }
 
 // fillRow fills row in st, which is how a bar's unfilled track is painted.

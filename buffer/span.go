@@ -162,6 +162,33 @@ func cutToWidth(s string, max int) (string, int) {
 	return s, w
 }
 
+// LineRange is where one wrapped line came from in the text that was wrapped.
+//
+// The offsets are RUNE INDICES INTO THE INPUT TEXT — the concatenation of every
+// Span's Text, walked as runes — not cell columns and not byte offsets, so
+// input[start:end] is exactly the text the line displays. That is the whole
+// point of the type: an editable widget needs to get from "the caret is on
+// visual line 3, cell column 7" back to "that is rune 41 of my buffer", and a
+// cell column cannot answer it because a double-width glyph is two cells and
+// one rune.
+//
+// The two offsets bracket the line's runes and EXCLUDE anything the wrap
+// consumed at the break: the one U+0020 SPACE a soft break ate, or the one
+// U+000A NEWLINE a hard break ate. So End is never Start of the next line, and
+// the runes between them are precisely what the wrap dropped. A line is empty
+// when Start == End.
+type LineRange struct {
+	// Start is the input rune index of the line's first rune. For an empty line
+	// it is the index the line's content would have begun at, which is the
+	// newline that ended it.
+	Start int
+	// End is the input rune index just past the line's last rune, including any
+	// zero-width runes trailing it before the next placed rune or the end of the
+	// input. On the last line it is the input's total rune count, so End is always
+	// a valid insertion point rather than a guess.
+	End int
+}
+
 // Wrapped is the result of Wrap: styled lines, ready to index.
 //
 // It is immutable once built and safe to cache on a widget. The Width field is
@@ -169,9 +196,21 @@ func cutToWidth(s string, max int) (string, int) {
 // was built for against the width it now has — that comparison is ADR 0007 §3's
 // rect-keyed cache, and this type supports it rather than reinventing it.
 type Wrapped struct {
-	// Lines holds each line as a slice of spans. A line is never empty; a Wrap
-	// that would produce one (a dropped wide glyph with nowhere to go) omits it.
+	// Lines holds each line as a slice of spans, and Ranges holds the matching
+	// LineRange for each: len(Ranges) == len(Lines), and both are indexed by the
+	// same visual line. A consumer that needs to address the source text — an
+	// editable widget moving a caret — reads Ranges rather than re-deriving the
+	// mapping from the consumed-space rule, which is a second implementation of
+	// Wrap's breaking rules and therefore a copy that drifts.
+	//
+	// A blank logical line is a NIL line rather than a zero-length slice, so it
+	// costs no allocation and reads as "no spans" to every consumer already
+	// written. The one line Wrap omits ENTIRELY — no line and no range, so the two
+	// stay in step — is the one a dropped wide glyph left with nowhere to go; see
+	// Wrap's contract.
 	Lines [][]Span
+	// Ranges[i] is where Lines[i] came from in the input text.
+	Ranges []LineRange
 	// Width is the column width Wrap was given, echoed back for the size check.
 	Width int
 }
@@ -190,16 +229,46 @@ func (w Wrapped) Line(i int) []Span {
 	return w.Lines[i]
 }
 
+// Range returns where line i came from in the input text, or the zero LineRange
+// if i is out of range. Like Line it never panics; a zero range is simply an
+// empty span at the start of the text, which is what a caller with no lines
+// should treat as "nothing is addressable".
+func (w Wrapped) Range(i int) LineRange {
+	if i < 0 || i >= len(w.Ranges) {
+		return LineRange{}
+	}
+	return w.Ranges[i]
+}
+
 // Wrap breaks spans into lines of at most width cells, preserving each rune's
 // style.
 //
-// IT ALLOCATES. Lines and every Line are new slices. Build it in the widget's
-// constructor for static text, or in its size-change check for reflowing text,
-// cache it against the rect it was computed for, and have Draw only index it.
-// Calling Wrap inside Draw allocates every frame and is the failure mode this
+// IT ALLOCATES. Lines, Ranges and every Line are new slices. Build it in the
+// widget's constructor for static text, or in its size-change check for reflowing
+// text, cache it against the rect it was computed for, and have Draw only index
+// it. Calling Wrap inside Draw allocates every frame and is the failure mode this
 // doc comment exists to prevent (ADR 0008 §4).
 //
+// Wrap is the ONE entry point for wrapping, for one reason: an earlier draft
+// dropped U+000A while flattening and every caller wanting line structure had to
+// split the text and concatenate the results. That is silent mangling at every
+// call site, so newline handling moved here. There is deliberately no
+// WrapSingleLine and no "honour newlines" flag — a flag is unreadable at the
+// call site (`Wrap(spans, w, true)` says nothing about which is correct) and a
+// second function leaves the wrong one reachable with the same signature.
+//
 // The rules, all of which are the contract:
+//   - U+000A NEWLINE is a HARD BREAK. It ends the line whatever the width says
+//     and it is consumed, so it appears in no line's spans; it sits in the gap
+//     between one line's End and the next line's Start, exactly like the space a
+//     soft break eats.
+//   - A BLANK LOGICAL LINE IS ONE EMPTY LINE, not no line. Splitting text on
+//     newlines yields a line per piece, so "a\n\nb" is three lines and "a\n" is
+//     two (the trailing newline opens a final empty line). A paragraph's blank
+//     lines are content: dropping them would silently reflow everything below
+//     them up one row. The one line Wrap still omits is the one a dropped
+//     double-width glyph left empty (see below), which emits no line AND no
+//     range.
 //   - The ONLY break opportunity in v1 is U+0020 SPACE. No hyphen breaks, no
 //     CJK boundary breaks, no slash breaks.
 //   - A span boundary is NOT a break opportunity. Break opportunities are
@@ -213,11 +282,14 @@ func (w Wrapped) Line(i int) []Span {
 //   - A double-width glyph is never split. One that does not fit the remaining
 //     cells is dropped and the line ends; if that leaves the line empty the line
 //     is omitted from Lines entirely.
-//   - Zero-width runes (combining marks) are DROPPED, matching SetSpans and
-//     RuneWidth's documented lack of grapheme composition. This ADR inherits
-//     that limitation rather than half-solving it: a mark is not attached to the
-//     preceding span, because each cell is written independently and it would
-//     not render anyway.
+//   - Zero-width runes (combining marks) are DROPPED from the spans, matching
+//     SetSpans and RuneWidth's documented lack of grapheme composition. This ADR
+//     inherits that limitation rather than half-solving it: a mark is not
+//     attached to the preceding span, because each cell is written independently
+//     and it would not render anyway. They are COUNTED in Ranges, because an
+//     offset into the caller's text that skipped them would address the wrong
+//     rune from the first mark onwards.
+//   - Empty input returns a Wrapped with no Lines, Height() == 0 and no Ranges.
 //   - width <= 0 returns a Wrapped with no Lines and Height() == 0. It never
 //     panics.
 //   - Runes sharing a style are merged into one span within a line, compared by
@@ -225,21 +297,72 @@ func (w Wrapped) Line(i int) []Span {
 //     as values (HeadingStyle and Style{Attr: AttrBold | AttrUnderline}) stay
 //     separate spans, because merging is a cosmetic detail and resolving here
 //     would bake the terminal defaults into a cached value.
+//
+// # Offsets
+//
+// Ranges is part of the result rather than something a widget re-derives. Its
+// offsets are rune indices into the input text (the spans' Text concatenated and
+// walked as runes), counting every rune including the zero-width ones the spans
+// dropped. Lines[i] is the display of input[Ranges[i].Start:Ranges[i].End] with
+// the zero-width runes removed, and Ranges[i+1].Start is Ranges[i].End plus the
+// rune the break consumed — a space, a newline, or nothing at all. The runes no
+// line owns are therefore exactly: the consumed break rune, the dropped
+// zero-width runes, and any glyph too wide for the line it would have gone on,
+// which only happens in a one-column area. An editable widget can address its own
+// buffer with these numbers without knowing anything about the breaking rules.
 func Wrap(spans []Span, width int) Wrapped {
 	out := Wrapped{Width: width}
 	if width <= 0 {
 		return out
 	}
 
-	flat := flatten(spans)
+	flat, total := flatten(spans)
 	if len(flat) == 0 {
 		return out
 	}
 
+	// srcAt converts a position in flat into a rune index in the caller's text.
+	// It is the single place the wrap turns a break decision into an offset, so
+	// there is no second arithmetic to keep in step with it.
+	srcAt := func(k int) int {
+		if k >= len(flat) {
+			return total
+		}
+		return flat[k].src
+	}
+
+	// emitFlat records the line covering flat[a:b]. Its extent is exactly the
+	// runes it displays: a line never claims a rune it does not show, which is
+	// what makes Ranges usable as the answer to "which of my text is on line i".
+	// The runes the wrap could not place or consumed — a dropped wide glyph, a
+	// dropped combining mark, a break space, a newline — belong to no line, and lie
+	// in the gap between two lines, before the first one or after the last.
+	//
+	// An empty extent therefore reports the position of the newline that ended the
+	// logical line, which is the one caret index that belongs on a blank row.
+	emitFlat := func(a, b int) {
+		var line []Span
+		if b > a {
+			line = buildLine(flat[a:b])
+		}
+		out.Lines = append(out.Lines, line)
+		out.Ranges = append(out.Ranges, LineRange{Start: srcAt(a), End: srcAt(b)})
+	}
+
 	i := 0
+	trailingBreak := false
 	for i < len(flat) {
 		lineStart, lineW, lastSpace := i, 0, -1
+		hard := false
 		for i < len(flat) {
+			if flat[i].r == '\n' {
+				// A newline ends the line wherever it falls, and is consumed, so
+				// it is in no line and the next line starts after it. Checked
+				// before the width test: a newline is zero-width, so the width
+				// test would never stop on one.
+				hard = true
+				break
+			}
 			w := RuneWidth(flat[i].r)
 			if lineW+w > width {
 				break
@@ -252,13 +375,19 @@ func Wrap(spans []Span, width int) Wrapped {
 		}
 
 		switch {
+		case hard:
+			emitFlat(lineStart, i)
+			trailingBreak = true
+			i++
+
 		case i < len(flat) && flat[i].r == ' ':
 			// The rune that does not fit is itself a space. That space caused the
 			// break, so it is consumed: emit the line as it stands and resume
 			// after the space. This case has to come before the lastSpace case,
 			// because a space that ran out of room was never recorded as a break
 			// opportunity and would otherwise lead the next line.
-			out.Lines = append(out.Lines, buildLine(flat[lineStart:i]))
+			emitFlat(lineStart, i)
+			trailingBreak = false
 			i++
 
 		case i < len(flat) && lastSpace > lineStart:
@@ -270,19 +399,30 @@ func Wrap(spans []Span, width int) Wrapped {
 			// The i < len(flat) guard is load-bearing: when the text ran out
 			// rather than the width running out, the last space in the line is
 			// just text, and breaking there would silently drop it.
-			out.Lines = append(out.Lines, buildLine(flat[lineStart:lastSpace]))
+			emitFlat(lineStart, lastSpace)
+			trailingBreak = false
 			i = lastSpace + 1
 
 		case i > lineStart:
 			// The text ended. Everything from lineStart to i fits.
-			out.Lines = append(out.Lines, buildLine(flat[lineStart:i]))
+			emitFlat(lineStart, i)
+			trailingBreak = false
 
 		case i < len(flat):
 			// Nothing on this line fits at all: the rune at i is wider than the
 			// whole width (only possible for a double-width glyph in a one-column
 			// area). Drop it and omit the line, per the contract above.
+			trailingBreak = false
 			i++
 		}
+	}
+	if trailingBreak {
+		// The text ended with a newline, so it opened a final empty logical
+		// line. That line is content: in an editable widget the caret sits on it
+		// after the last Enter, and dropping it would put the caret back on the
+		// line above. Empty input never reaches here (flat is empty and returns
+		// above), so this is exactly the "text ends in a newline" case.
+		emitFlat(len(flat), len(flat))
 	}
 	return out
 }
@@ -293,25 +433,37 @@ func Wrap(spans []Span, width int) Wrapped {
 type flatRune struct {
 	r  rune
 	st Style
+	// src is this rune's index in the INPUT text, as a rune index — the basis
+	// Ranges is expressed in. It advances for every input rune, including the
+	// zero-width ones dropped below, which is what keeps the offsets usable
+	// against the caller's own buffer.
+	src int
 }
 
-// flatten concatenates spans into one rune sequence, dropping zero-width runes.
-// It is the first of Wrap's two allocations.
-func flatten(spans []Span) []flatRune {
+// flatten concatenates spans into one rune sequence, dropping zero-width runes,
+// and returns it with the input's total rune count.
+//
+// A newline is the exception to "drop the zero-width runes": it is zero-width but
+// it is structure, so it is kept as a hard-break marker. The total is returned
+// because the end of the text is a position no flatRune carries.
+func flatten(spans []Span) ([]flatRune, int) {
 	n := 0
 	for i := range spans {
 		n += len(spans[i].Text)
 	}
 	flat := make([]flatRune, 0, n)
+	src := 0
 	for i := range spans {
 		for _, r := range spans[i].Text {
-			if RuneWidth(r) == 0 {
+			if RuneWidth(r) == 0 && r != '\n' {
+				src++
 				continue
 			}
-			flat = append(flat, flatRune{r: r, st: spans[i].Style})
+			flat = append(flat, flatRune{r: r, st: spans[i].Style, src: src})
+			src++
 		}
 	}
-	return flat
+	return flat, src
 }
 
 // buildLine turns a run of flattened runes into a line of spans, merging

@@ -344,7 +344,7 @@ func (c *BarChart) drawHorizontal(buf *buffer.Buffer) {
 		c.drawBar(buf, bar, d)
 		if c.labelW > 2 {
 			row := buffer.Rect{X: c.axisRow.X, Y: y, W: c.labelW - 2, H: 1}
-			drawSpansCapped(buf, row.X, row.Right(), y, []buffer.Span{buffer.NewSpan(d.Label, c.LabelStyle)}, c.mark)
+			buf.SetSpansCappedIn(row.X, row.Right(), y, []buffer.Span{buffer.NewSpan(d.Label, c.LabelStyle)}, c.mark)
 		}
 		// The value sits at the end of the bar when there is room for it, which is
 		// the reading a dashboard is scanned for.
@@ -385,7 +385,7 @@ func (c *BarChart) drawAxis(buf *buffer.Buffer) {
 			lw = w
 		}
 		lx := x + geometry.AlignCenter.Offset(w, lw)
-		drawSpansCapped(buf, x, row.Right(), row.Y, []buffer.Span{buffer.NewSpan(d.Label, c.LabelStyle)}, c.mark)
+		buf.SetSpansCappedIn(x, row.Right(), row.Y, []buffer.Span{buffer.NewSpan(d.Label, c.LabelStyle)}, c.mark)
 		_ = lx
 		x += w
 	}
