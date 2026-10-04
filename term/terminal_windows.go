@@ -45,6 +45,17 @@ func ErrWindowsStub() error { return errWindows }
 // report a readable error, rather than failing with a message the user cannot
 // act on.
 func Open(in, out *os.File, getenv func(string) string) (*WindowsTerminal, error) {
+	// The same nil checks as the Unix backend. Open is one API with two
+	// implementations, so it must reject the same inputs on both; the Windows
+	// stub is a stub for console *operations*, not for argument validation, and
+	// validating nothing here made the shared test in term_test.go fail on
+	// Windows while passing everywhere else.
+	if in == nil {
+		return nil, errors.New("termmosaic: nil input file")
+	}
+	if out == nil {
+		return nil, errors.New("termmosaic: nil output file")
+	}
 	if getenv == nil {
 		getenv = os.Getenv
 	}
