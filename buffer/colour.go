@@ -25,6 +25,23 @@ const DefaultColour Colour = 0xFFFFFFFF
 // IsDefault reports whether c is the "use the terminal default" sentinel.
 func (c Colour) IsDefault() bool { return c == DefaultColour }
 
+// UnsetColour is the "this channel was not specified" marker, understood by
+// Style.Patch and Style.Resolved. Like DefaultColour it sits outside the
+// 0x00RRGGBB space, so it can never compare equal to a real colour — and it is
+// a different value from DefaultColour, so "inherit" and "the terminal's own
+// colour" stay distinguishable.
+//
+// Its existence is what lets Style.Patch work. Without it a colour has no way
+// to say "inherit", because Colour(0) is a real colour: opaque black.
+//
+// A Colour holding UnsetColour must never be written into a Cell. Resolve it
+// first (Style.Resolved) or the encoder would quantise the marker as if it were
+// an RGB value.
+const UnsetColour Colour = 0xFFFFFFFE
+
+// IsUnset reports whether c is the inherit marker.
+func (c Colour) IsUnset() bool { return c == UnsetColour }
+
 // NewColour returns the Colour for an 8-bit-per-channel RGB triple.
 func NewColour(r, g, b uint8) Colour {
 	return Colour(uint32(r)<<16 | uint32(g)<<8 | uint32(b))

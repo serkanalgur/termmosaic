@@ -152,27 +152,96 @@ func (b *Buffer) CellAt(x, y int) Cell {
 	return *b.at(x, y)
 }
 
-// Set is a convenience wrapper for writing a styled rune at (x, y).
-func (b *Buffer) Set(x, y int, r rune, fg, bg Colour, attr Attr) {
-	b.SetCell(x, y, NewCell(r, fg, bg, attr))
+// Set writes r at (x, y) in st. Out-of-range coordinates are silently ignored,
+// so a widget is never crashed by a layout rounding error.
+//
+// st is written verbatim: an unset Style produces a cell in the literal zero
+// style, which is Style's documented footgun rather than something Set papers
+// over. Read the style through Resolved first.
+func (b *Buffer) Set(x, y int, r rune, st Style) {
+	b.SetCell(x, y, st.Cell(r))
 }
 
-// SetString writes s starting at (x, y) and returns the x coordinate just past
-// the last cell written.
+// SetString writes s starting at (x, y) in st and returns the x coordinate just
+// past the last cell written.
 //
-// It is wide-character aware: a double-width rune consumes two cells, and the
-// second is written as a continuation cell so that the pair compares equal to
-// the previous frame and the row skip still fires. A rune that would straddle
-// the right edge is not written at all, because there is no partial glyph.
+// It is SetSpans of one span; it exists because uniform text is the common case
+// and one span should not cost a slice. Wide-character behaviour is exactly
+// SetSpans', including the continuation half carrying the same style.
 //
-// Writing a continuation cell directly is impossible; SetString owns that
-// state.
-func (b *Buffer) SetString(x, y int, s string, fg, bg Colour, attr Attr) int {
+// Writing a continuation cell directly is impossible; SetSpans and SetString own
+// that state.
+func (b *Buffer) SetString(x, y int, s string, st Style) int {
+	if y < 0 || y >= b.h {
+		return x
+	}
+	cx, _ := b.setSpan(x, y, s, st.Resolved())
+	return cx
+}
+
+// SetSpans writes spans left to right on row y starting at x, in each span's own
+// style, and returns the x coordinate just past the last cell written.
+//
+// It writes ONE row. Wrapping is not this function's job: the caller wraps with
+// Wrap, caches the result against its rect (ADR 0007 §3) and writes one line per
+// row. That split is what keeps wrapping cacheable and Draw allocation-free.
+//
+// Rules, all of which are the contract:
+//   - A span's Style is resolved through Resolved exactly once, on entry. An
+//     unset span style is DefaultStyle.
+//   - A double-width rune writes two cells and the continuation half takes THE
+//     SAME SPAN'S STYLE. Never the next span's. A mismatched continuation cell
+//     does not compare equal to the previous frame, the row skip never fires,
+//     and the row flickers on every frame forever.
+//   - A double-width rune that does not fit before the right edge is not written
+//     and the function returns. Half a glyph is worse than none.
+//   - Zero-width runes are DROPPED, matching SetString's long-standing behaviour
+//     and RuneWidth's documented lack of grapheme composition. A combining mark
+//     is not attached to the preceding span, because each cell is written
+//     independently and it would not render anyway.
+//   - Writes outside the buffer are silently ignored, per SetCell. A negative x
+//     advances the cursor without writing, so a partially off-screen string
+//     keeps its column alignment.
+//
+// 0 allocations. It takes a slice and never builds one.
+func (b *Buffer) SetSpans(x, y int, spans []Span) int {
 	if y < 0 || y >= b.h {
 		return x
 	}
 	cx := x
-	for _, r := range s {
+	for i := range spans {
+		if cx >= b.w {
+			// The row is full and there is nothing more this call can do. The
+			// contract is that the function returns rather than the caller
+			// inspecting the remaining spans.
+			return cx
+		}
+		next, stopped := b.setSpan(cx, y, spans[i].Text, spans[i].Style.Resolved())
+		cx = next
+		if stopped {
+			// A wide glyph did not fit. The whole run ends here, not just this
+			// span: continuing into the next one would put text after a gap that
+			// the reader cannot account for.
+			return cx
+		}
+	}
+	return cx
+}
+
+// setSpan writes one run of text on row y starting at x, in an already-resolved
+// style st. It returns the x coordinate just past the last cell written and
+// whether the run stopped early because the row ran out.
+//
+// It is the shared body of SetString and SetSpans. Keeping it as one function
+// rather than two copies is the point: the wide-glyph rules below are the part
+// of this code that thirty widgets would each get wrong, so there must be one
+// implementation of them, not one per entry point.
+//
+// stopped is separate from cx so that SetSpans can end the WHOLE run on a
+// dropped wide glyph rather than resuming at the next span.
+func (b *Buffer) setSpan(x, y int, text string, st Style) (cx int, stopped bool) {
+	cx = x
+	for _, r := range text {
 		w := RuneWidth(r)
 		switch w {
 		case 0:
@@ -185,30 +254,26 @@ func (b *Buffer) SetString(x, y int, s string, fg, bg Colour, attr Attr) int {
 			// is worse than none, and the row would otherwise be left with an
 			// unpaired cell that differs from the previous frame forever.
 			if cx+1 >= b.w {
-				return cx
+				return cx, true
 			}
 			if cx >= 0 {
-				*bufCell(b, cx, y) = NewCell(r, fg, bg, attr)
-				*bufCell(b, cx+1, y) = NewCell(continuationRune, fg, bg, attr).asContinuation()
+				// Both halves take THIS span's resolved style. See SetSpans.
+				*b.at(cx, y) = st.Cell(r)
+				*b.at(cx+1, y) = st.Cell(continuationRune).asContinuation()
 			}
 			cx += 2
 		default:
 			if cx >= b.w {
-				return cx
+				return cx, true
 			}
 			if cx >= 0 {
-				*bufCell(b, cx, y) = NewCell(r, fg, bg, attr)
+				*b.at(cx, y) = st.Cell(r)
 			}
 			cx++
 		}
 	}
-	return cx
+	return cx, false
 }
-
-// bufCell returns a pointer to (x, y) without bounds checking, for use from
-// SetString which has already validated the coordinates. It exists so the wide
-// path is stride-correct on sub-buffers too.
-func bufCell(b *Buffer, x, y int) *Cell { return b.at(x, y) }
 
 // Fill writes c to every cell in the buffer and marks the whole buffer dirty.
 func (b *Buffer) Fill(c Cell) {

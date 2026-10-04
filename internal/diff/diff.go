@@ -193,7 +193,7 @@ func (d *Differ) Diff(f Frame) []byte {
 					d.out = ansi.AppendCursorPosition(d.out, y+1, x+1)
 				}
 
-				style := ansi.StyleOf(cur)
+				style := cur.Style()
 				if !d.haveStyle {
 					// We do not know what the terminal is in, so restate the
 					// whole style rather than guessing a delta.

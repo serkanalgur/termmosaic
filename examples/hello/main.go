@@ -14,10 +14,13 @@
 // scan for 'q' this example used before ADR 0005. Everything about how those
 // bytes got decoded is the input package's business, not the example's.
 //
-// Note what this example does not use: the widget catalog is empty at this stage
-// of the project. The block is drawn by direct buffer writes on purpose, because
-// this example is the foundation layer and widgets get built against it later.
-// The drawing code is therefore an example, not a reusable widget.
+// Note what this example does not use: the widget catalog is still empty at this
+// stage of the project, and in particular there is no Block yet. The border and
+// title are drawn here by direct buffer writes, but they draw NO runes of their
+// own and invent NO thresholds of their own — every glyph comes from
+// buffer.BorderStyle and every style from buffer.NewStyle, which is ADR 0008's
+// vocabulary. The catalog's Block will own borders and titles properly; until
+// then this is where the example shows the vocabulary being used.
 package main
 
 import (
@@ -33,8 +36,9 @@ import (
 	"github.com/serkanalgur/termmosaic/term"
 )
 
-// Palette for the example. These are plain colour values, not a theme: the theme
-// and styling system is still an OPEN decision in STATUS.md.
+// The example's palette: four plain colours. This is an application's styling
+// decision, which is where ADR 0008 puts it — the framework ships no default
+// colours at all, only attribute-only named styles.
 var (
 	bg      = buffer.NewColour(0x10, 0x14, 0x1c)
 	fg      = buffer.NewColour(0xd8, 0xdc, 0xe4)
@@ -43,10 +47,39 @@ var (
 	edge    = buffer.NewColour(0x30, 0x36, 0x40)
 )
 
+// The styles the example draws with, each built through NewStyle rather than a
+// composite literal: a partial literal would silently leave a channel at opaque
+// black, which is Style's documented footgun.
+var (
+	stBody   = buffer.NewStyle(fg, bg, 0)
+	stMuted  = buffer.NewStyle(dim, bg, 0)
+	stValue  = buffer.NewStyle(fg, bg, 0)
+	stAccent = buffer.NewStyle(titleFg, bg, 0)
+	stTitle  = buffer.NewStyle(titleFg, bg, buffer.AttrBold)
+	stEdge   = buffer.NewStyle(edge, bg, 0)
+)
+
 // blockW and blockH are the example's block size in cells.
 const (
 	blockW = 46
 	blockH = 9
+)
+
+// The border's minimum size, in cells. ADR 0007 §4 is explicit that no widget
+// may assume a floor of its own; a border needs two cells on each axis, one per
+// corner.
+//
+// These stand in for the catalog's Block until it exists. ADR 0007 §1 rule 5
+// makes a threshold a local named constant, and ADR 0008 fixes these particular
+// VALUES for the whole catalog, so the example pins itself to them rather than
+// inventing its own.
+const (
+	minBorderW = 2
+	minBorderH = 2
+	// titlePad is the one space Block inserts on each side of a title. The title
+	// threshold is therefore the border threshold plus the padding plus room for
+	// one glyph: 2 + 2 + 1 = 5.
+	minTitleW = 5
 )
 
 // hello is the example's widget: a bordered block whose body changes each frame.
@@ -77,9 +110,15 @@ func (h *hello) Handle(termmosaic.Event) bool { return false }
 // demand and are not required to implement incremental drawing, because Go
 // cannot enforce invalidation discipline and silent invalidation bugs are the
 // worst failure mode a TUI has.
+//
+// It allocates nothing. Every span slice and every truncated title below is
+// built here, which is legal precisely because the title is constant: there is
+// no text derived from the widget's size, so there is nothing ADR 0007 §3 would
+// want cached. A widget with reflowing text must build its spans at construction
+// and its wrapped lines in a size-change check, never here.
 func (h *hello) Draw(buf *buffer.Buffer) {
 	r := h.bounds
-	if r.W < 4 || r.H < 4 {
+	if r.W < minBorderW || r.H < minBorderH {
 		return
 	}
 
@@ -87,62 +126,110 @@ func (h *hello) Draw(buf *buffer.Buffer) {
 	// clears: it diffs against the previous frame, so a cell that is not
 	// written keeps whatever was there. A widget that shrinks its content must
 	// therefore repaint its whole bounds, or stale cells show through.
-	buf.FillRect(r, buffer.NewCell(' ', fg, bg, 0))
+	buf.FillRect(r, stBody.Blank())
 
 	h.drawBorder(buf, r)
 	h.drawTitle(buf, r)
 	h.drawBody(buf, r)
 }
 
-// drawBorder paints the eight glyph corners and the runs between them.
+// drawBorder paints the corners and the runs between them.
 //
-// SetString would be shorter, but writing the eight cells explicitly shows
-// exactly how much work a future Border widget has to do, and keeps this example
-// honest about what the buffer API costs.
+// Every rune comes from buffer's glyph table, never from a literal here: the
+// example is not allowed to own border glyphs any more than a widget is. The
+// ASCII rung is the one boolean, and it is false because this example asks for
+// Unicode directly; a real application passes !caps.Unicode.
 func (h *hello) drawBorder(buf *buffer.Buffer, r buffer.Rect) {
-	horiz := buffer.NewCell('─', edge, bg, 0)
-	vert := buffer.NewCell('│', edge, bg, 0)
+	g := buffer.BorderPlain.Glyphs(false)
 	for x := r.X + 1; x < r.Right()-1; x++ {
-		buf.SetCell(x, r.Y, horiz)
-		buf.SetCell(x, r.Bottom()-1, horiz)
+		buf.SetCell(x, r.Y, stEdge.Cell(g.Horizontal))
+		buf.SetCell(x, r.Bottom()-1, stEdge.Cell(g.Horizontal))
 	}
 	for y := r.Y + 1; y < r.Bottom()-1; y++ {
-		buf.SetCell(r.X, y, vert)
-		buf.SetCell(r.Right()-1, y, vert)
+		buf.SetCell(r.X, y, stEdge.Cell(g.Vertical))
+		buf.SetCell(r.Right()-1, y, stEdge.Cell(g.Vertical))
 	}
-	buf.SetCell(r.X, r.Y, buffer.NewCell('┌', edge, bg, 0))
-	buf.SetCell(r.Right()-1, r.Y, buffer.NewCell('┐', edge, bg, 0))
-	buf.SetCell(r.X, r.Bottom()-1, buffer.NewCell('└', edge, bg, 0))
-	buf.SetCell(r.Right()-1, r.Bottom()-1, buffer.NewCell('┘', edge, bg, 0))
+	buf.SetCell(r.X, r.Y, stEdge.Cell(g.TopLeft))
+	buf.SetCell(r.Right()-1, r.Y, stEdge.Cell(g.TopRight))
+	buf.SetCell(r.X, r.Bottom()-1, stEdge.Cell(g.BottomLeft))
+	buf.SetCell(r.Right()-1, r.Bottom()-1, stEdge.Cell(g.BottomRight))
 }
 
-// drawTitle paints the inset title on the top border.
+// drawTitle paints the inset title over the top border.
+//
+// The title sits on the border row and overwrites it, with one space each side
+// and never spilling past the second corner: SetSpans bounds-checks per cell, so
+// a title wider than the box simply stops rather than overrunning the border.
+// Because the title never changes there is nothing here for ADR 0008 §4 to
+// forbid — a widget with reflowing text would build these spans once and cache
+// them against the rect instead.
 func (h *hello) drawTitle(buf *buffer.Buffer, r buffer.Rect) {
-	if r.W < 16 {
+	const pad = 2 // one space each side, so the glyph run is inset by two
+	if r.W < minTitleW {
 		return
 	}
-	buf.SetString(r.X+2, r.Y, " termmosaic ", titleFg, bg, buffer.AttrBold)
+	buf.SetSpans(r.X+pad, r.Y, []buffer.Span{
+		buffer.NewSpan(" ", stTitle),
+		buffer.NewSpan("termmosaic", stTitle),
+		buffer.NewSpan(" ", stTitle),
+	})
 }
 
-// drawBody paints the label/value rows.
+// drawBody paints the label/value rows. It only indexes, writes a small number
+// digit by digit and calls SetString, so the whole thing is allocation-free —
+// which is what ADR 0008 §4 requires of Draw.
 func (h *hello) drawBody(buf *buffer.Buffer, r buffer.Rect) {
 	h.ticks++
-	rows := []struct {
+	rows := [...]struct {
 		label string
 		value string
-		col   buffer.Colour
+		st    buffer.Style
 	}{
-		{"frame", fmt.Sprintf("%d", h.ticks), fg},
-		{"depth", h.depth.String(), dim},
-		{"quit", "press q", titleFg},
+		{"frame", "", stValue},
+		{"depth", h.depth.String(), stMuted},
+		{"quit", "press q", stAccent},
 	}
 	for i, row := range rows {
 		y := r.Y + 2 + i
 		if y >= r.Bottom()-1 || r.X+18 >= r.Right() {
 			break
 		}
-		buf.SetString(r.X+2, y, row.label, dim, bg, 0)
-		buf.SetString(r.X+12, y, row.value, row.col, bg, 0)
+		buf.SetString(r.X+2, y, row.label, stMuted)
+		if i == 0 {
+			// The frame counter is written digit by digit rather than formatted
+			// into a string. fmt.Sprintf allocates, and one allocation per frame
+			// is exactly what the 0-allocs draw path forbids; this is the same
+			// hazard ADR 0008 §4 names for Wrap and Truncate, one function call
+			// earlier in the pipeline.
+			h.writeInt(buf, r.X+12, y, h.ticks)
+			continue
+		}
+		buf.SetString(r.X+12, y, row.value, row.st)
+	}
+}
+
+// writeInt writes v's decimal digits left to right at (x, y) in stValue and
+// returns the x coordinate just past them. It is the allocation-free replacement
+// for fmt.Sprintf("%d", v) on the draw path.
+//
+// v is clamped at zero: a negative frame count would need a sign, and no
+// meaningful number here is negative, so the extra branch would be dead weight.
+func (h *hello) writeInt(buf *buffer.Buffer, x, y, v int) int {
+	if v < 0 {
+		v = 0
+	}
+	// Walk to the highest decimal place, then step back down emitting digits.
+	div := 1
+	for d := v / 10; d > 0; d /= 10 {
+		div *= 10
+	}
+	for {
+		buf.Set(x, y, rune('0'+v/div%10), stValue)
+		x++
+		if div == 1 {
+			return x
+		}
+		div /= 10
 	}
 }
 

@@ -48,8 +48,8 @@ func TestCellHasNoInteriorPadding(t *testing.T) {
 // consecutive cells in the backing slice are adjacent in memory with no gaps.
 func TestRowBytesAreContiguous(t *testing.T) {
 	b := NewBuffer(4, 1)
-	b.Set(0, 0, 'a', DefaultColour, DefaultColour, 0)
-	b.Set(1, 0, 'b', DefaultColour, DefaultColour, 0)
+	b.Set(0, 0, 'a', DefaultStyle)
+	b.Set(1, 0, 'b', DefaultStyle)
 	got := b.RowBytes(0, 0, 4)
 	if len(got) != 64 {
 		t.Fatalf("rowBytes len = %d, want 64", len(got))
@@ -148,18 +148,18 @@ func TestPaddingMakesByteCompareUnsound(t *testing.T) {
 // misses and the glyph flickers. Unmeasured upstream (ADR 0002 risk 2), but the
 // property is cheap to assert.
 func TestContinuationCellRoundTripsEqual(t *testing.T) {
-	c := NewCell('漢', NewColour(255, 0, 0), DefaultColour, 0).asContinuation()
-	if c == NewCell('漢', NewColour(255, 0, 0), DefaultColour, 0) {
+	wideStyle := NewStyle(NewColour(255, 0, 0), DefaultColour, 0)
+	c := NewCell('漢', wideStyle).asContinuation()
+	if c == NewCell('漢', wideStyle) {
 		t.Fatal("continuation flag must distinguish the cell from its left half")
 	}
-	if NewCell('x', DefaultColour, DefaultColour, 0).asContinuation() !=
-		NewCell('x', DefaultColour, DefaultColour, 0).asContinuation() {
+	if NewCell('x', DefaultStyle).asContinuation() != NewCell('x', DefaultStyle).asContinuation() {
 		t.Fatal("two identical continuation cells must compare equal")
 	}
 	if !c.IsContinuation() {
 		t.Fatal("IsContinuation must be true")
 	}
-	if NewCell('x', DefaultColour, DefaultColour, 0).IsContinuation() {
+	if NewCell('x', DefaultStyle).IsContinuation() {
 		t.Fatal("IsContinuation must be false for an ordinary cell")
 	}
 }

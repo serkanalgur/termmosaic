@@ -100,7 +100,7 @@ func TestRuneWidth(t *testing.T) {
 
 func BenchmarkBufferFullWrite(b *testing.B) {
 	buf := NewBuffer(200, 60)
-	c := NewCell('x', NewColour(1, 2, 3), NewColour(4, 5, 6), AttrBold)
+	c := NewCell('x', NewStyle(NewColour(1, 2, 3), NewColour(4, 5, 6), AttrBold))
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		for y := 0; y < 60; y++ {
@@ -117,6 +117,6 @@ func BenchmarkSetString(b *testing.B) {
 	const s = "the quick brown fox jumps over the lazy dog"
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		buf.SetString(0, 0, s, DefaultColour, DefaultColour, 0)
+		buf.SetString(0, 0, s, DefaultStyle)
 	}
 }

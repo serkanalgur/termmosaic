@@ -132,18 +132,22 @@ const (
 	DepthNone = buffer.DepthNone
 )
 
-// Style is the full rendition state of a cell, and the state the diff tracks
-// from cell to cell.
-type Style struct {
-	FG   buffer.Colour
-	BG   buffer.Colour
-	Attr buffer.Attr
-}
-
-// StyleOf returns the Style of c.
-func StyleOf(c buffer.Cell) Style {
-	return Style{FG: c.FG, BG: c.BG, Attr: c.Attr}
-}
+// Style is buffer.Style — an ALIAS, not a second type.
+//
+// It was its own {FG, BG, Attr} struct here, which is precisely the collision
+// ADR 0008 exists to prevent: one type in a public package, one in an internal
+// one, same name and same fields and no assignability between them — and the
+// internal one is what the frame actually compares. A style that is
+// ==-comparable but not assignable to what the diff tracks is a comparison that
+// silently never comes true.
+//
+// Aliasing rather than re-declaring means the diff's tracked style and the
+// widget-facing style are literally one type, with no conversion anywhere. It is
+// an alias and not a defined type on purpose: a defined type would need
+// conversions at every boundary and would reintroduce the split.
+//
+// No import cycle: this package already imported buffer for Depth.
+type Style = buffer.Style
 
 // Encoder appends SGR sequences for a style at a given colour depth. It is a
 // value type and holds no mutable state: the caller owns current-style
@@ -240,7 +244,12 @@ func appendAttrParams(dst []int, a buffer.Attr) []int {
 
 func (e Encoder) appendFGParams(dst []int, c buffer.Colour) []int {
 	switch {
-	case c.IsDefault():
+	case c.IsDefault(), c.IsUnset():
+		// IsUnset is a backstop, not the normal path: Style.Resolved maps the
+		// inherit marker to DefaultColour, so a resolved style never carries it.
+		// Without the case, a style that skipped Resolved would quantise the
+		// marker (0xFFFFFFFE) as if it were a near-white RGB value and produce a
+		// confusing frame rather than a visible no-op.
 		return append(dst, sgrDefaultFG)
 	case e.Depth == Depth16:
 		i := int(e.quantiser().Nearest16(c))
@@ -258,7 +267,8 @@ func (e Encoder) appendFGParams(dst []int, c buffer.Colour) []int {
 
 func (e Encoder) appendBGParams(dst []int, c buffer.Colour) []int {
 	switch {
-	case c.IsDefault():
+	case c.IsDefault(), c.IsUnset():
+		// See appendFGParams: backstop for an unresolved style.
 		return append(dst, sgrDefaultBG)
 	case e.Depth == Depth16:
 		i := int(e.quantiser().Nearest16(c))

@@ -13,16 +13,16 @@ func TestBufferBasics(t *testing.T) {
 	if got := b.CellAt(0, 0); got != DefaultCell {
 		t.Fatalf("fresh cell = %+v, want DefaultCell", got)
 	}
-	b.Set(1, 1, 'x', NewColour(1, 2, 3), NewColour(4, 5, 6), AttrBold)
+	b.Set(1, 1, 'x', NewStyle(NewColour(1, 2, 3), NewColour(4, 5, 6), AttrBold))
 	got := b.CellAt(1, 1)
-	want := NewCell('x', NewColour(1, 2, 3), NewColour(4, 5, 6), AttrBold)
+	want := NewCell('x', NewStyle(NewColour(1, 2, 3), NewColour(4, 5, 6), AttrBold))
 	if got != want {
 		t.Fatalf("CellAt = %+v, want %+v", got, want)
 	}
 	// Out of range must not panic or write.
-	b.Set(-1, 0, 'a', DefaultColour, DefaultColour, 0)
-	b.Set(0, -1, 'a', DefaultColour, DefaultColour, 0)
-	b.Set(99, 0, 'a', DefaultColour, DefaultColour, 0)
+	b.Set(-1, 0, 'a', DefaultStyle)
+	b.Set(0, -1, 'a', DefaultStyle)
+	b.Set(99, 0, 'a', DefaultStyle)
 	if got := b.CellAt(-1, 0); got != DefaultCell {
 		t.Errorf("out-of-range CellAt = %+v, want DefaultCell", got)
 	}
@@ -30,7 +30,7 @@ func TestBufferBasics(t *testing.T) {
 
 func TestFillAndClearRect(t *testing.T) {
 	b := NewBuffer(4, 4)
-	c := NewCell('#', NewColour(9, 9, 9), DefaultColour, 0)
+	c := NewCell('#', NewStyle(NewColour(9, 9, 9), DefaultColour, 0))
 	b.FillRect(Rect{X: 1, Y: 1, W: 2, H: 2}, c)
 	if b.CellAt(1, 1) != c || b.CellAt(2, 2) != c {
 		t.Error("FillRect did not fill")
@@ -60,7 +60,7 @@ func TestFillAndClearRect(t *testing.T) {
 func TestSetString(t *testing.T) {
 	t.Run("ascii", func(t *testing.T) {
 		b := NewBuffer(10, 1)
-		next := b.SetString(0, 0, "hello", DefaultColour, DefaultColour, 0)
+		next := b.SetString(0, 0, "hello", DefaultStyle)
 		if next != 5 {
 			t.Errorf("returned %d, want 5", next)
 		}
@@ -74,7 +74,7 @@ func TestSetString(t *testing.T) {
 	t.Run("zero-width marks are dropped", func(t *testing.T) {
 		b := NewBuffer(10, 1)
 		// A base 'e' plus combining acute: one grapheme, two runes, one cell.
-		next := b.SetString(0, 0, "e\u0301", DefaultColour, DefaultColour, 0)
+		next := b.SetString(0, 0, "e\u0301", DefaultStyle)
 		if next != 1 {
 			t.Errorf("returned %d, want 1 (combining mark must not occupy a cell)", next)
 		}
@@ -86,7 +86,7 @@ func TestSetString(t *testing.T) {
 	t.Run("wide glyph occupies two cells", func(t *testing.T) {
 		b := NewBuffer(10, 1)
 		fg := NewColour(255, 0, 0)
-		next := b.SetString(0, 0, "漢", fg, DefaultColour, 0)
+		next := b.SetString(0, 0, "漢", NewStyle(fg, DefaultColour, 0))
 		if next != 2 {
 			t.Errorf("returned %d, want 2", next)
 		}
@@ -104,7 +104,7 @@ func TestSetString(t *testing.T) {
 		// The stability property: re-writing the same glyph yields an equal
 		// second cell, so the row skip fires and nothing flickers.
 		first := b.CellAt(1, 0)
-		b.SetString(0, 0, "漢", fg, DefaultColour, 0)
+		b.SetString(0, 0, "漢", NewStyle(fg, DefaultColour, 0))
 		if b.CellAt(1, 0) != first {
 			t.Error("continuation cell is not stable across identical writes")
 		}
@@ -113,7 +113,7 @@ func TestSetString(t *testing.T) {
 	t.Run("wide glyph straddling the edge is not written", func(t *testing.T) {
 		// Width 2: 'a' takes cell 0, leaving one cell for a two-cell glyph.
 		b := NewBuffer(2, 1)
-		b.SetString(0, 0, "a漢", DefaultColour, DefaultColour, 0)
+		b.SetString(0, 0, "a漢", DefaultStyle)
 		if b.CellAt(0, 0).Rune() != 'a' {
 			t.Errorf("cell 0 = %q, want 'a'", b.CellAt(0, 0).Rune())
 		}
@@ -124,14 +124,14 @@ func TestSetString(t *testing.T) {
 
 	t.Run("out of range rows are no-ops", func(t *testing.T) {
 		b := NewBuffer(4, 1)
-		if got := b.SetString(0, 5, "x", DefaultColour, DefaultColour, 0); got != 0 {
+		if got := b.SetString(0, 5, "x", DefaultStyle); got != 0 {
 			t.Errorf("returned %d, want 0", got)
 		}
 	})
 
 	t.Run("negative start x skips off-screen runes", func(t *testing.T) {
 		b := NewBuffer(4, 1)
-		b.SetString(-2, 0, "abcd", DefaultColour, DefaultColour, 0)
+		b.SetString(-2, 0, "abcd", DefaultStyle)
 		if b.CellAt(0, 0).Rune() != 'c' || b.CellAt(1, 0).Rune() != 'd' {
 			t.Errorf("got %q,%q want c,d", b.CellAt(0, 0).Rune(), b.CellAt(1, 0).Rune())
 		}
@@ -141,7 +141,7 @@ func TestSetString(t *testing.T) {
 func TestResizeDiscardsAndMarksDirty(t *testing.T) {
 	b := NewBuffer(4, 4)
 	b.TakeDirty()
-	b.Set(0, 0, 'x', DefaultColour, DefaultColour, 0)
+	b.Set(0, 0, 'x', DefaultStyle)
 	b.TakeDirty()
 
 	b.Resize(2, 2)
@@ -177,7 +177,7 @@ func TestSubBufferIsAViewAndForwardsDirty(t *testing.T) {
 	if sub.Width() != 4 || sub.Height() != 5 {
 		t.Fatalf("sub size = %dx%d, want 4x5", sub.Width(), sub.Height())
 	}
-	sub.Set(1, 1, 'z', DefaultColour, DefaultColour, 0)
+	sub.Set(1, 1, 'z', DefaultStyle)
 	if got := parent.CellAt(3, 4); got.Rune() != 'z' {
 		t.Error("writes through the sub-buffer must be visible in the parent")
 	}
@@ -232,7 +232,7 @@ func TestSubBufferRowsAreStrided(t *testing.T) {
 
 	// The striding is observable: a cell written at sub-buffer row 1 lands in
 	// parent row 4, not immediately after sub-buffer row 0.
-	sub.Set(0, 1, 'z', DefaultColour, DefaultColour, 0)
+	sub.Set(0, 1, 'z', DefaultStyle)
 	if got := parent.CellAt(2, 4).Rune(); got != 'z' {
 		t.Errorf("parent cell (2,4) = %q, want 'z'; the view is not strided as documented", got)
 	}
@@ -259,7 +259,7 @@ func TestRowIsStrideCorrectOnSubBuffer(t *testing.T) {
 	parent := NewBuffer(parentW, parentH)
 	for y := 0; y < parentH; y++ {
 		for x := 0; x < parentW; x++ {
-			parent.Set(x, y, rune('a'+x), DefaultColour, DefaultColour, 0)
+			parent.Set(x, y, rune('a'+x), DefaultStyle)
 		}
 	}
 
@@ -279,7 +279,7 @@ func TestRowIsStrideCorrectOnSubBuffer(t *testing.T) {
 
 	// And a write through Row lands in the parent, which is the other half of
 	// "a view shares storage rather than copying it".
-	sub.Row(1)[2] = NewCell('Z', NewColour(0xff, 0, 0), DefaultColour, AttrBold)
+	sub.Row(1)[2] = NewCell('Z', NewStyle(NewColour(0xff, 0, 0), DefaultColour, AttrBold))
 	if got := parent.CellAt(x0+2, y0+1).Rune(); got != 'Z' {
 		t.Errorf("write through sub.Row(1)[2] landed at rune %q, want 'Z'", got)
 	}
@@ -334,12 +334,12 @@ func rowGap(b *Buffer, a, c int) int {
 
 func TestClipIsDetached(t *testing.T) {
 	parent := NewBuffer(4, 4)
-	parent.Set(1, 1, 'q', DefaultColour, DefaultColour, 0)
+	parent.Set(1, 1, 'q', DefaultStyle)
 	c := parent.Clip(Rect{X: 1, Y: 1, W: 2, H: 2})
 	if c.CellAt(0, 0).Rune() != 'q' {
 		t.Error("Clip must copy the region")
 	}
-	c.Set(0, 0, 'w', DefaultColour, DefaultColour, 0)
+	c.Set(0, 0, 'w', DefaultStyle)
 	if parent.CellAt(1, 1).Rune() != 'q' {
 		t.Error("Clip must be detached from the parent")
 	}
@@ -351,8 +351,8 @@ func TestClipIsDetached(t *testing.T) {
 func TestSwapExchangesContents(t *testing.T) {
 	a := NewBuffer(2, 2)
 	b := NewBuffer(2, 2)
-	a.Set(0, 0, 'a', DefaultColour, DefaultColour, 0)
-	b.Set(1, 1, 'b', DefaultColour, DefaultColour, 0)
+	a.Set(0, 0, 'a', DefaultStyle)
+	b.Set(1, 1, 'b', DefaultStyle)
 	// swap moves other's cell storage into the receiver; the argument keeps its
 	// own cells, because the renderer swaps by exchanging its own references.
 	// Dirty state is exchanged, so invalidation follows the cells.

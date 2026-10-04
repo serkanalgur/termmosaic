@@ -59,7 +59,7 @@ func TestRowSkipEmitsOnlyDirtyRows(t *testing.T) {
 	prev := grid(w, h)
 	cur := grid(w, h)
 	// One changed cell on row 2 only.
-	setCell(cur, 3, 2, buffer.NewCell('X', red, buffer.DefaultColour, 0))
+	setCell(cur, 3, 2, buffer.NewCell('X', buffer.NewStyle(red, buffer.DefaultColour, 0)))
 
 	d := NewDiffer(1024)
 	out := string(d.Diff(Frame{
@@ -80,10 +80,10 @@ func TestEmitsSGROnColourChange(t *testing.T) {
 	prev := grid(w, h)
 	cur := grid(w, h)
 	for x := 0; x < 6; x++ {
-		setCell(prev, x, 0, buffer.NewCell('a', buffer.DefaultColour, buffer.DefaultColour, 0))
-		setCell(cur, x, 0, buffer.NewCell('a', buffer.DefaultColour, buffer.DefaultColour, 0))
+		setCell(prev, x, 0, buffer.NewCell('a', buffer.NewStyle(buffer.DefaultColour, buffer.DefaultColour, 0)))
+		setCell(cur, x, 0, buffer.NewCell('a', buffer.NewStyle(buffer.DefaultColour, buffer.DefaultColour, 0)))
 	}
-	setCell(cur, 2, 0, buffer.NewCell('a', red, buffer.DefaultColour, 0))
+	setCell(cur, 2, 0, buffer.NewCell('a', buffer.NewStyle(red, buffer.DefaultColour, 0)))
 
 	d := NewDiffer(1024)
 	out := string(d.Diff(Frame{
@@ -104,10 +104,10 @@ func TestNoSGRWhenOnlyTheRuneChanges(t *testing.T) {
 	prev := grid(w, h)
 	cur := grid(w, h)
 	for x := 0; x < w; x++ {
-		setCell(prev, x, 0, buffer.NewCell('a', white, white, 0))
-		setCell(cur, x, 0, buffer.NewCell('a', white, white, 0))
+		setCell(prev, x, 0, buffer.NewCell('a', buffer.NewStyle(white, white, 0)))
+		setCell(cur, x, 0, buffer.NewCell('a', buffer.NewStyle(white, white, 0)))
 	}
-	setCell(cur, 1, 0, buffer.NewCell('b', white, white, 0))
+	setCell(cur, 1, 0, buffer.NewCell('b', buffer.NewStyle(white, white, 0)))
 
 	d := NewDiffer(1024)
 	// Seed the tracked style from a previous frame that left the cursor with
@@ -128,10 +128,10 @@ func TestSGRIsEmittedForEveryStyleChangeNotEveryCell(t *testing.T) {
 	prev := grid(w, h)
 	cur := grid(w, h)
 	// Four adjacent cells, all changed, two sharing a style.
-	setCell(cur, 0, 0, buffer.NewCell('a', red, blue, buffer.AttrBold))
-	setCell(cur, 1, 0, buffer.NewCell('b', red, blue, buffer.AttrBold))
-	setCell(cur, 2, 0, buffer.NewCell('c', white, blue, buffer.AttrBold))
-	setCell(cur, 3, 0, buffer.NewCell('d', red, blue, 0))
+	setCell(cur, 0, 0, buffer.NewCell('a', buffer.NewStyle(red, blue, buffer.AttrBold)))
+	setCell(cur, 1, 0, buffer.NewCell('b', buffer.NewStyle(red, blue, buffer.AttrBold)))
+	setCell(cur, 2, 0, buffer.NewCell('c', buffer.NewStyle(white, blue, buffer.AttrBold)))
+	setCell(cur, 3, 0, buffer.NewCell('d', buffer.NewStyle(red, blue, 0)))
 
 	d := NewDiffer(1024)
 	out := string(d.Diff(Frame{
@@ -157,7 +157,7 @@ func TestColorDepthLadder(t *testing.T) {
 	w, h := 2, 1
 	prev := grid(w, h)
 	cur := grid(w, h)
-	setCell(cur, 0, 0, buffer.NewCell('a', red, blue, 0))
+	setCell(cur, 0, 0, buffer.NewCell('a', buffer.NewStyle(red, blue, 0)))
 
 	cases := []struct {
 		depth ansi.Depth
@@ -188,7 +188,7 @@ func TestNoColorSuppressesColourButKeepsAttributes(t *testing.T) {
 	w, h := 2, 1
 	prev := grid(w, h)
 	cur := grid(w, h)
-	setCell(cur, 0, 0, buffer.NewCell('a', red, blue, buffer.AttrUnderline|buffer.AttrBold))
+	setCell(cur, 0, 0, buffer.NewCell('a', buffer.NewStyle(red, blue, buffer.AttrUnderline|buffer.AttrBold)))
 
 	d := NewDiffer(1024)
 	out := string(d.Diff(Frame{
@@ -208,7 +208,7 @@ func TestDepthNoneEmitsNoColour(t *testing.T) {
 	w, h := 2, 1
 	prev := grid(w, h)
 	cur := grid(w, h)
-	setCell(cur, 0, 0, buffer.NewCell('a', red, red, 0))
+	setCell(cur, 0, 0, buffer.NewCell('a', buffer.NewStyle(red, red, 0)))
 
 	d := NewDiffer(1024)
 	out := string(d.Diff(Frame{
@@ -246,12 +246,12 @@ func TestContinuationCellIsNotWritten(t *testing.T) {
 	prev := grid(w, h)
 	cur := grid(w, h)
 	// A wide glyph at cells 0 and 1, written via SetString semantics.
-	cur.SetCell(0, 0, buffer.NewCell('漢', red, buffer.DefaultColour, 0))
-	cur.SetCell(1, 0, buffer.NewCell(0, red, buffer.DefaultColour, 0))
+	cur.SetCell(0, 0, buffer.NewCell('漢', buffer.NewStyle(red, buffer.DefaultColour, 0)))
+	cur.SetCell(1, 0, buffer.NewCell(0, buffer.NewStyle(red, buffer.DefaultColour, 0)))
 	// Mark cell 1 as the continuation half the way SetString does. The flag is
 	// private, so reach it through a Buffer, which is the only supported path.
 	b := buffer.NewBuffer(w, h)
-	b.SetString(0, 0, "漢", red, buffer.DefaultColour, 0)
+	b.SetString(0, 0, "漢", buffer.NewStyle(red, buffer.DefaultColour, 0))
 	cur.SetCell(0, 0, b.CellAt(0, 0))
 	cur.SetCell(1, 0, b.CellAt(1, 0))
 
@@ -426,7 +426,7 @@ func TestWideGlyphOnlyWrittenOnce(t *testing.T) {
 	w, h := 4, 1
 	prev := grid(w, h)
 	src := buffer.NewBuffer(w, h)
-	src.SetString(0, 0, "漢", red, buffer.DefaultColour, 0)
+	src.SetString(0, 0, "漢", buffer.NewStyle(red, buffer.DefaultColour, 0))
 	cur := grid(w, h)
 	for x := 0; x < w; x++ {
 		cur.SetCell(x, 0, src.CellAt(x, 0))

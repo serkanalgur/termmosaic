@@ -82,6 +82,11 @@ const flagContinuation uint16 = 1 << 0
 // 2 bytes wide. TestCellHasNoPadding fails otherwise. A reserved-but-unused
 // byte is unsound: bytes.Equal over a row would compare undefined padding.
 //
+// Style is deliberately NOT embedded here. Style is the 10-byte flat projection
+// of the three styling fields; embedding it would make the cell 28+ bytes with
+// interior padding and reintroduce the hazard above. Cell.Style and Style.Cell
+// convert, and TestCellRemainsSixteenBytesWithStyle fails if that is undone.
+//
 // ADR 0002 spells the final two bytes as `_ [2]byte`. We spend them on the
 // wide-glyph continuation flag instead, at zero extra bytes, because a
 // continuation cell has to be distinguishable from an empty one for the diff
@@ -104,20 +109,23 @@ type Cell struct {
 // default foreground and background, with no attributes.
 var DefaultCell = Cell{Ch: ' ', FG: DefaultColour, BG: DefaultColour}
 
-// ContinuationCell returns the right half of a double-width glyph in the given
-// style: a cell that occupies no column of its own and carries no rune.
+// ContinuationCell returns the right half of a double-width glyph in st: a cell
+// that occupies no column of its own and carries no rune.
 //
-// SetString is the supported way to write a wide glyph, and it is the only code
-// that sets the private continuation flag. This constructor exists for the
-// headless screen model, which must reproduce that cell when it interprets a
-// frame written by someone else's terminal.
-func ContinuationCell(fg, bg Colour, attr Attr) Cell {
-	return Cell{Ch: continuationRune, FG: fg, BG: bg, Attr: attr, flags: flagContinuation}
+// Its style MUST match the glyph cell it follows, or the pair will not compare
+// equal to the previous frame and the row skip will never fire. SetSpans and
+// SetString are the supported way to write a wide glyph, and they are the only
+// code that sets the private continuation flag with that guarantee. This
+// constructor exists for the headless screen model, which must reproduce the
+// cell when it interprets a frame written by someone else's terminal.
+func ContinuationCell(st Style) Cell {
+	return Cell{Ch: continuationRune, FG: st.FG, BG: st.BG, Attr: st.Attr, flags: flagContinuation}
 }
 
-// NewCell returns a Cell with the given rune and styling.
-func NewCell(ch rune, fg, bg Colour, attr Attr) Cell {
-	return Cell{Ch: ch, FG: fg, BG: bg, Attr: attr}
+// NewCell returns a Cell with the given rune in st. It is the inverse of
+// Cell.Style, and neither direction allocates.
+func NewCell(ch rune, st Style) Cell {
+	return Cell{Ch: ch, FG: st.FG, BG: st.BG, Attr: st.Attr}
 }
 
 // Rune returns the rune the cell displays, or 0 if the cell is the continuation

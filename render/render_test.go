@@ -47,12 +47,12 @@ func (b *block) Draw(buf *buffer.Buffer) {
 	if b.animate {
 		b.counter++
 	}
-	buf.FillRect(b.bounds, buffer.NewCell(' ', b.fg, buffer.DefaultColour, 0))
+	buf.FillRect(b.bounds, buffer.NewCell(' ', buffer.NewStyle(b.fg, buffer.DefaultColour, 0)))
 	if b.text != "" {
-		buf.SetString(b.bounds.X, b.bounds.Y, b.text, b.fg, buffer.DefaultColour, 0)
+		buf.SetString(b.bounds.X, b.bounds.Y, b.text, buffer.NewStyle(b.fg, buffer.DefaultColour, 0))
 	}
 	if b.animate {
-		buf.Set(b.bounds.X, b.bounds.Y, rune('0'+b.counter%10), green, buffer.DefaultColour, 0)
+		buf.Set(b.bounds.X, b.bounds.Y, rune('0'+b.counter%10), buffer.NewStyle(green, buffer.DefaultColour, 0))
 	}
 }
 

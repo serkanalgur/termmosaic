@@ -82,7 +82,7 @@ func buildFrame(t int) *buffer.Buffer {
 	// scene builder is exercising the public bulk accessor too.
 	buf := buffer.NewBuffer(w, h)
 	set := func(x, y int, c buffer.Cell) { buf.SetCell(x, y, c) }
-	rowFill := buffer.NewCell(' ', fill, fill, 0)
+	rowFill := buffer.NewCell(' ', buffer.NewStyle(fill, fill, 0))
 	for y := 0; y < h; y++ {
 		row := buf.Row(y)
 		for x := range row {
@@ -91,23 +91,29 @@ func buildFrame(t int) *buffer.Buffer {
 	}
 
 	// --- static chrome: three panel borders ------------------------------
+	// The glyphs come from buffer's table rather than from literals here, for
+	// the same reason a widget must: one table in the repository means
+	// BorderPlain is the same rune everywhere, and it means this benchmark is
+	// exercising the shared vocabulary rather than a private copy of it.
+	g := buffer.BorderPlain.Glyphs(false)
+	edge := buffer.NewStyle(panel, fill, 0)
 	for _, p := range []struct{ x0, y0, x1, y1 int }{
 		{0, 0, w - 1, 8},
 		{0, 10, 39, h - 2},
 		{41, 10, w - 1, h - 2},
 	} {
 		for x := p.x0; x <= p.x1; x++ {
-			set(x, p.y0, buffer.NewCell('─', panel, fill, 0))
-			set(x, p.y1, buffer.NewCell('─', panel, fill, 0))
+			set(x, p.y0, edge.Cell(g.Horizontal))
+			set(x, p.y1, edge.Cell(g.Horizontal))
 		}
 		for y := p.y0; y <= p.y1; y++ {
-			set(p.x0, y, buffer.NewCell('│', panel, fill, 0))
-			set(p.x1, y, buffer.NewCell('│', panel, fill, 0))
+			set(p.x0, y, edge.Cell(g.Vertical))
+			set(p.x1, y, edge.Cell(g.Vertical))
 		}
-		set(p.x0, p.y0, buffer.NewCell('┌', panel, fill, 0))
-		set(p.x1, p.y0, buffer.NewCell('┐', panel, fill, 0))
-		set(p.x0, p.y1, buffer.NewCell('└', panel, fill, 0))
-		set(p.x1, p.y1, buffer.NewCell('┘', panel, fill, 0))
+		set(p.x0, p.y0, edge.Cell(g.TopLeft))
+		set(p.x1, p.y0, edge.Cell(g.TopRight))
+		set(p.x0, p.y1, edge.Cell(g.BottomLeft))
+		set(p.x1, p.y1, edge.Cell(g.BottomRight))
 	}
 
 	// --- static sidebar text ----------------------------------------------
@@ -118,7 +124,7 @@ func buildFrame(t int) *buffer.Buffer {
 		}
 		label := fmt.Sprintf("  - item %02d static", i)
 		for x := 0; x < len(label) && 1+x < 39; x++ {
-			set(1+x, y, buffer.NewCell(rune(label[x]), fg, fill, 0))
+			set(1+x, y, buffer.NewCell(rune(label[x]), buffer.NewStyle(fg, fill, 0)))
 		}
 	}
 
@@ -144,14 +150,14 @@ func buildFrame(t int) *buffer.Buffer {
 		switch {
 		case i < filled:
 			if (i+t)%2 == 0 {
-				c = buffer.NewCell('#', accent, fill, 0)
+				c = buffer.NewCell('#', buffer.NewStyle(accent, fill, 0))
 			} else {
-				c = buffer.NewCell('=', accent, fill, 0)
+				c = buffer.NewCell('=', buffer.NewStyle(accent, fill, 0))
 			}
 		case (i+t)%2 == 0:
-			c = buffer.NewCell('.', fill, fill, 0)
+			c = buffer.NewCell('.', buffer.NewStyle(fill, fill, 0))
 		default:
-			c = buffer.NewCell(',', fill, fill, 0)
+			c = buffer.NewCell(',', buffer.NewStyle(fill, fill, 0))
 		}
 		set(barX0+i, barY, c)
 	}
@@ -164,8 +170,8 @@ func buildFrame(t int) *buffer.Buffer {
 		y := readoutY0 + i*2
 		d1 := rune('0' + (t+i)%10)
 		d2 := rune('0' + (t*3+i)%10)
-		set(readoutX+0, y, buffer.NewCell(d1, fg, fill, 0))
-		set(readoutX+1, y, buffer.NewCell(d2, fg, fill, 0))
+		set(readoutX+0, y, buffer.NewCell(d1, buffer.NewStyle(fg, fill, 0)))
+		set(readoutX+1, y, buffer.NewCell(d2, buffer.NewStyle(fg, fill, 0)))
 	}
 	return buf
 }
@@ -244,8 +250,8 @@ func TestDiffNeverCostsMoreThanFullRepaint(t *testing.T) {
 	cur := buffer.NewBuffer(sceneW, sceneH)
 	for i := 0; i < sceneW*sceneH; i++ {
 		x, y := i%sceneW, i/sceneW
-		prev.SetCell(x, y, buffer.NewCell(' ', buffer.DefaultColour, buffer.DefaultColour, 0))
-		cur.SetCell(x, y, buffer.NewCell('x', buffer.NewColour(uint8(i%256), 0, 0), buffer.DefaultColour, buffer.AttrBold))
+		prev.SetCell(x, y, buffer.NewCell(' ', buffer.NewStyle(buffer.DefaultColour, buffer.DefaultColour, 0)))
+		cur.SetCell(x, y, buffer.NewCell('x', buffer.NewStyle(buffer.NewColour(uint8(i%256), 0, 0), buffer.DefaultColour, buffer.AttrBold)))
 	}
 	enc := ansi.Encoder{Depth: ansi.DepthTrueColor}
 	rects := []buffer.Rect{{W: sceneW, H: sceneH}}
@@ -362,8 +368,8 @@ func BenchmarkRowSkipAllRows(b *testing.B) {
 	cur := buffer.NewBuffer(sceneW, sceneH)
 	for y := 0; y < sceneH; y++ {
 		for x := 0; x < sceneW; x++ {
-			prev.SetCell(x, y, buffer.NewCell(' ', buffer.DefaultColour, buffer.DefaultColour, 0))
-			cur.SetCell(x, y, buffer.NewCell('x', buffer.DefaultColour, buffer.DefaultColour, 0))
+			prev.SetCell(x, y, buffer.NewCell(' ', buffer.NewStyle(buffer.DefaultColour, buffer.DefaultColour, 0)))
+			cur.SetCell(x, y, buffer.NewCell('x', buffer.NewStyle(buffer.DefaultColour, buffer.DefaultColour, 0)))
 		}
 	}
 	b.ReportAllocs()
@@ -386,7 +392,7 @@ func BenchmarkRowSkipAllIdentical(b *testing.B) {
 	prev := buffer.NewBuffer(sceneW, sceneH)
 	for y := 0; y < sceneH; y++ {
 		for x := 0; x < sceneW; x++ {
-			prev.SetCell(x, y, buffer.NewCell(' ', buffer.DefaultColour, buffer.DefaultColour, 0))
+			prev.SetCell(x, y, buffer.NewCell(' ', buffer.NewStyle(buffer.DefaultColour, buffer.DefaultColour, 0)))
 		}
 	}
 	b.ReportAllocs()
@@ -422,8 +428,8 @@ func BenchmarkDiffAllDynamic(b *testing.B) {
 	cur := buffer.NewBuffer(sceneW, sceneH)
 	for i := 0; i < sceneW*sceneH; i++ {
 		x, y := i%sceneW, i/sceneW
-		prev.SetCell(x, y, buffer.NewCell(' ', buffer.DefaultColour, buffer.DefaultColour, 0))
-		cur.SetCell(x, y, buffer.NewCell('x', buffer.NewColour(uint8(i%256), 0, 0), buffer.DefaultColour, buffer.AttrBold))
+		prev.SetCell(x, y, buffer.NewCell(' ', buffer.NewStyle(buffer.DefaultColour, buffer.DefaultColour, 0)))
+		cur.SetCell(x, y, buffer.NewCell('x', buffer.NewStyle(buffer.NewColour(uint8(i%256), 0, 0), buffer.DefaultColour, buffer.AttrBold)))
 	}
 	enc := ansi.Encoder{Depth: ansi.DepthTrueColor}
 	rects := []buffer.Rect{{W: sceneW, H: sceneH}}

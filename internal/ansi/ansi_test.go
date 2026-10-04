@@ -255,11 +255,67 @@ func TestDepthString(t *testing.T) {
 	}
 }
 
-func TestStyleOf(t *testing.T) {
-	c := buffer.NewCell('a', red, blue, buffer.AttrBold)
-	s := StyleOf(c)
-	if s.FG != red || s.BG != blue || s.Attr != buffer.AttrBold {
-		t.Errorf("StyleOf = %+v", s)
+// TestStyleIsAnAliasOfBufferStyle pins ADR 0008's collapse of the two
+// same-named, same-fielded Style types into one.
+//
+// Assignability in both directions WITHOUT a conversion is the assertion: if
+// someone turns the alias back into a defined type, the two blocks below stop
+// compiling, which is the failure the ADR is about — a widget style that is
+// ==-comparable but not assignable to what the diff tracks.
+func TestStyleIsAnAliasOfBufferStyle(t *testing.T) {
+	var s Style = buffer.NewStyle(red, blue, buffer.AttrBold)
+	var b buffer.Style = s
+	if b != buffer.NewStyle(red, blue, buffer.AttrBold) {
+		t.Fatalf("alias round trip lost the value: %+v", b)
+	}
+
+	// And the projection the diff actually uses is the cell's own Style method.
+	c := buffer.NewCell('a', buffer.NewStyle(red, blue, buffer.AttrBold))
+	if c.Style() != s {
+		t.Errorf("Cell.Style() = %+v, want %+v", c.Style(), s)
+	}
+
+	// The encoder must accept the alias directly, with no conversion at the
+	// call site: that is the property that makes the diff's tracked style and
+	// the widget-facing style the same type.
+	enc := Encoder{Depth: DepthTrueColor}
+	if got, want := enc.StyleString(s), enc.StyleString(b); got != want {
+		t.Errorf("encoding through the alias differs: %q vs %q", got, want)
+	}
+}
+
+// TestUnsetColourIsNotARealColour pins the sentinel's whole reason for
+// existing: it must be distinguishable from every RGB colour AND from the
+// terminal-default sentinel, or Patch could not tell "inherit" from "default".
+func TestUnsetColourIsNotARealColour(t *testing.T) {
+	if buffer.UnsetColour.IsDefault() {
+		t.Error("UnsetColour must not equal DefaultColour")
+	}
+	if buffer.DefaultColour.IsUnset() {
+		t.Error("DefaultColour must not be the inherit marker")
+	}
+	for _, c := range []buffer.Colour{
+		buffer.NewColour(0, 0, 0),
+		buffer.NewColour(255, 255, 254),
+		buffer.DefaultColour,
+	} {
+		if c.IsUnset() {
+			t.Errorf("%v reports as the inherit marker", c)
+		}
+	}
+}
+
+// TestEncoderTreatsUnresolvedColourAsDefault is the backstop for a style written
+// into a cell without being resolved first. Resolved() maps the marker to
+// DefaultColour, so this is unreachable through the normal path — but
+// quantising 0xFFFFFFFE as near-white would produce a confusing frame rather
+// than a visible no-op, so the encoder refuses to.
+func TestEncoderTreatsUnresolvedColourAsDefault(t *testing.T) {
+	enc := Encoder{Depth: DepthTrueColor}
+	leaked := Style{FG: buffer.UnsetColour, BG: buffer.DefaultColour}
+	want := enc.StyleString(Style{FG: buffer.DefaultColour, BG: buffer.DefaultColour})
+	if got := enc.StyleString(leaked); got != want {
+		t.Errorf("an unresolved colour encoded as %q, want the terminal default %q", got, want)
 	}
 }
 

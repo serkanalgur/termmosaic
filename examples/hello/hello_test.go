@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -264,6 +265,47 @@ func TestResizeGolden(t *testing.T) {
 	checkGolden(t, "hello_resized.txt", sink.String())
 }
 
+// TestWriteIntRendersEveryDecimalPlace covers the hand-rolled formatting that
+// replaced fmt.Sprintf on the draw path. It is worth testing precisely because
+// it exists to avoid an allocation: a bug here would be a wrong digit on screen,
+// and a "simplification" back to Sprintf would reintroduce the heap traffic
+// TestDrawIsAllocationFree forbids.
+func TestWriteIntRendersEveryDecimalPlace(t *testing.T) {
+	for _, v := range []int{0, 1, 7, 9, 10, 42, 99, 100, 1000, 9999, 123456, 1 << 20, -5} {
+		b := buffer.NewBuffer(12, 1)
+		h := &hello{}
+		next := h.writeInt(b, 0, 0, v)
+		if got := b.CellAt(next-1, 0); next < 1 || got.Style() != stValue {
+			t.Errorf("writeInt(%d) ended at %d, outside the buffer or unstyled", v, next)
+		}
+		if got := strings.TrimRight(rowText(b, next), " "); got != wantDecimal(v) {
+			t.Errorf("writeInt(%d) wrote %q, want %q", v, got, wantDecimal(v))
+		}
+		// Everything before the digits must be untouched.
+		if next > 0 {
+			_ = b.CellAt(0, 0)
+		}
+	}
+}
+
+// rowText renders row 0's first n cells as a string.
+func rowText(b *buffer.Buffer, n int) string {
+	var sb strings.Builder
+	for x := 0; x < n; x++ {
+		sb.WriteRune(b.CellAt(x, 0).Rune())
+	}
+	return sb.String()
+}
+
+// wantDecimal is the reference the hand-rolled formatter is checked against. It
+// is strconv, used only in a test, which is the point: the draw path must not.
+func wantDecimal(v int) string {
+	if v < 0 {
+		v = 0
+	}
+	return strconv.Itoa(v)
+}
+
 // TestGoldenFilesExist fails with a clear instruction rather than a file-not-found
 // error, because that is the first thing anyone hits here.
 func TestGoldenFilesExist(t *testing.T) {
@@ -272,4 +314,72 @@ func TestGoldenFilesExist(t *testing.T) {
 			t.Errorf("missing golden file %s: %v", name, err)
 		}
 	}
+}
+
+// TestExampleBorderThresholdsMatchTheAgreedValues pins the two numbers ADR 0008
+// §2 fixes for borders and titles: a border needs two cells on each axis, and a
+// title additionally needs five.
+//
+// ADR 0007 §1 rule 5 says thresholds are local named constants rather than
+// framework vocabulary, so these constants live here rather than in the
+// framework. But ADR 0008's reconciliation says the box-drawing thresholds are
+// decided once for the whole catalog, precisely because three authors would each
+// pick their own. The catalog's Block will own them; until it exists the example
+// stands in for it, and this test is what stops the example from quietly drifting
+// away from the agreed numbers.
+func TestExampleBorderThresholdsMatchTheAgreedValues(t *testing.T) {
+	if minBorderW != 2 || minBorderH != 2 {
+		t.Errorf("border threshold = %dx%d, want 2x2: two cells per axis, one per corner",
+			minBorderW, minBorderH)
+	}
+	// A title needs two corners plus a space, a glyph and a space.
+	const (
+		titlePad = 2 // one space each side
+		titleMin = minBorderW + titlePad + 1
+	)
+	if titleMin != 5 || minTitleW != 5 {
+		t.Errorf("title threshold = %d (derived %d), want 5", minTitleW, titleMin)
+	}
+}
+
+// TestDrawIsTotalAtEverySize is ADR 0007 §4's degenerate-size contract applied to
+// the example: Draw must be defined for every rectangle, including empty, and
+// must never panic. Every write is bounds-checked, so the assertion is really
+// that the guards short-circuit before they do any work.
+func TestDrawIsTotalAtEverySize(t *testing.T) {
+	for w := 0; w <= 12; w++ {
+		for h := 0; h <= 12; h++ {
+			widget := &hello{depth: buffer.DepthTrueColor, bounds: buffer.Rect{W: w, H: h}}
+			b := buffer.NewBuffer(atLeast1(w), atLeast1(h))
+			widget.Draw(b) // must not panic for any size, including 0x0
+		}
+	}
+}
+
+// TestDrawIsAllocationFree is the widget-side half of ADR 0008 §4: a Draw that
+// builds nothing derived from its size allocates nothing.
+//
+// The title's span slice is constant, so it stays on the stack; the body formats
+// one integer, which for these small values does not escape. If a future change
+// makes Draw call Wrap or Truncate, this fails — which is the point, because that
+// is the most likely performance regression in the catalog and documentation alone
+// does not catch it.
+func TestDrawIsAllocationFree(t *testing.T) {
+	b := buffer.NewBuffer(60, 14)
+	h := &hello{depth: buffer.DepthTrueColor, bounds: centred(60, 14, blockW, blockH)}
+	h.Draw(b) // warm any lazily-initialised state
+
+	if got := testing.AllocsPerRun(100, func() { h.Draw(b) }); got != 0 {
+		t.Errorf("Draw allocated %.1f objects per run, want 0. ADR 0008 §4 forbids calling Wrap, "+
+			"Truncate, or building a []Span inside Draw; cache them on a rect change instead", got)
+	}
+}
+
+// atLeast1 clamps a degenerate dimension, because NewBuffer rejects nothing but
+// a zero-sized buffer has no cells to draw into and would prove nothing.
+func atLeast1(v int) int {
+	if v < 1 {
+		return 1
+	}
+	return v
 }

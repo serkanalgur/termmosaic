@@ -722,7 +722,7 @@ func (s *MemorySink) eraseRow(y int) {
 // behind: the background colour is retained, so erasing a coloured region does
 // not flash it back to the terminal default.
 func (s *MemorySink) blankCell() buffer.Cell {
-	return buffer.NewCell(' ', s.curStyle.FG, s.curStyle.BG, s.curStyle.Attr)
+	return s.curStyle.Blank()
 }
 
 // putRune writes a rune at the cursor and advances, wrapping at the right edge
@@ -752,9 +752,9 @@ func (s *MemorySink) putRune(r rune) {
 		s.advance(1, 0)
 		return
 	}
-	s.screen.SetCell(s.curX, s.curY, buffer.NewCell(r, s.curStyle.FG, s.curStyle.BG, s.curStyle.Attr))
+	s.screen.SetCell(s.curX, s.curY, s.curStyle.Cell(r))
 	if w == 2 {
-		s.screen.SetCell(s.curX+1, s.curY, buffer.ContinuationCell(s.curStyle.FG, s.curStyle.BG, s.curStyle.Attr))
+		s.screen.SetCell(s.curX+1, s.curY, buffer.ContinuationCell(s.curStyle))
 	}
 	if s.curX > s.maxX {
 		s.maxX = s.curX
