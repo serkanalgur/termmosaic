@@ -14,6 +14,7 @@
 package widgettest
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -22,6 +23,33 @@ import (
 	"github.com/serkanalgur/termmosaic/render"
 )
 
+// Capture draws frames frames of root on a w-by-h screen and returns the sink.
+//
+// It is Render without a testing.TB, for the documentation generator: the same
+// widget, through the same widget -> buffer -> renderer -> two-tier diff -> ANSI
+// encoder -> MemorySink path, so a capture on the website cannot disagree with
+// what the tests assert on. It is the reason the documentation is derived from
+// tested code rather than retyped from it.
+//
+// It fails for the same reason Render does — an unrecognised sequence means the
+// screen model is incomplete and any capture derived from it would be a picture
+// of something the tests cannot vouch for — but it reports that as an error
+// rather than through t.Fatalf, because a generator has no t to fail.
+func Capture(w, h, frames int, root termmosaic.Widget) (*headless.MemorySink, error) {
+	sink := headless.NewMemorySink(w, h)
+	r := render.New(sink, render.Config{Width: w, Height: h, Caps: termmosaic.DefaultCaps()})
+	r.SetRoot(root)
+	for i := 0; i < frames; i++ {
+		if _, err := r.Render(); err != nil {
+			return nil, fmt.Errorf("frame %d: %w", i, err)
+		}
+	}
+	if got := sink.UnknownSequences(); got != 0 {
+		return nil, fmt.Errorf("the headless screen saw %d unrecognised sequences; a capture of it would be unsound", got)
+	}
+	return sink, nil
+}
+
 // Render draws frames frames of root on a w-by-h screen and returns the sink.
 //
 // It fails the test if the encoder emits anything the headless screen model does
@@ -29,16 +57,9 @@ import (
 // every assertion against it unsound.
 func Render(t testing.TB, w, h, frames int, root termmosaic.Widget) *headless.MemorySink {
 	t.Helper()
-	sink := headless.NewMemorySink(w, h)
-	r := render.New(sink, render.Config{Width: w, Height: h, Caps: termmosaic.DefaultCaps()})
-	r.SetRoot(root)
-	for i := 0; i < frames; i++ {
-		if _, err := r.Render(); err != nil {
-			t.Fatalf("frame %d: %v", i, err)
-		}
-	}
-	if got := sink.UnknownSequences(); got != 0 {
-		t.Fatalf("the headless screen saw %d unrecognised sequences; assertions about it are unsound", got)
+	sink, err := Capture(w, h, frames, root)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return sink
 }
