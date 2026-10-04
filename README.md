@@ -1,5 +1,11 @@
 # TermMosaic
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/serkanalgur/termmosaic.svg)](https://pkg.go.dev/github.com/serkanalgur/termmosaic)
+[![CI](https://github.com/serkanalgur/termmosaic/actions/workflows/ci.yml/badge.svg)](https://github.com/serkanalgur/termmosaic/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/serkanalgur/termmosaic)](https://goreportcard.com/report/github.com/serkanalgur/termmosaic)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/go-1.23%2B-00ADD8.svg)](go.mod)
+
 A terminal UI framework for Go: a cell-buffer renderer plus a catalog of
 ready-to-use widgets.
 
