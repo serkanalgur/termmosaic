@@ -1087,22 +1087,28 @@ table, so a scene whose "wide" glyphs measured 1 could not pass silently.
    glyphs, and a one-glyph change writes exactly one rune. Without this the risk
    above would still be open: a continuation cell that fails to compare equal
    repaints its row at 60 Hz forever, and no narrow-glyph scene can reproduce it.
-4. **A defect the benchmark surfaced, NOT fixed in this release.** `Diff` suppresses
+4. **A defect the benchmark surfaced — RESOLVED 2026-10-04.** `Diff` suppresses
    a cursor move when the following cell is `lastX+1`. A wide glyph advances the
-   terminal's cursor by **two**, but `lastX` is set to the glyph's own `x`, so the
-   check fails and **every wide glyph is preceded by a full CUP escape**. On a
-   scene of 6,000 glyphs in one style that is 6,000 cursor moves against the
-   narrow scene's 30, and 68,832 bytes against 6,233 — **11×** — for the same
-   number of runes. The output is correct, so this is byte efficiency, not
-   correctness, and `TestDenseWideGlyphCostsOneCursorMovePerGlyph` pins the current
-   behaviour so a fix shows up as a deliberate change to that test.
+   terminal's cursor by **two**, but `lastX` was set to the glyph's own `x`, so
+   every wide glyph was preceded by a full CUP escape: on 6,000 glyphs in one
+   style, 6,000 cursor moves against the narrow scene's 30, and 68,832 bytes
+   against 6,233 — **11×** — for the same number of runes.
 
-   **Not fixed here, deliberately.** `internal/diff` is the most load-bearing code
-   in the project and ADR 0002's headline numbers are quoted from it; changing its
-   cursor-run logic is not a release-gate task and wants its own review and its own
-   measurement. The fix is one line — track the last written CELL rather than the
-   last written GLYPH — and it is recorded here so the next person does not
-   rediscover it as a performance bug report.
+   **It is fixed.** The run tracker now advances by the glyph's **cell width**
+   rather than by one column. Measured on the same scene: **60 cursor moves and
+   19,443 bytes, 3.12× the narrow frame.** Output was always correct — this was
+   byte efficiency on dense wide content — and the ASCII path, which matters far
+   more, is unchanged at ~7,200 ns/op with 0 allocs.
+
+   The remaining 3.12× is inherent rather than a defect: a wide rune is three
+   UTF-8 bytes where a narrow one is one, so the same 6,000 runes cannot produce
+   the same frame.
+
+   `TestDenseWideGlyphCostsOneCursorMovePerGlyph` had pinned the defective
+   behaviour deliberately, so that a fix would appear as a deliberate test
+   change. It is inverted and renamed
+   `TestDenseWideGlyphCostsOneCursorMovePerRow`, and now asserts what is
+   correct: one move per **row**, as for the narrow scene.
 
 **What did not move.** Risk 6 stands: nothing here has been run against a real
 terminal, and `Caps.Unicode` remains a proxy. The width table remains

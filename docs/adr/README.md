@@ -18,6 +18,7 @@ original stays and a new one supersedes it, so the reasoning history survives.
 | [0006](0006-subbuffer-cell-access.md) | Sub-buffer cell access | Accepted | 2026-10-04 |
 | [0007](0007-responsive-screens.md) | Responsive screen composition | Accepted | 2026-10-04 |
 | [0008](0008-style-and-text.md) | Style, theme, and text | Accepted | 2026-10-04 |
+| [0009](0009-command-and-keymap.md) | Commands and keymap | Accepted | 2026-10-05 |
 
 ## Decisions at a glance
 
@@ -132,6 +133,40 @@ original stays and a new one supersedes it, so the reasoning history survives.
   packages had each written for themselves, which also fixed a marker landing on
   a wide glyph's continuation cell and leaving an unpaired glyph flickering.
 
+- **0009 — Commands and keymap: a named action, and a key as one way to reach
+  it.** A new `keymap` package holding `Command`, `CommandID`, `Scope`
+  (`Global`/`Screen`/`Focus` — a fixed three-value specificity order, with **no
+  numeric priority**, because a knob an application sets wrong produces bindings
+  nobody can predict), `Chord`, `Binding`, `Entry` and `Registry`. The
+  load-bearing piece is `Chord`: one normalised gesture in which **`KeySpace` and
+  `Rune ' '` are the same chord**, because terminals disagree and
+  `form.activateKey` already works around that by hand — one place now states it,
+  and it is a comparable 16-byte struct, so resolution is a map lookup at **0
+  allocs**, pinned by `TestDispatchIsZeroAllocation` in ADR 0005's own shape.
+  **`termmosaic.Widget` is unchanged**: the keymap sits *above* `Handle`, an
+  unconsumed key falls through to the tree exactly as today, and the cost of the
+  alternative — 24 signatures, plus `TextInput` losing undeclared runes and
+  `List` losing its viewport-relative paging — is costed in the ADR itself.
+  Widgets participate through **optional** `Commandable` and `Clickable`
+  interfaces, the `Focusable`/`Minimizable` pattern, and **v0.2 requires them of
+  zero catalog widgets**, which is recorded as a bad consequence rather than
+  hidden. **`EventResize` and `EventPaste` never enter a command layer**, because
+  re-expanding a paste to look for a command is ADR 0005 §4's failure repeated one
+  layer up. Help cannot drift from the bindings: `Describe` is computed from the
+  same tables `Dispatch` walks. A click becomes a command because the **widget
+  under the pointer says so** — the registry holds no rectangles, since a global
+  rect is a second source of truth for geometry that goes stale on the first
+  reflow. The `Ctrl+K` palette is in scope but **not built here**: it is a
+  `Dialog` + `Menu` + `TextInput` over `Describe`/`Invoke`/`Chords`, and the ADR
+  states exactly what it needs from each rather than deciding their API. Deferred
+  with triggers: multi-stroke sequences and leader keys (their pending-sequence
+  state belongs to `input.Parser`, beside the escape deadline it already owns),
+  command-line arguments, config-file persistence, release bindings, and
+  drag-as-command. **`form.Binding` is left alone** — naming the new type
+  `Binding` would recreate the two-types-one-name collision ADR 0008 removed from
+  `ansi.Style`, so the new vocabulary takes the unused name and the reconciliation
+  is deferred to the next `KeyHint` change.
+
 ## How these were decided
 
 Decisions 1 and 2 were made **empirically**. A scratch Go module was built
@@ -172,6 +207,15 @@ ASCII-rung claims are **inherited** from `buffer/width.go` and `term/caps.go`,
 both of which already document their own limits. Its risk section names which of
 its claims are unbenchmarked.
 
+Decision 9 follows the same pattern for the same reason: it is an API-shape
+decision about where a new layer sits above an existing one, made on the cost of
+the alternative (24 `Handle` signatures, plus what `TextInput` and `List` would
+lose) and on the published shape of OpenTUI's `@opentui/keymap`, rather than on
+a measurement of ours. Its two performance claims — 0 allocs on dispatch and a
+16-byte `Chord` — are **specified and pinned by named tests**, not measured
+today, and its `Chord` normalisation rules have never been run against a real
+terminal, which is ADR 0005's already-recorded risk extended one layer up.
+
 **Caveat worth repeating:** OpenTUI is a Zig core with TypeScript FFI bindings.
 Its numbers do not transfer to Go, and ADR 0002 exists precisely because we
 checked that assumption instead of inheriting it.
@@ -180,10 +224,15 @@ checked that assumption instead of inheriting it.
 
 These are tracked in [STATUS.md](../STATUS.md) and are **not** decided:
 
-- Colour model and degradation ladder
-- Headless backend as v1 vs v0.5 — largely settled by ADR 0001 in favour of
-  v1, but the assertion surface is still open
+- Colour model and degradation ladder — **built and working, but PROPOSED rather
+  than decided**: the redmean quantiser to 256 and 16 rungs has never been
+  checked for perceptual acceptability. `buffer.Quantiser` is the drop-in hook.
 - Kitty **graphics** in v1 (the kitty *keyboard* protocol is decided by ADR 0005)
+
+The headless backend's "v1 vs v0.5" question is **closed** — ADR 0001 settled it
+in favour of v1, and `headless.MemorySink` exposes the cell buffer rather than
+only recorded bytes. Its remaining open sub-question is the assertion surface,
+tracked in [STATUS.md](../STATUS.md).
 
 ### Scoped out by ADR 0005, with triggers recorded
 

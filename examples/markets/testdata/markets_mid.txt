@@ -31,10 +31,10 @@
 │  MXN/USD       18.3350   ▲ +0.93%                                    █│ │BTC ▲  █████████ 73 │
 │  BTC/USD      85492.00   ▲ +0.73%                                    █│ │EUR ▲  ████████ 65  │
 │  EUR/USD       0.89087   ▲ +0.65%                                    █│ │ETH ▲  ███████ 54   │
-│  ETH/USD       2701.83   ▲ +0.54%                                    █│ │                    │
-│  SEK/USD       10.0579   ▲ +0.29%                                    █│ │                    │
+│  ETH/USD       2701.83   ▲ +0.54%                                     │ │                    │
+│  SEK/USD       10.0579   ▲ +0.29%                                     │ │                    │
 │  GBP/USD       0.75753   ▲ +0.25%                                     │ │                    │
 │  NOK/USD        9.6494   ▲ +0.25%                                     │ │                    │
-│  JPY/USD        157.67   = -0.20%                                     │ │                    │
 └───────────────────────────────────────────────────────────────────────┘ └────────────────────┘
+[EUR/USD] GBP/USD  JPY/USD  [←→] pair  [home] first  [tab] panel  [space] pause  [r] fetch  [?]…
 markets  offline: bundled sample, no network  as of 2026-10-02  fetched 14:30:05Z

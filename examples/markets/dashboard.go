@@ -48,6 +48,8 @@ package main
 
 import (
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/serkanalgur/termmosaic"
 	"github.com/serkanalgur/termmosaic/buffer"
@@ -56,9 +58,23 @@ import (
 	"github.com/serkanalgur/termmosaic/widgets/basic"
 	"github.com/serkanalgur/termmosaic/widgets/block"
 	"github.com/serkanalgur/termmosaic/widgets/data"
+	"github.com/serkanalgur/termmosaic/widgets/form"
 	"github.com/serkanalgur/termmosaic/widgets/split"
 	"github.com/serkanalgur/termmosaic/widgets/viz"
 )
+
+// The rows below the bands that are not bands: one row of controls and one of
+// status.
+//
+// Two rather than one, because a screen whose only chrome is a status line
+// cannot say what the keys do, and a dashboard that has to be discovered by
+// pressing keys is not interactive, it is a puzzle. The control row is where the
+// key bindings and the currency pair live; the status row keeps the last place a
+// reader looks for "is this current", which is the bottom of the screen.
+//
+// Both are subtracted from the bands' height in adapt and counted in MinSize, so
+// the budget and the minimum cannot disagree about how many rows exist.
+const chromeRows = 2
 
 // The breakpoints, and the band's own geometry. Every one of these is a local
 // constant: ADR 0007 §1 rule 5 says a widget's thresholds are its own policy, and
@@ -83,8 +99,8 @@ const (
 
 	// minH is the shortest screen that shows all three bands at once: the KPI row,
 	// a sparkline, the table's own minimum, and the two gaps between them, plus the
-	// footer row.
-	minH = kpiH + bandGap + 5 + bandGap + 4 + 1
+	// rows below the bands that are not bands.
+	minH = kpiH + bandGap + 5 + bandGap + 4 + chromeRows
 
 	// bandGap is the cells between two panels. Panels are bordered, so a gap of
 	// zero would butt two borders together and read as one panel with a seam.
@@ -225,6 +241,39 @@ type dashboard struct {
 	// status is the footer: a single row of pre-formatted text.
 	status *basic.Text
 
+	// pair is the currency chooser: a Tabs row of the tracked majors, which is a
+	// focusable widget with its own key contract rather than three application-
+	// invented keys. Selecting a tab is what switches the primary pair, so the
+	// choice is visible, is hit-testable, and needs no separate commit key.
+	pair *form.Tabs
+
+	// hints is the key-binding affordance on the control row. It shows the
+	// FOCUSED widget's bindings, so it changes when the focus does rather than
+	// listing every binding at once and being unreadable at every width.
+	hints *form.KeyHint
+
+	// focusables is the tab ring, in reading order. Cycling it is the whole of the
+	// keyboard's focus routing, because neither widget consumes KeyTab — a fact a
+	// test asserts rather than assumes, since one of them growing a Tab binding
+	// would silently break navigation.
+	focusables []termmosaic.Focusable
+	// focusLabels names each entry of focusables, for the key hint.
+	focusLabels []string
+	// focus is the ring index. It starts at 0, which is the pair chooser, because
+	// that is the control a reader is most likely to want to change.
+	focus int
+
+	// paused suspends the automatic refresh, and helpOpen is whether the help
+	// overlay is showing. Both are read by Draw.
+	paused   bool
+	helpOpen bool
+
+	// OnRefresh is called when the user asks for a fetch. It is a callback rather
+	// than a call into the fetch loop because the dashboard must not know how data
+	// arrives — and because the callback is the seam a test drives instead of a
+	// network.
+	OnRefresh func()
+
 	// diag is the below-minimum diagnostic. It is a widget rather than a
 	// hand-drawn string so that it truncates through buffer's shared writers,
 	// which is what makes it legible at 20x8 instead of an ellipsis soup.
@@ -237,11 +286,41 @@ type dashboard struct {
 	noDataTitle *basic.Text
 	noDataBody  *basic.Paragraph
 
+	// helpBlk, helpTitle and helpBody are the overlay '?' reveals. They are built
+	// once, at construction, with their text already set: a help panel whose text
+	// is assembled when it is opened would allocate on the frame path the first
+	// time it was drawn, and an overlay that costs an allocation to appear is an
+	// overlay that stutters.
+	helpBlk   *block.Block
+	helpTitle *basic.Text
+	helpBody  *basic.Paragraph
+
+	// sparkTitle is the sparkline panel's current title, held so retitle can tell a
+	// real change from a republish of the same one — SetTitleString copies, so a
+	// title rewritten on every frame would allocate on the frame path.
+	sparkTitle string
+
 	// cur is the frame the widgets were last fed, and curGen the store generation
 	// it came from. Held so that the heartbeat can tell a republish of the frame
 	// already applied from a genuinely new one.
 	cur    *frame
 	curGen uint64
+
+	// market is the snapshot's market as last applied, held so that switching the
+	// primary pair can rebuild the frame without going back to the source. A
+	// market is immutable once fetched, so holding the pointer is holding a fact,
+	// not a copy of one — and rebuilding from it is what keeps a pair switch from
+	// costing a network round trip.
+	market *market
+	// snapAt is the instant cur was built from, carried so a pair switch can
+	// rebuild the status line without reading the clock a second time and showing
+	// two different fetch times in one frame.
+	snapAt time.Time
+	// snapErr and snapSrc are the failure and the source label for the same
+	// reason: the status line is a function of them, and rebuilding the frame must
+	// reproduce it.
+	snapErr error
+	snapSrc string
 
 	// statusText is the footer's current string, and noDataShown the failure panel's,
 	// both held so that a republish of unchanged text costs a string comparison
@@ -326,6 +405,55 @@ func newDashboard(w, h int) *dashboard {
 	d.status = basic.NewTextString(buffer.Rect{}, "", stMuted)
 	d.status.SetBackground(stBody)
 
+	// The currency chooser. Three majors, chosen because they are the three the
+	// window response has carried reliably and because three is enough to show the
+	// tab row scrolling when it does not fit.
+	//
+	// EUR comes first because it is the pair every other row is quoted against, so
+	// the default selection is the one that makes the rest of the screen
+	// self-consistent: the sparkline, the gauge and the KPI tile are all about the
+	// same pair the table's first FX row is.
+	d.pair = form.NewTabs(buffer.Rect{}, pairLabels())
+	d.pair.TabStyle = stMuted
+	d.pair.SelectedStyle = stAccent
+	d.pair.Background = stBody
+	// The default tab is the default pair. The lookup's boolean is deliberately
+	// ignored: the default pair is selectablePairs' first entry by construction,
+	// and a pair that fell out of that list would be a data bug this line should
+	// not paper over — the tab row would then highlight whatever is at index 0.
+	d.pair.SetSelected(indexOfOrZero(primaryPair))
+	// OnSelect rather than a key handler: the tab row already maps left and right
+	// to the previous and next pair, and routing the pair change through its own
+	// callback means the widget's key contract is the only description of which
+	// keys change the pair.
+	d.pair.OnSelect = func(i int) {
+		if code, ok := pairCodeAt(i); ok {
+			d.setPair(code)
+		}
+	}
+
+	d.hints = form.NewKeyHint(buffer.Rect{}, nil)
+	d.hints.KeyStyle = stAccent
+	d.hints.HelpStyle = stMuted
+	d.hints.SeparatorStyle = stMuted
+	d.hints.Background = stBody
+
+	d.helpBlk = block.New(buffer.Rect{})
+	d.helpBlk.SetBorder(buffer.BorderPlain)
+	d.helpBlk.SetBorderStyle(stEdge)
+	d.helpBlk.SetBackground(stPanel)
+	d.helpBlk.SetTitleString("keys", stTitle)
+	d.helpTitle = basic.NewTextString(buffer.Rect{}, helpTitleText, stMuted)
+	d.helpTitle.SetBackground(stPanel)
+	d.helpBody = basic.NewParagraphString(buffer.Rect{}, helpBodyText, stMuted)
+	d.helpBody.SetBackground(stPanel)
+
+	// The ring, in reading order: the chooser is above the bands and the table is
+	// below them, so the order is the order a reader's eye travels.
+	d.focusables = []termmosaic.Focusable{d.pair, d.table}
+	d.focusLabels = []string{"pair", "pairs table"}
+	d.setFocus(0)
+
 	d.diag = basic.NewTextString(buffer.Rect{}, tooSmallText, stMuted)
 	d.diag.SetBackground(stBody)
 
@@ -384,10 +512,17 @@ func newDashboard(w, h int) *dashboard {
 func (d *dashboard) applyRung() {
 	for _, b := range []*block.Block{
 		d.spark.Block(), d.gauge.Block(), d.meter.Block(),
-		d.table.Block(), d.chart.Block(), d.noDataBlk,
+		d.table.Block(), d.chart.Block(), d.noDataBlk, d.helpBlk,
 	} {
 		b.Ascii = asciiRung
 	}
+	// The two chrome widgets carry GLYPHS of their own — the tab row's brackets and
+	// the hint's arrows — so the ASCII rung has to reach them as well. Missing this
+	// would leave a monochrome terminal showing box-drawing brackets from a widget
+	// that was told to use ASCII, which is the kind of half-degraded screen nobody
+	// can report usefully.
+	d.pair.Ascii = asciiRung
+	d.hints.Ascii = asciiRung
 	for i := range d.stat {
 		d.stat[i].blk.Ascii = asciiRung
 	}
@@ -408,11 +543,11 @@ func (d *dashboard) MinSize() buffer.Size {
 	// the one that has to fit at the narrowest width.
 	//
 	// The heights are the same three terms the height budget declares, gaps
-	// included, plus the footer row. Deriving both from one place is what keeps them
-	// from drifting: a MinSize claiming a height the budget would not honour would
-	// put the screen above its own minimum and still drawing the diagnostic, which
-	// is the one state an application cannot reason about.
-	h := (kpiH + bandGap) + (d.seriesHeightFor(arrSingle) + bandGap) + d.detailHeight() + 1
+	// included, plus the rows below the bands. Deriving both from one place is what
+	// keeps them from drifting: a MinSize claiming a height the budget would not
+	// honour would put the screen above its own minimum and still drawing the
+	// diagnostic, which is the one state an application cannot reason about.
+	h := (kpiH + bandGap) + (d.seriesHeightFor(arrSingle) + bandGap) + d.detailHeight() + chromeRows
 	return buffer.Size{W: narrowW, H: h}
 }
 
@@ -420,17 +555,201 @@ func (d *dashboard) MinSize() buffer.Size {
 // rectangle every frame, so there is no finer-grained state to mark.
 func (d *dashboard) Invalidate() {}
 
-// Handle satisfies termmosaic.Widget. The dashboard routes a resize to SetBounds
-// so that a caller may drive it through the ordinary event path; everything else
-// belongs to the widgets, and the only key the application itself claims is the
-// one that quits.
+// Handle routes an event: a resize to SetBounds, and everything else through the
+// focus ring to whichever widget owns it.
+//
+// # The composition contract
+//
+// This is the whole of the interaction design, and it is deliberately one line
+// long per case. Widgets own their keys — the table consumes the arrows, the tab
+// row consumes left and right — and the application owns the routing and the keys
+// no widget wants: Tab, space, r, ?, and the quit keys. Neither half knows about
+// the other, which is why adding a panel to this screen means adding it to the
+// focus ring and nothing else.
+//
+// A key the application claims is consumed even when it did nothing visible, so a
+// form never falls through to the next field because the user pressed space at the
+// end of a list. That is the same rule form.Select applies internally, and it is
+// what stops '?' from reaching the table as a stray rune.
+//
+// The caller must invoke this on the render goroutine: Handle mutates the focus
+// index, the pause flag and the pair, all of which Draw reads.
 func (d *dashboard) Handle(ev termmosaic.Event) bool {
-	if ev.Kind == termmosaic.EventResize {
+	switch ev.Kind {
+	case termmosaic.EventResize:
 		d.SetBounds(buffer.Rect{W: ev.Size.W, H: ev.Size.H})
 		return true
+	case termmosaic.EventMouse:
+		return d.handleMouse(ev)
+	case termmosaic.EventKey:
+		return d.handleKey(ev)
+	default:
+		return false
+	}
+}
+
+// handleKey is the application's own routing. Everything it does not claim goes
+// to the focused widget, and the widget's own key contract decides whether it was
+// consumed.
+func (d *dashboard) handleKey(ev termmosaic.Event) bool {
+	// The help overlay is MODAL over the keyboard but not over the mouse: a reader
+	// who has opened it and then clicks a table row expects the row to be selected,
+	// and a modal that swallowed the mouse too would be a worse overlay than no
+	// overlay. Any key other than the ones below dismisses it, which is why this
+	// runs before the focus ring.
+	if d.helpOpen {
+		switch ev.Key {
+		case termmosaic.KeyEscape, termmosaic.KeyEnter:
+			d.helpOpen = false
+			return true
+		}
+		if ev.Mod == 0 && (ev.Rune == '?' || ev.Rune == 'q' || ev.Rune == 'Q') {
+			d.helpOpen = false
+			return true
+		}
+	}
+
+	switch {
+	case isCtrlC(ev):
+		return true // the caller quits; see run
+	case ev.Mod == 0 && (ev.Rune == 'q' || ev.Rune == 'Q'):
+		return true
+	case ev.Key == termmosaic.KeyEscape:
+		return true
+	case ev.Mod == 0 && ev.Rune == '?':
+		d.helpOpen = !d.helpOpen
+		return true
+	}
+
+	switch ev.Key {
+	case termmosaic.KeyTab:
+		d.cycleFocus(false)
+		return true
+	case termmosaic.KeyBacktab:
+		d.cycleFocus(true)
+		return true
+	}
+
+	switch ev.Mod {
+	case 0:
+		switch ev.Rune {
+		case ' ':
+			// Space pauses the auto-refresh. It is the application's key rather
+			// than a widget's because the thing it pauses is the FETCH, which no
+			// widget knows about.
+			d.SetPaused(!d.Paused())
+			return true
+		case 'r':
+			if d.OnRefresh != nil {
+				d.OnRefresh()
+			}
+			return true
+		}
+	}
+
+	if i := d.focusIndex(); i >= 0 && i < len(d.focusables) {
+		return d.focusables[i].Handle(ev)
 	}
 	return false
 }
+
+// handleMouse offers the event to every focusable widget and takes focus from the
+// one that consumed it: a click on a table row both selects the row and makes the
+// table the keyboard's target, which is what a user expects and what no widget can
+// do on its own.
+//
+// The focusable order is the reading order, so a click that two widgets could
+// claim — none currently overlap — goes to the one a reader would have aimed at.
+func (d *dashboard) handleMouse(ev termmosaic.Event) bool {
+	for i, w := range d.focusables {
+		if w.Handle(ev) {
+			d.setFocus(i)
+			return true
+		}
+	}
+	return false
+}
+
+// isCtrlC reports whether ev is the interrupt chord, in the decoder's vocabulary.
+//
+// Ctrl-C arrives as Ctrl+'c' rather than as 0x03, so the raw-byte spelling of this
+// check would be comparing against a byte the decoder has already consumed.
+func isCtrlC(ev termmosaic.Event) bool {
+	return ev.Mod == termmosaic.ModCtrl && (ev.Rune == 'c' || ev.Rune == 'C')
+}
+
+// focusIndex returns which widget has the keyboard, or -1 when the ring is empty.
+func (d *dashboard) focusIndex() int { return d.focus }
+
+// FocusIndex reports which panel the keyboard is aimed at, which is what the tests
+// assert on after a simulated Tab and what an application would read to build its
+// own chrome.
+func (d *dashboard) FocusIndex() int { return d.focus }
+
+// FocusLabel names the focused panel, for the key hint's first binding.
+//
+// It is a parallel list rather than something derived from the widget, because a
+// widget's own bounds say where it is and nothing about what it is called. Keeping
+// the two lists the same length is asserted by a test, because a ring with a label
+// list shorter than it is a panic waiting for the reader who tabs far enough.
+func (d *dashboard) FocusLabel() string {
+	if d.focus < 0 || d.focus >= len(d.focusLabels) {
+		return "none"
+	}
+	return d.focusLabels[d.focus]
+}
+
+// cycleFocus moves the keyboard's target by one widget, wrapping. back is
+// shift-tab.
+func (d *dashboard) cycleFocus(back bool) {
+	n := len(d.focusables)
+	if n == 0 {
+		return
+	}
+	step := 1
+	if back {
+		step = -1
+	}
+	d.setFocus(((d.focus+step)%n + n) % n)
+}
+
+// setFocus focuses the i-th focusable and unfocuses the rest. A widget that keeps
+// its selection while unfocused is what makes tabbing back to it useful.
+func (d *dashboard) setFocus(i int) {
+	if i < 0 || i >= len(d.focusables) {
+		return
+	}
+	d.focus = i
+	for j, w := range d.focusables {
+		w.SetFocused(j == i)
+	}
+	// The bindings on the control row are the FOCUSED widget's, so they change
+	// here rather than in Draw. SetBindings copies, which would allocate on the
+	// frame path, so it is called on the interaction path where an allocation costs
+	// nothing.
+	d.syncHints()
+}
+
+// Paused reports whether the automatic refresh is suspended.
+func (d *dashboard) Paused() bool { return d.paused }
+
+// SetPaused suspends or resumes the automatic refresh.
+//
+// It is the dashboard's state rather than main's because the control row has to
+// SHOW it — a pause the reader cannot see is indistinguishable from a fetch that
+// is slow — and a second source of truth for the same flag is how the row and the
+// fetch loop start to disagree.
+func (d *dashboard) SetPaused(v bool) {
+	if d.paused == v {
+		return
+	}
+	d.paused = v
+	d.syncHints()
+	d.syncStatus()
+}
+
+// HelpOpen reports whether the help overlay is showing.
+func (d *dashboard) HelpOpen() bool { return d.helpOpen }
 
 // SetBounds resizes the screen and drops the layout cache, so the next Draw
 // re-derives the arrangement from the new rectangle (ADR 0007 §3).
@@ -470,6 +789,10 @@ func (d *dashboard) SetFrame(f *frame) {
 	}
 	d.cur = f
 	d.curGen = f.gen
+	d.market = f.market
+	d.snapAt = f.at
+	d.snapErr = f.err
+	d.snapSrc = f.source
 
 	d.spark.SetValues(f.series)
 	// The sparkline's normalisation is cached against the interior, and a new
@@ -497,15 +820,36 @@ func (d *dashboard) SetFrame(f *frame) {
 		d.stat[i].set(f.tiles[i])
 	}
 
-	// The footer, from the same pre-formatted string the frame carries. Only when it
-	// changed, because SetSpans copies.
-	if f.status != d.statusText {
-		d.statusText = f.status
-		d.status.SetText(f.status, statusStyle(f))
-	}
-
+	d.syncStatus()
 	d.setNoData(f)
+	// The sparkline's panel title names the pair, so a switch has to relabel it.
+	// It is done here rather than at the point of the switch because SetFrame is
+	// the only path that knows what is on screen now, and two callers relabelling
+	// is how the panel and the data drift apart.
+	d.retitle(f.pair)
 	d.lay.valid = false
+}
+
+// syncStatus republishes the footer, which is a function of the frame AND of the
+// pause flag — a paused dashboard must say so, because a screen that stops
+// updating without saying why is indistinguishable from one that has hung.
+//
+// It is separate from SetFrame for exactly that reason: pausing changes no data,
+// so there is no new frame to apply, and a footer that only updated with data
+// would leave a paused screen lying about being live.
+func (d *dashboard) syncStatus() {
+	if d.cur == nil {
+		return
+	}
+	want := d.cur.status
+	if d.paused {
+		want += "  PAUSED"
+	}
+	if want == d.statusText {
+		return
+	}
+	d.statusText = want
+	d.status.SetText(want, statusStyle(d.cur))
 }
 
 // statusStyle is the footer's one style decision: a screen carrying a failure is
@@ -541,6 +885,138 @@ func (d *dashboard) setNoData(f *frame) {
 
 // noDataReason is the headline of the failure panel, above the transport error.
 const noDataReason = "Neither source answered. The screen will fill in as soon as one does."
+
+// The key hint's bindings, per focused widget.
+//
+// They are the focused widget's OWN key contract, restated rather than
+// discovered. That is the point of showing them: a reader who does not know that
+// the table takes PageDown learns it from the row rather than by pressing it and
+// watching nothing happen. The bindings the application itself claims are on
+// every panel's list, because they work wherever the focus is.
+//
+// The arrows are ARROW GLYPHS and not the words, and the help text is one word.
+// Both are because this row is a fixed width that has to survive truncation with
+// an ellipsis: a hint written in full words is cut off before it reaches "quit",
+// and a hint whose last visible binding is not the one that gets you out is a
+// worse affordance than no hint. The full spelling is on the help overlay, which
+// is what '?' is for.
+//
+// Returned as a value rather than stored, and only when the focus or a toggle
+// changes, because SetBindings COPIES its argument: building this on the frame path
+// would allocate every frame, while building it in Handle is the interaction path,
+// where an allocation costs nothing.
+func (d *dashboard) bindings() []form.Binding {
+	b := []form.Binding{
+		{Key: "tab", Help: "panel"},
+		{Key: "space", Help: pauseWord(d.paused)},
+		{Key: "r", Help: "fetch"},
+		{Key: "?", Help: helpWord(d.helpOpen)},
+		{Key: "q", Help: "quit"},
+	}
+	switch d.FocusLabel() {
+	case "pairs table":
+		b = append([]form.Binding{
+			{Key: "↑↓", Help: "row"},
+			{Key: "pgup", Help: "page"},
+			{Key: "home", Help: "first"},
+		}, b...)
+	case "pair":
+		b = append([]form.Binding{
+			{Key: "←→", Help: "pair"},
+			{Key: "home", Help: "first"},
+		}, b...)
+	}
+	return b
+}
+
+// pauseWord and helpWord are the two bindings whose help text depends on the state
+// they toggle. Naming the ACTION rather than the key is what makes the hint usable
+// without prior knowledge: "[space] pause" tells a reader what the key does, and a
+// static "[space]" does not.
+func pauseWord(paused bool) string {
+	if paused {
+		return "resume"
+	}
+	return "pause"
+}
+
+func helpWord(open bool) string {
+	if open {
+		return "hide keys"
+	}
+	return "keys"
+}
+
+// syncHints pushes the focused widget's bindings onto the control row.
+//
+// It is called on the interaction path only, and it is idempotent in effect: the
+// hint caches its line against its rect and its binding count, so re-setting the
+// same bindings would only rebuild when they differ.
+func (d *dashboard) syncHints() {
+	d.hints.SetBindings(d.bindings())
+}
+
+// The help overlay's text.
+//
+// Two lines rather than one paragraph, and each line is a GROUP rather than a list,
+// because a reader looking for a key scans for a shape they recognise and a wall of
+// bindings is a wall. The mouse line is on the panel because mouse capture is on
+// for this example and a reader would otherwise assume the wheel does nothing.
+//
+// The text is a constant rather than built from the binding table above, for the
+// same reason the hint's is not: a help panel assembled at open time allocates on
+// the frame path, and the two would then be able to disagree about which keys
+// exist.
+const (
+	helpTitleText = "markets — keys and mouse"
+	helpBodyText  = "" +
+		"keyboard\n" +
+		"  tab / shift-tab   next / previous panel\n" +
+		"  arrows            move within the focused panel\n" +
+		"  pgup / pgdn       page · home / end  first / last\n" +
+		"  space             pause or resume the auto refresh\n" +
+		"  r                 fetch now\n" +
+		"  ?                 show or hide this panel\n" +
+		"  q, esc, ctrl-c    quit\n" +
+		"\n" +
+		"mouse\n" +
+		"  wheel             scroll the pairs table\n" +
+		"  click a row       select it and focus the table\n" +
+		"  click a tab       change the primary pair\n" +
+		"\n" +
+		"mouse capture is ON while this screen runs, and is handed back to the\n" +
+		"shell on every exit path — including an error and ctrl-c."
+)
+
+// The help text's own measurements, computed once at construction.
+//
+// They are measured rather than written as literals because a literal width is a
+// number a future edit to the text would silently invalidate — the panel would
+// size itself for text that no longer exists and clip the line that does.
+var (
+	helpTextW     = longestLine(helpBodyText)
+	helpTextLines = strings.Count(helpBodyText, "\n") + 1
+	// helpBodyPad is the rows the body asks for beyond its own lines: the panel's
+	// top and bottom border. It is the same two cells helpPanelSize adds, named on
+	// both sides so the two cannot disagree about what the border costs.
+	helpBodyPad = 2
+)
+
+// longestLine returns the width in cells of the widest line in s.
+//
+// buffer.RuneWidth is used rather than a byte count because the text contains
+// em-dashes and middots, which are three bytes each and one or two cells wide: a
+// byte count would size the panel for text twice as wide as it renders and clip
+// the right-hand column for no reason.
+func longestLine(s string) int {
+	widest := 0
+	for _, line := range strings.Split(s, "\n") {
+		if n := buffer.StringWidth(line); n > widest {
+			widest = n
+		}
+	}
+	return widest
+}
 
 // tooSmallText is what the screen says below MinSize.
 //
@@ -588,12 +1064,137 @@ func (d *dashboard) Draw(buf *buffer.Buffer) {
 	}
 
 	d.adapt(r)
-	d.drawStatus(buf, r)
+	d.drawChrome(buf, r)
 	if d.cur.noData {
 		d.drawNoData(buf, r)
+	} else {
+		d.bands.Draw(buf)
+	}
+	// The overlay goes LAST, over everything. It is the only thing drawn after the
+	// bands rather than before them, because an overlay under the panels would be an
+	// overlay nobody could read.
+	//
+	// It is drawn even in the failure case, because a reader whose screen has gone
+	// empty is exactly the reader who needs to know which key quits.
+	if d.helpOpen {
+		d.drawHelp(buf, r)
+	}
+}
+
+// drawChrome paints the two rows below the bands: the controls and the status.
+//
+// Both are pinned to the bottom rather than stacked below the bands, so they are
+// visible at every height instead of being the first thing a grow would reveal. The
+// control row is ABOVE the status row because the bindings are what a reader looks
+// for first and the fetch time is what they look for when something is wrong.
+func (d *dashboard) drawChrome(buf *buffer.Buffer, r buffer.Rect) {
+	controls := buffer.Rect{X: r.X, Y: r.Bottom() - chromeRows, W: r.W, H: 1}
+	status := buffer.Rect{X: r.X, Y: r.Bottom() - 1, W: r.W, H: 1}
+
+	// The tab row takes the width its labels need and the hint takes the rest. The
+	// split is arithmetic rather than a solve because there is one constraint and
+	// one remainder — a Solve call here would be the second solver in an example
+	// whose whole point is that there is one, and it would allocate.
+	pairW := pairRowW(controls.W)
+	hintW := controls.W - pairW
+	if hintW < 0 {
+		hintW = 0
+	}
+	d.pair.SetBounds(buffer.Rect{X: controls.X, Y: controls.Y, W: pairW, H: 1})
+	d.pair.Draw(buf)
+	d.hints.SetBounds(buffer.Rect{X: controls.X + pairW, Y: controls.Y, W: hintW, H: 1})
+	d.hints.Draw(buf)
+
+	d.status.SetBounds(status)
+	d.status.Draw(buf)
+}
+
+// pairRowNeed is the width the chooser's labels want: each label plus the two
+// marker cells the widget puts around it, and the gap that separates the row from
+// the hint.
+//
+// It is computed ONCE rather than per frame, because pairLabels allocates: a width
+// derived from a freshly built label slice would put an allocation on the frame
+// path, and the labels are a constant list.
+var pairRowNeed = measurePairRow()
+
+// measurePairRow is pairRowNeed's derivation, kept as a function so the expression
+// is written once and the variable is plainly a constant.
+func measurePairRow() int {
+	need := bandGap
+	for _, l := range pairLabels() {
+		// Two marker cells per tab: the widget brackets the selected tab and
+		// space-pads every other one, so every tab is its label plus two.
+		need += len(l) + 2
+	}
+	return need
+}
+
+// pairRowW is pairRowNeed capped to a row w cells wide, so the rect is never
+// negative — and never larger than the row it is drawn on, which at the narrowest
+// width the dashboard draws at is the only thing that stops the tab row painting
+// over the hint.
+func pairRowW(w int) int {
+	if pairRowNeed > w {
+		return w
+	}
+	return pairRowNeed
+}
+
+// drawHelp paints the help overlay, centred over the screen.
+//
+// Centred rather than pinned, because a help panel in a corner is read as part of
+// the chrome and this is an interruption. It is sized to its own text with a margin,
+// and CLIPPED to the screen, so at a terminal too small for it the panel is a
+// smaller panel rather than an off-screen one — ADR 0007 §1 rule 2.
+//
+// The rectangle is total for every screen size, including one too small for the
+// text: helpPanelSize caps it, so the panel shrinks rather than running off the
+// edge (ADR 0007 §1 rule 2).
+func (d *dashboard) drawHelp(buf *buffer.Buffer, r buffer.Rect) {
+	// The panel is sized from the help text's own measurements rather than by
+	// wrapping the paragraph here: wrapping allocates, and this runs on the frame
+	// path. Both figures are computed ONCE, at construction, from the same constant
+	// the panel shows.
+	w, h := helpPanelSize(r.W, r.H, helpTextW, helpTextLines+helpBodyPad)
+
+	// Centring is integer arithmetic rather than a layout.Solve, and the reason is
+	// worth stating because this file uses the solver everywhere else: Solve
+	// ALLOCATES a fresh slice per call, and this runs on the frame path. A centred
+	// overlay is one subtraction on each axis and has no breakpoints, so there is
+	// no policy for a solver to express — the bands' layout has breakpoints and a
+	// height budget, and this has neither.
+	panel := buffer.Rect{
+		X: r.X + (r.W-w)/2,
+		Y: r.Y + (r.H-h)/2,
+		W: w,
+		H: h,
+	}
+	d.helpBlk.SetBounds(panel)
+	d.helpBlk.Draw(buf)
+	in := d.helpBlk.Interior()
+	if in.Empty() {
 		return
 	}
-	d.bands.Draw(buf)
+	d.helpTitle.SetBounds(buffer.Rect{X: in.X, Y: in.Y, W: in.W, H: 1})
+	d.helpTitle.Draw(buf)
+	d.helpBody.SetBounds(buffer.Rect{X: in.X, Y: in.Y + 1, W: in.W, H: in.H - 1})
+	d.helpBody.Draw(buf)
+}
+
+// helpMargin is the cells between the help panel and the screen's edge, so it never
+// touches the border and the reader can see it is an overlay rather than a new
+// layout.
+const helpMargin = 2
+
+// helpPanelSize is the panel's size for a screen of w by h around content of cw by
+// ch: the content plus its border, capped at the screen less the margin.
+//
+// It is capped rather than allowed to overflow because an overlay that runs off the
+// edge of the screen is worse than a truncated one: the reader loses the QUIT key,
+// which is the one line the panel exists to guarantee.
+func helpPanelSize(w, h, cw, ch int) (int, int) {
+	return min(cw+2, max(1, w-2*helpMargin)), min(ch+3, max(1, h-2*helpMargin))
 }
 
 // enough reports whether r is large enough for the bands at all.
@@ -625,7 +1226,7 @@ func (d *dashboard) drawStatus(buf *buffer.Buffer, r buffer.Rect) {
 // It occupies the whole area above the footer, because an empty grid of panels
 // with nothing in them reads as a bug rather than as an outage.
 func (d *dashboard) drawNoData(buf *buffer.Buffer, r buffer.Rect) {
-	body := buffer.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H - 1}
+	body := buffer.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H - chromeRows}
 	if body.Empty() {
 		return
 	}
@@ -641,6 +1242,66 @@ func (d *dashboard) drawNoData(buf *buffer.Buffer, r buffer.Rect) {
 	rest := buffer.Rect{X: in.X, Y: in.Y + 1, W: in.W, H: in.H - 1}
 	d.noDataBody.SetBounds(rest)
 	d.noDataBody.Draw(buf)
+}
+
+// setPair switches the primary pair and rebuilds the frame for it.
+//
+// The rebuild is from the MARKET ALREADY HELD rather than from the source, which
+// is what makes switching instant: a network round trip to redraw a label is a
+// spinner the reader did not ask for. The generation is bumped rather than
+// reused, because SetFrame skips a republish of the generation it already applied
+// and a pair switch with the store's generation would therefore be silently
+// dropped.
+//
+// A pair the held market has no window for produces a frame whose sparkline and
+// gauge report the absence — see market.withPair — rather than one that keeps
+// drawing the previous pair's shape.
+func (d *dashboard) setPair(code string) {
+	if d.market == nil || d.market.primary == code {
+		return
+	}
+	m := d.market.withPair(code)
+	if m == nil {
+		return
+	}
+	// The tab row is the control that caused this, so its own selection is already
+	// right; setting it again would be harmless but would make the widget's state a
+	// function of two writers.
+	d.applyFrame(buildFrame(&snapshot{
+		m: m, err: d.snapErr, at: d.snapAt, source: d.snapSrc, ok: m.anyData(),
+		gen: d.curGen + 1,
+	}))
+	// The hint names the focused panel's bindings and the overlay's own state, and
+	// a pair switch changes neither — so nothing here re-pushes them. It is
+	// mentioned because the obvious "re-sync everything" instinct would add an
+	// allocation per switch for no visible change.
+}
+
+// applyFrame feeds the widgets a frame the application rebuilt itself, which is
+// what a pair switch does.
+//
+// It is SetFrame without the generation check, because the frame it is given is by
+// definition not one the store has published: the generation is bumped by the
+// caller precisely so that SetFrame's "already applied" test cannot swallow it.
+func (d *dashboard) applyFrame(f *frame) {
+	d.SetFrame(f)
+}
+
+// retitle points the sparkline's panel at pair.
+//
+// It is a no-op when the title already says that, because SetTitleString copies
+// and a title rewritten on every frame would allocate on the frame path for a
+// string that did not change.
+func (d *dashboard) retitle(pair string) {
+	if pair == "" {
+		return
+	}
+	title := pair + "/USD, last " + strconv.Itoa(windowDays) + "d"
+	if d.sparkTitle == title {
+		return
+	}
+	d.sparkTitle = title
+	d.spark.Block().SetTitleString(title, stTitle)
 }
 
 // adapt derives the arrangement from the rectangle, or reuses what was derived
@@ -697,18 +1358,24 @@ func (d *dashboard) adapt(r buffer.Rect) {
 	d.regions[bandKPI] = geometry.Region{Size: kpiH + bandGap, Prio: geometry.PrioHigh}
 	d.regions[bandSeries] = geometry.Region{Size: d.seriesHeight() + bandGap, Prio: geometry.PrioNormal}
 	d.regions[bandDetail] = geometry.Region{Size: d.detailHeight(), Prio: geometry.PrioHigh}
-	// The footer is not a band — it is outside the bands' split entirely, pinned to
-	// the last row — but it is PrioAlways in spirit: a screen with no status line is
-	// a screen that cannot say it is stale, which is the one thing this example
-	// exists to demonstrate. It is subtracted rather than budgeted because it cannot
-	// be dropped.
-	show := geometry.Budget(d.regions[:], r.H-1)
+	// The chrome below the bands is not a band — it is outside the bands' split
+	// entirely, pinned to the bottom rows — but it is PrioAlways in spirit: a screen
+	// with no status line is a screen that cannot say it is stale, and a screen with
+	// no key bindings is a screen whose interactivity nobody can discover. It is
+	// SUBTRACTED rather than budgeted because it cannot be dropped.
+	//
+	// chromeRows is used here rather than a literal because this is the third place
+	// that has to agree about how many rows exist — with MinSize and with
+	// drawChrome — and a chrome row that is budgeted for but not reserved would be a
+	// band drawn over the control row, which is the exact stale-cell failure ADR
+	// 0007 §1 rule 3 is about, reached from the other direction.
+	show := geometry.Budget(d.regions[:], r.H-chromeRows)
 	a.showSeries = show[bandSeries] && d.hasSeries()
 	a.showDetail = show[bandDetail] && len(d.cur.rows) > 0
 
 	d.configureChildren(a)
 
-	d.bands.SetBounds(buffer.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H - 1})
+	d.bands.SetBounds(buffer.Rect{X: r.X, Y: r.Y, W: r.W, H: r.H - chromeRows})
 	d.bands.SetConstraints(d.bandConstraints(a))
 }
 

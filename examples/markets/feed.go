@@ -80,6 +80,64 @@ const (
 // because the base is USD.
 const primaryPair = "EUR"
 
+// selectablePairs are the currencies the on-screen chooser offers, in the order it
+// shows them.
+//
+// Three, and only three: they are the majors this example's window response has
+// carried reliably, and the list is deliberately short so the tab row fits without
+// scrolling at the narrowest width the dashboard draws at — a control that has to
+// be scrolled to discover what else it offers is worse than a short one. EUR is
+// first because every other row on the screen is quoted against USD and EUR is the
+// pair the rest of the dashboard was built around, so the default selection makes
+// the whole screen self-consistent.
+//
+// It is a SUBSET of trackedFX rather than a separate list, and a test asserts
+// that: a chooser offering a currency the table never fetches would be a control
+// that can select a pair with no rates at all.
+var selectablePairs = []string{"EUR", "GBP", "JPY"}
+
+// pairLabels are the chooser's tab labels, which are the PAIRS rather than the
+// bare currency codes. "/USD" is what makes a tab unambiguous at a glance: a row
+// of three three-letter codes is a list a reader has to decode.
+func pairLabels() []string {
+	out := make([]string, len(selectablePairs))
+	for i, c := range selectablePairs {
+		out[i] = c + "/USD"
+	}
+	return out
+}
+
+// pairTabIndex is the chooser index of a currency code, and whether it is offered.
+func pairTabIndex(code string) (int, bool) {
+	for i, c := range selectablePairs {
+		if c == code {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// pairCodeAt is the currency a chooser index names, and whether the index is in
+// range. It is the inverse of pairTabIndex because the tab row speaks in indices
+// and the rest of the program speaks in codes, and translating at the boundary is
+// what stops an index from being read as a code.
+func pairCodeAt(i int) (string, bool) {
+	if i < 0 || i >= len(selectablePairs) {
+		return "", false
+	}
+	return selectablePairs[i], true
+}
+
+// indexOfOrZero is pairTabIndex without the boolean, for the one caller — the
+// chooser's initial selection — where "not offered" has no better answer than the
+// first tab and where a test asserts the default pair is in the list.
+func indexOfOrZero(code string) int {
+	if i, ok := pairTabIndex(code); ok {
+		return i
+	}
+	return 0
+}
+
 // windowDays is how many calendar days of history the sparkline is given. Thirty
 // is about twenty-two publications — a month of trading — which is enough to show
 // a trend rather than a wobble.
@@ -161,6 +219,19 @@ type market struct {
 	dates []string
 	// history is the primary pair's rate on each of those dates, aligned to dates.
 	history []float64
+	// series is EVERY tracked currency's window, not only the primary's.
+	//
+	// The range request already asks for all of trackedFX — one request, twelve
+	// currencies — and this map is where those eleven answers were being thrown
+	// away. Keeping them is what makes the pair control honest: switching the
+	// primary pair has to be able to switch the window too, because a sparkline
+	// titled "GBP/USD" drawn from the EUR series is a lie told in shapes rather
+	// than in words.
+	//
+	// A currency absent from this map has no window, and the screen says so by
+	// dropping the panels that need one rather than by drawing another currency's
+	// shape.
+	series map[string]series
 	// primary is the currency history tracks, and the pair the sparkline and the
 	// gauge are about. It is a field rather than a bare reference to the constant
 	// so that a market built from a fixture can be about a different pair without
@@ -184,7 +255,46 @@ func newMarket() *market {
 		rates:   map[string]float64{},
 		prev:    map[string]float64{},
 		crypto:  cryptoBook{},
+		series:  map[string]series{},
 	}
+}
+
+// series is one currency's window: the publication dates it has a positive rate
+// on, oldest first, and the rate on each, aligned to those dates.
+//
+// It is a pair of slices rather than a map for the same reason m.dates and
+// m.history are: a sparkline is an ORDERED thing, and a date-keyed map would
+// hand the widget an order Go does not promise.
+type series struct {
+	dates []string
+	rates []float64
+}
+
+// withPair returns a copy of m whose primary pair is code, with the window
+// fields taken from that currency's own series.
+//
+// A copy rather than a mutation, because a market is immutable once built and
+// three of them — the store's, the frame builder's and the widgets' — hold the
+// same pointer at once. Sharing the maps and slices is safe for the same reason
+// the original sharing was: nothing writes to a market after Fetch returns.
+//
+// A currency with no series yields a market with an EMPTY window rather than the
+// primary's. That is the whole point: the sparkline, the gauge and the two window
+// extremes then say there is no history instead of drawing another currency's
+// shape under this one's name.
+func (m *market) withPair(code string) *market {
+	if m == nil {
+		return nil
+	}
+	out := *m
+	out.primary = code
+	s, ok := m.series[code]
+	if !ok {
+		out.dates, out.history = nil, nil
+		return &out
+	}
+	out.dates, out.history = s.dates, s.rates
+	return &out
 }
 
 // primary is the currency history and the sparkline track.
@@ -333,50 +443,77 @@ func (l *liveSource) fetchFX(ctx context.Context, m *market) error {
 		}
 	}
 
-	series, err := l.fetchFXWindow(ctx, spot.Date)
+	win, err := l.fetchFXWindow(ctx, spot.Date)
 	if err != nil {
 		m.failures = append(m.failures, "history "+oneLine(err))
 		return nil
 	}
-	absorbSeries(m, series)
+	absorbSeries(m, win)
 	return nil
 }
 
-// absorbSeries copies a range response into m: the primary pair's history in date
-// order, and the previous publication day's full snapshot for the change column.
+// absorbSeries copies a range response into m: EVERY tracked currency's window in
+// date order, and the previous publication day's full snapshot for the change
+// column.
 //
-// A date whose primary rate is missing is dropped from BOTH slices rather than
-// having a zero substituted for it: a series silently shifted by one entry is a
-// worse lie than a shorter series, and zero is a rate no currency has.
-func absorbSeries(m *market, series *fxSeries) {
-	dates := make([]string, 0, len(series.Rates))
-	for d := range series.Rates {
+// Every currency rather than only the primary, because the response already
+// carries all twelve and the pair control needs to be able to switch the window
+// as well as the headline figures. A currency the response does not carry gets no
+// entry at all, so withPair reports the absence rather than substituting one.
+//
+// A date whose rate is missing is dropped from THAT currency's two slices rather
+// than having a zero substituted for it: a series silently shifted by one entry is
+// a worse lie than a shorter series, and zero is a rate no currency has. Per
+// currency rather than globally, which is what keeps GBP's window aligned with
+// GBP's dates on a day the ECB published EUR but not GBP.
+//
+// The parameter is named in rather than series, because `series` is now this
+// package's type name and a parameter shadowing it would make the two impossible
+// to tell apart in the body.
+func absorbSeries(m *market, in *fxSeries) {
+	dates := make([]string, 0, len(in.Rates))
+	for d := range in.Rates {
 		dates = append(dates, d)
 	}
 	sort.Strings(dates)
 
-	history := make([]float64, 0, len(dates))
-	kept := make([]string, 0, len(dates))
-	for _, d := range dates {
-		v, ok := series.Rates[d][m.primary]
-		if !ok || v <= 0 {
+	for _, code := range trackedFX {
+		keptDates := make([]string, 0, len(dates))
+		keptRates := make([]float64, 0, len(dates))
+		for _, d := range dates {
+			v, ok := in.Rates[d][code]
+			if !ok || v <= 0 {
+				continue
+			}
+			keptDates = append(keptDates, d)
+			keptRates = append(keptRates, v)
+		}
+		if len(keptDates) < 2 {
 			continue
 		}
-		kept = append(kept, d)
-		history = append(history, v)
-	}
-	if len(kept) < 2 {
-		return
-	}
-	m.dates, m.history = kept, history
+		m.series[code] = series{dates: keptDates, rates: keptRates}
 
-	// The change column needs the day before the last one, for every tracked
-	// currency rather than only the primary pair.
-	prevDate := kept[len(kept)-2]
-	for _, code := range trackedFX {
-		if v, ok := series.Rates[prevDate][code]; ok {
-			m.prev[code] = v
+		// The change column needs the day before the last one, for every tracked
+		// currency rather than only the primary pair. It is taken from the PRIMARY's
+		// window, because a change is always measured against the previous
+		// publication of the same instrument, and the primary's window is the one
+		// whose end date the spot snapshot is dated to.
+		if code == m.primary {
+			prevDate := keptDates[len(keptDates)-2]
+			for _, c := range trackedFX {
+				if v, ok := in.Rates[prevDate][c]; ok {
+					m.prev[c] = v
+				}
+			}
 		}
+	}
+
+	// The primary's window is a VIEW of the map rather than a second copy of it, so
+	// withPair and the map cannot disagree about what the primary's history is. The
+	// two slices are shared, not copied, which is safe because a market is immutable
+	// once built.
+	if s, ok := m.series[m.primary]; ok {
+		m.dates, m.history = s.dates, s.rates
 	}
 }
 

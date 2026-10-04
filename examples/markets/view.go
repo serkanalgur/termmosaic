@@ -160,6 +160,21 @@ type frame struct {
 	// one without the board having to hold the store.
 	gen uint64
 
+	// pair is the primary currency this frame is about, so the screen can relabel
+	// the sparkline's panel and re-derive the next frame from the same market when
+	// the reader changes it.
+	pair string
+	// market is the market this frame was built from, carried through for the pair
+	// switch. A market is immutable once fetched, so holding the pointer is holding
+	// a fact rather than a copy of one, and switching pairs costs no fetch.
+	market *market
+	// at, err and source are the snapshot's timing, failure and provenance, carried
+	// so a frame rebuilt by the pair switch reproduces the SAME status line instead
+	// of reading the clock a second time and showing two different fetch times.
+	at     time.Time
+	err    error
+	source string
+
 	// status is the single-row footer.
 	status string
 	// stale marks a footer that carries a failure, which is the only thing that
@@ -189,7 +204,15 @@ type frame struct {
 // produce byte-identical output from identical inputs, which is what makes the
 // goldens worth having.
 func buildFrame(s *snapshot) *frame {
-	f := &frame{gen: s.gen}
+	// The pair is the market's own primary rather than the constant, because a
+	// reader who has switched to GBP must see GBP in the tile label and the
+	// sparkline's title. defaulting to the constant for a nil market keeps the
+	// no-data path — where there is no market to ask — showing a real pair name.
+	pair := primaryPair
+	if s.m != nil && s.m.primary != "" {
+		pair = s.m.primary
+	}
+	f := &frame{gen: s.gen, market: s.m, at: s.at, err: s.err, source: s.source, pair: pair}
 	f.noData = !s.ok
 	f.stale = s.err != nil
 	f.status = statusLine(s)
@@ -203,10 +226,10 @@ func buildFrame(s *snapshot) *frame {
 		// the failure panel: the panel is not the only thing that can read them, and
 		// a widget whose fields are unset in one of its two modes is a widget whose
 		// behaviour differs between them for reasons nobody wrote down.
-		f.tiles[tileSpot] = tileText{label: tileLabel(tileSpot), value: noDataPlaceholder, note: absentNote}
-		f.tiles[tileChange] = tileText{label: tileLabel(tileChange), value: noDataPlaceholder, note: absentNote}
-		f.tiles[tileHigh] = tileText{label: tileLabel(tileHigh), value: noDataPlaceholder, note: absentNote}
-		f.tiles[tileLow] = tileText{label: tileLabel(tileLow), value: noDataPlaceholder, note: absentNote}
+		f.tiles[tileSpot] = tileText{label: tileLabelFor(tileSpot, pair), value: noDataPlaceholder, note: absentNote}
+		f.tiles[tileChange] = tileText{label: tileLabelFor(tileChange, pair), value: noDataPlaceholder, note: absentNote}
+		f.tiles[tileHigh] = tileText{label: tileLabelFor(tileHigh, pair), value: noDataPlaceholder, note: absentNote}
+		f.tiles[tileLow] = tileText{label: tileLabelFor(tileLow, pair), value: noDataPlaceholder, note: absentNote}
 		f.noDataBody = failureText(s)
 		return f
 	}
@@ -235,12 +258,22 @@ func buildFrame(s *snapshot) *frame {
 	return f
 }
 
-// tileLabel is a tile's title, as a function of its index so that the labels and
-// the constants cannot drift apart.
-func tileLabel(i int) string {
+// tileLabel is a tile's title, as a function of its index AND the pair the screen
+// is about, so that the labels and the constants cannot drift apart and so that
+// switching the pair re-labels the spot tile rather than leaving EUR's name on a
+// GBP figure.
+//
+// The default pair is applied when the caller has none — which is the freshly
+// constructed dashboard, before any frame has been applied — so that a tile built
+// at construction carries a real label rather than a bare index.
+func tileLabel(i int) string { return tileLabelFor(i, primaryPair) }
+
+// tileLabelFor is tileLabel for a named pair. It is the form the frame builder
+// uses, because that is the only place that knows which pair is on screen.
+func tileLabelFor(i int, pair string) string {
 	switch i {
 	case tileSpot:
-		return primaryPair + "/USD spot"
+		return pair + "/USD spot"
 	case tileChange:
 		return "1d change"
 	case tileHigh:
@@ -260,7 +293,7 @@ func tileLabel(i int) string {
 func buildTiles(f *frame, m *market) {
 	spot, haveSpot := m.spot()
 	f.tiles[tileSpot] = tileText{
-		label: tileLabel(tileSpot),
+		label: tileLabelFor(tileSpot, m.primary),
 		value: orNA(haveSpot, rateText(spot)),
 		note:  orDefault(m.asOf != "", m.asOf, "no publication date"),
 	}
@@ -268,7 +301,7 @@ func buildTiles(f *frame, m *market) {
 	chg, haveChg := m.changePct(m.primary)
 	dir := changeDir(chg, haveChg)
 	f.tiles[tileChange] = tileText{
-		label: tileLabel(tileChange),
+		label: tileLabelFor(tileChange, m.primary),
 		value: signPct(chg, haveChg),
 		note:  arrowNote(dir, "since previous publication"),
 	}

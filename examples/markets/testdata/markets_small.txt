@@ -1,4 +1,4 @@
-too small: need 49x17
+too small: need 49x18
 
 
 

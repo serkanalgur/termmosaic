@@ -45,7 +45,6 @@ import (
 	"time"
 
 	"github.com/serkanalgur/termmosaic"
-	"github.com/serkanalgur/termmosaic/buffer"
 	"github.com/serkanalgur/termmosaic/input"
 	"github.com/serkanalgur/termmosaic/render"
 	"github.com/serkanalgur/termmosaic/term"
@@ -198,15 +197,32 @@ func run(offline bool, interval time.Duration) error {
 		})
 	}
 
+	// 'r' asks for one cycle without waiting out the interval, which is how the
+	// staleness and failure states are reachable without thirty seconds of patience.
+	//
+	// It runs on its OWN goroutine because a cycle blocks for up to fetchTimeout and
+	// this is called from Handle, which the input loop runs on the render goroutine —
+	// where blocking is the one thing that must never happen (ADR 0002). The refresh
+	// itself ends in a Post, so the widgets are still only ever mutated on the render
+	// goroutine.
+	board.OnRefresh = func() { go refresh() }
+
 	// The fetch goroutine. It owns every network call in this program, which is the
 	// statement the whole design rests on: nothing on the frame path can block,
 	// because nothing on the frame path can reach the network.
+	//
+	// The PAUSE check is here rather than inside refresh because pausing is about
+	// the SCHEDULE, not about the cycle: a paused dashboard must still republish the
+	// heartbeat and must still honour a manual 'r', and folding the check into the
+	// cycle would suppress both.
 	go func() {
 		defer stop()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
-			refresh()
+			if !board.Paused() {
+				refresh()
+			}
 			select {
 			case <-quit:
 				return
@@ -245,7 +261,23 @@ func run(offline bool, interval time.Duration) error {
 
 	// Input. One goroutine over the ordered event stream, so a resize can never be
 	// delivered between the bytes of a half-read escape sequence.
-	src2 := input.NewSource(t, withProbe(input.DefaultConfig(), term.NewSink(os.Stdout)))
+	//
+	// MOUSE CAPTURE IS ON, and this is the one example in the repository that turns
+	// it on. ADR 0005 leaves capture off by default because enabling it takes text
+	// selection, middle-click paste and scrollback copying away from the user's
+	// shell with no terminal-side indication — a framework that did that by default
+	// would break something users rely on. This screen needs the wheel and clicks, so
+	// it opts in explicitly, and the cost is paid back on the way out: every exit
+	// path below goes through the one teardown, which closes the Source — whose
+	// Close writes the disable sequences — before leaving the alternate screen and
+	// raw mode.
+	//
+	// The order matters and is the reverse of the order the modes were turned on:
+	// mouse capture off, then the alternate screen, then raw mode. Disabling mouse
+	// reporting after leaving raw mode would emit it into a terminal that is
+	// line-buffering again, which is how a disable sequence ends up echoed into the
+	// user's shell as visible text.
+	src2 := input.NewSource(t, marketsInputConfig(term.NewSink(os.Stdout)))
 	go func() {
 		for {
 			select {
@@ -258,24 +290,45 @@ func run(offline bool, interval time.Duration) error {
 				}
 				switch ev.Kind {
 				case termmosaic.EventKey:
-					switch {
-					case isQuitKey(ev):
+					if isQuitKey(ev) {
 						stop()
 						return
-					case ev.Rune == 'r':
-						// A manual refetch, so the failure and staleness paths are
-						// reachable without waiting out the interval.
-						go refresh()
 					}
-				case termmosaic.EventResize:
-					// ADR 0007 §6's rule, and it needs no code beyond these two
-					// calls: resize for EVERY event so Renderer.Size stays
-					// truthful, then recompute the root's rect, then let the pacer
-					// decide when to paint. Resize already forces a full repaint, so
-					// the InvalidateAll that would sit here is redundant.
-					r.Resize(ev.Size.W, ev.Size.H)
-					board.SetBounds(buffer.Rect{W: ev.Size.W, H: ev.Size.H})
+					// Everything else goes to the board, ON THE RENDER GOROUTINE.
+					// Handle writes the focus index, the pause flag, the pair and the
+					// overlay flag, all of which Draw reads, so calling it here would
+					// be a data race against the frame path. Post is the framework's
+					// own handoff for exactly this (ADR 0003), and routing through it
+					// is the pattern the other two examples follow.
+					key := ev
 					r.Post(func() {
+						if board.Handle(key) {
+							r.InvalidateAll()
+						}
+					})
+				case termmosaic.EventMouse:
+					// The same handoff, and for the same reason: a click mutates the
+					// table's selection and the focus ring.
+					click := ev
+					r.Post(func() {
+						if board.Handle(click) {
+							r.InvalidateAll()
+						}
+					})
+				case termmosaic.EventResize:
+					// ADR 0007 §6's rule, and it needs no code beyond these calls:
+					// resize for EVERY event so Renderer.Size stays truthful, then
+					// recompute the root's rect, then let the pacer decide when to
+					// paint. Resize already forces a full repaint, so the InvalidateAll
+					// that would sit here is redundant.
+					//
+					// The SetBounds goes through Handle — on the render goroutine —
+					// for the same reason as the key: Bounds is read by the frame that
+					// is drawing right now.
+					size := ev.Size
+					r.Resize(size.W, size.H)
+					r.Post(func() {
+						board.Handle(termmosaic.ResizeEvent(size.W, size.H))
 						r.Invalidate(board.Bounds())
 					})
 				}
@@ -288,13 +341,32 @@ func run(offline bool, interval time.Duration) error {
 	go func() { frameErr <- pacer.Run(quit) }()
 
 	err = <-frameErr
-	// Closing the Source restores the terminal modes it enabled and stops its
-	// goroutines. It does not close the terminal, which the deferred t.Close()
-	// above owns.
-	_ = src2.Close()
+	// The single teardown, on the single exit path. Anything that returns early
+	// above — an error from EnterRawMode, EnterAltScreen or Reset — has NOT built a
+	// Source yet, so it has not enabled mouse capture and has nothing to undo; the
+	// deferred t.Close() above owns raw mode and the alternate screen for those
+	// paths, which is why there is no second teardown to forget to call.
+	teardown(r, t, src2)
+	return err
+}
+
+// teardown restores everything the program turned on, in the reverse of the order
+// it turned them on.
+//
+// It is a function rather than four lines at the end of run because the ORDER is
+// the whole of it and a reader — or a future edit that adds an early return — cannot
+// check four scattered statements. It is what makes the mouse-capture guarantee
+// checkable: there is exactly one place where capture is disabled, and every exit
+// path reaches it.
+//
+// Closing the Source is what disables mouse capture, restores bracketed paste, and
+// pops the kitty keyboard flags: input.Source owns the modes IT enabled and its
+// Close undoes them (ADR 0005 §6). It does not close the terminal, which the
+// deferred t.Close() owns.
+func teardown(r *render.Renderer, t termmosaic.Terminal, src *input.Source) {
+	_ = src.Close()
 	_ = r.LeaveAltScreen()
 	_ = t.LeaveRawMode()
-	return err
 }
 
 // FrameGen reports the generation of the frame the widgets currently hold, which
@@ -320,8 +392,32 @@ func withProbe(cfg input.Config, sink termmosaic.Sink) input.Config {
 	return cfg
 }
 
+// marketsInputConfig is this example's input configuration: the recommended
+// defaults, the probe wired to the frame sink, and MOUSE CAPTURE ON.
+//
+// It is a named function rather than an inline call because the capture decision is
+// the most consequential line in this file — it takes the user's text selection,
+// middle-click paste and scrollback away for as long as this program runs — and a
+// named function is something a test can name and assert on and a reader can find by
+// searching for "mouse".
+//
+// MouseClick rather than MouseDrag or MouseAll: this screen needs the wheel and
+// clicks, and reporting MOTION would multiply the event volume for a dashboard with
+// nothing to do with a drag. That difference is exactly what the three modes are
+// for, and choosing the cheapest one that does the job is the whole of the decision.
+func marketsInputConfig(sink termmosaic.Sink) input.Config {
+	cfg := withProbe(input.DefaultConfig(), sink)
+	cfg.MouseMode = input.MouseClick
+	return cfg
+}
+
 // isQuitKey reports whether ev should end the program, in the decoder's vocabulary
 // rather than as raw bytes.
+//
+// Ctrl-C is included here and NOT in the board's own key handling, so the quit
+// decision lives in exactly one place for every exit path: a key the board also
+// claims (it consumes ctrl-c so a form never sees it) does not also have to decide
+// whether to exit.
 func isQuitKey(ev termmosaic.Event) bool {
 	switch {
 	case ev.Key == termmosaic.KeyEscape:

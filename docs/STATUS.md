@@ -38,6 +38,7 @@ break without notice until v1.0.0.**
 | Color model and degradation ladder | **PROPOSED** | Built and working: `Colour` is truecolor/named-16/256 with a redmean quantiser and a `ColourDepth` rung, plus `NO_COLOR`. **Not yet validated.** Nobody has checked the redmean mapping is perceptually acceptable, so treat the 256 and 16 rungs as provisional. The `buffer.Quantiser` interface is the escape hatch for a Lab-space replacement. |
 | Theme and styling system | **DECIDED** — **no theme in v1**; widgets carry `Style` fields, framework defaults are the terminal's own colours plus named attribute styles | One `buffer.Style` value (fg/bg/attr, by value, 12 bytes, 0 allocs) replaces the loose-argument write API; `ansi.Style` becomes an alias of it. Trigger for a theme: the first role two widgets must share. [ADR 0008](adr/0008-style-and-text.md) |
 | Text and span rendering | **DECIDED** — `Span` + `Buffer.SetSpans`, parsed once, wrapped outside `Draw` | A wide glyph's continuation cell takes its **owning span's** style or the row flickers forever. `Wrap`/`Truncate` allocate and are banned from `Draw`. Borders and titles have one vocabulary (`BorderPlain`/`Rounded`/`Double`/`Thick`/`ASCII`, one `Block`). [ADR 0008](adr/0008-style-and-text.md) |
+| Commands and keymap (where the command layer sits, and whether `Widget.Handle` changes) | **DECIDED** — a new `keymap` package sitting **above** `Widget.Handle`; the `Widget` interface is **unchanged** | A named action and a key that reaches it are different things. One normalised `Chord` (`KeySpace` and `Rune ' '` are one chord) is a comparable 16-byte struct, so resolution is a map lookup at **0 allocs**, pinned by `TestDispatchIsZeroAllocation`. Resolution is **focus > screen > global with no numeric priority**, and a user override wins only within its own scope — so a dialog's `Esc` cannot be stolen. Widgets join through **optional** `Commandable`/`Clickable` interfaces (the `Focusable` pattern) and **v0.2 requires them of zero catalog widgets**. `EventResize` and `EventPaste` never enter a command layer. Help is `Describe`, computed from the same tables `Dispatch` walks, so it cannot drift. A click is a command because the **widget under the pointer says so** — the registry holds no rectangles. The `Ctrl+K` palette is in scope, built on `Menu`+`Dialog`+`TextInput`, and not by this ADR. Deferred with triggers: multi-stroke/leader sequences, command-line args, config persistence, release bindings, drag-as-command. [ADR 0009](adr/0009-command-and-keymap.md) |
 | `docs/ARCHITECTURE.md` | **DECIDED** — a short orientation document, not a summary | Reduced to 105 lines at the v0.1.0 release gate. It had grown to 251 lines duplicating ADR reasoning, its decision numbering (5=colour, 6=theme, 7=input) did not match the ADR set, and it still called the colour model OPEN after this table moved it to PROPOSED. It now states what the pieces are, how they fit, and links each ADR — no duplicated reasoning — and preserves the **Non-goals** section verbatim, which is not duplicated anywhere else. |
 | Documentation site | **PROPOSED** — Hugo + Pagefind on GitHub Pages; captures generated in Go from `MemorySink` cells, not screenshots | No browser TTY exists, so the only truthful picture of a widget is the cell grid the renderer produced — which is what `widgets/widgettest` already builds and what the golden tests assert on, so the docs cannot drift from behaviour. **Not built.** A live WASM playground is rejected: `docs/ARCHITECTURE.md` lists "no WASM build" as a written non-goal and `term/terminal_windows.go` is a stub, so there is no seam to port. Plan, page tree, per-widget template and effort: [docs/SITE-PLAN.md](SITE-PLAN.md). |
 
@@ -45,7 +46,8 @@ break without notice until v1.0.0.**
 
 The seven core architecture rows above are **DECIDED** — the first four on
 2026-10-03, input decoding, sub-buffer cell access, responsive screen
-composition and style/theme/text on 2026-10-04 — and are recorded in full, with
+composition and style/theme/text on 2026-10-04, and commands and the keymap on
+2026-10-05 — and are recorded in full, with
 rejected alternatives, in [docs/adr/](adr/README.md).
 
 Decisions 1 and 2 were made **empirically** — a scratch benchmark module was
@@ -268,13 +270,6 @@ Answered questions have been removed; the reasoning is preserved in
   is hand-written from East Asian Width ranges rather than generated from Unicode
   data, and grapheme clusters are not composed (a flag emoji renders as two cells'
   worth of junk). Deferred until internationalization is scoped.
-  **A defect the benchmark surfaced and this release does NOT fix:** the diff's
-  cursor-run suppression assumes one cell per rune, so every wide glyph is
-  preceded by a cursor-position escape — 68,832 bytes against 6,233 for the same
-  6,000 runes on a dense wide scene. Correct output, 11x the bytes. The fix is one
-  line and is specified in the ADR 0008 amendment; it is out of scope for a
-  release gate because `internal/diff` is the most load-bearing code here and ADR
-  0002's headline numbers are quoted from it.
 - **Headless backend: v1 or v0.5?** Largely settled — [ADR 0001](adr/0001-backend-strategy.md)
   makes the headless memory sink a v1 deliverable, because the whole testability
   pillar depends on it. The remaining open sub-question is its **assertion

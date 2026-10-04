@@ -14,6 +14,29 @@
 // scan for 'q' this example used before ADR 0005. Everything about how those
 // bytes got decoded is the input package's business, not the example's.
 //
+// # What is interactive here
+//
+// The fact grid is a real focus ring, not decoration. The arrows, Tab and
+// Home/End move a focus marker through the facts, and the focused fact is marked
+// BOTH ways — a marker glyph in its own gutter and reverse video — so the focus is
+// legible on a monochrome terminal and in a golden file, neither of which can see
+// a colour. '?' reveals two rows of key help. Every one of those keys is decoded
+// by the real input decoder in the tests, so a test cannot pass on an event no
+// terminal would ever send.
+//
+// The focus state is MUTATED only on the render goroutine: the input goroutine
+// posts the event through render.Renderer.Post rather than calling Handle itself,
+// because Handle writes the same fields Draw reads and those are different
+// goroutines (ADR 0003).
+//
+// # Keys
+//
+//	arrows          move the focus marker through the facts
+//	tab / shift-tab next / previous fact
+//	home / end      first / last fact
+//	?               show or hide the key help
+//	q / esc / ctrl-c quit
+//
 // # What "responsive" means here
 //
 // The block used to ask for a fixed 46x9 and clamp it to the screen, so a
@@ -28,6 +51,9 @@
 //     reads in full when it does
 //   - a two-row explanatory paragraph that is DROPPED, lowest priority first,
 //     when the terminal is too short to hold it (geometry.Budget)
+//   - a two-row help panel that '?' reveals and that is dropped before the
+//     paragraph, because a key the user has not found yet is worth less than the
+//     explanation of what they are looking at
 //   - a "press q" hint pinned to the bottom row, which is PrioAlways and is
 //     therefore never the thing that gets dropped
 //
@@ -57,6 +83,7 @@ import (
 	"github.com/serkanalgur/termmosaic/term"
 	"github.com/serkanalgur/termmosaic/widgets/basic"
 	"github.com/serkanalgur/termmosaic/widgets/block"
+	"github.com/serkanalgur/termmosaic/widgets/form"
 )
 
 // The example's palette: four plain colours. This is an application's styling
@@ -101,10 +128,35 @@ const (
 	// colGap is the cells between two fact columns.
 	colGap = 2
 
+	// focusCol is the gutter in front of every fact's label: the marker cell and
+	// the space that separates it from the label.
+	//
+	// It is a GUTTER and not part of the label because a marker that shifted the
+	// label would move every value in the column with it, and a fact grid whose
+	// values step sideways when the focus moves is worse than one with no marker
+	// at all. It is two cells rather than one because a marker hard against the
+	// label reads as a prefix on the label, which is exactly the reading the
+	// gutter exists to prevent.
+	//
+	// The gutter is also what makes focus a non-colour signal: the focused fact is
+	// marked by a shape in its own column, which survives NO_COLOR and a
+	// monochrome terminal, where a colour alone would not.
+	focusCol = 2
+
+	// labelCol is where a fact's label starts, relative to its column: just past
+	// the focus gutter.
+	labelCol = focusCol
+
 	// valueCol is where a fact's value starts, relative to its column. It is the
-	// longest label ("frame") plus one space, so values line up down the column
-	// rather than stepping with their labels.
-	valueCol = 6
+	// focus gutter plus the longest label ("frame") plus one space, so values line
+	// up down the column rather than stepping with their labels.
+	valueCol = labelCol + 6
+
+	// helpRows is how many rows the key help asks for. It is two because the
+	// bindings are grouped into two lines — navigation on one, the rest on the
+	// other — and a single line long enough to hold them all would be truncated at
+	// every width the example is used at.
+	helpRows = 2
 
 	// twoColW and threeColW are the INTERIOR widths at which the fact grid gains
 	// a column. They are interior rather than bounds widths because the interior
@@ -191,10 +243,42 @@ const tagline = "hello from termmosaic — resize this terminal"
 // when there is not.
 const noteText = "the layout above is recomputed only when Bounds() changes, so a resize repaints in full and a steady frame costs nothing."
 
+// The two help lines, and the bindings each one names.
+//
+// They are constants rather than something built from a key table because the
+// example's whole point on this axis is that the text on screen and the keys
+// Handle accepts cannot drift apart silently — and a table of bindings that a
+// test then checks against Handle is the mechanism that makes that true. helpNav
+// and helpExit below are the same two lines.
+const (
+	helpNav  = "move  arrows, tab, shift-tab, home, end"
+	helpExit = "help  ?            quit  q, esc, ctrl-c"
+)
+
+// The hint pinned to the bottom row.
+//
+// It leads with the quit binding because that is the one a first-time reader is
+// looking for, and it names '?' rather than spelling out the navigation, because
+// the navigation is on the other side of a key press and this line is the only
+// thing guaranteed to be on screen.
+//
+// The goldens are the regression net for it: TestGoldenScreen and the per-size
+// files contain this exact string, so changing a binding without changing this
+// line fails the diff rather than leaving a lie on screen.
+const hintText = "press q to quit  ·  ? keys  ·  arrows move focus"
+
 // Region indices into the budget table, in draw order.
+//
+// The help sits between the tagline and the note on purpose. It is PrioNormal, so
+// within that priority the DECLARATION ORDER is the tiebreak and Budget keeps the
+// tagline before the help — while both still outrank the PrioLow note. That is the
+// ranking the priorities are for: an explanation of what you are looking at is
+// worth less than the keys that move it, and both are worth more than a paragraph
+// the reader has already seen once.
 const (
 	regionFacts = iota
 	regionTagline
+	regionHelp
 	regionNote
 	regionHint
 	numRegions
@@ -264,6 +348,19 @@ type hello struct {
 	note    *basic.Paragraph
 	hint    *basic.Text
 
+	// help is the key help '?' toggles. It is a pair of widgets/form KeyHints rather
+	// than two more basic.Texts because a key hint is a widget the catalog already
+	// owns, it already truncates through buffer's shared writers with a marker
+	// rather than a clip, and reusing it is what stops the example from growing a
+	// second spelling of "here are the keys".
+	help *helpPair
+
+	// focus is which fact the keyboard is aimed at, and helpOpen whether the key
+	// help is showing. Both are mutated only through Handle, which the application
+	// calls on the render goroutine — see the file comment on why that matters.
+	focus    int
+	helpOpen bool
+
 	// lay is the derived layout, cached against the interior it came from.
 	lay bodyLayout
 
@@ -304,6 +401,16 @@ func newHello(r buffer.Rect, depth buffer.ColourDepth) *hello {
 	// tagline, which goes before the note, and the hint is never a candidate.
 	h.regions[regionFacts] = geometry.Region{Size: len(h.facts), Prio: geometry.PrioHigh}
 	h.regions[regionTagline] = geometry.Region{Size: 1, Prio: geometry.PrioNormal}
+	// The help's SIZE is zero while it is closed, and adapt patches it when '?'
+	// toggles. A region that asked for its rows while hidden would push the note
+	// down for content nobody can see, so the two-row gap would be the visible
+	// cost of a closed help.
+	//
+	// That makes the budget's answer depend on a mode as well as on the rectangle,
+	// which is why toggling invalidates the layout cache: it is the same
+	// "a field the layout depends on changed" rule SetFrame follows in markets, and
+	// keeping the cache keyed on the rect alone would leave a stale answer behind.
+	h.regions[regionHelp] = geometry.Region{Size: 0, Prio: geometry.PrioNormal}
 	h.regions[regionNote] = geometry.Region{Size: noteRows, Prio: geometry.PrioLow}
 	h.regions[regionHint] = geometry.Region{Size: 1, Prio: geometry.PrioAlways}
 
@@ -311,8 +418,14 @@ func newHello(r buffer.Rect, depth buffer.ColourDepth) *hello {
 	h.tagline.SetBackground(stBody)
 	h.note = basic.NewParagraphString(buffer.Rect{}, noteText, stMuted)
 	h.note.SetBackground(stBody)
-	h.hint = basic.NewTextString(buffer.Rect{}, "press q to quit", stAccent)
+	h.hint = basic.NewTextString(buffer.Rect{}, hintText, stAccent)
 	h.hint.SetBackground(stBody)
+
+	// The help is two rows of a KeyHint, which is a ONE-LINE widget, so the two
+	// lines are two KeyHints: a second kind of help widget would have been a second
+	// spelling of the same thing. They are held as a pair because they are always
+	// shown and always hidden together.
+	h.help = newHelpPair(stMuted, stAccent, stBody)
 
 	h.tooSmall = []buffer.Span{buffer.NewSpan(tooSmallText, stMuted)}
 
@@ -349,10 +462,6 @@ func (h *hello) MinSize() buffer.Size { return buffer.Size{W: minW, H: minH} }
 // Invalidate satisfies termmosaic.Widget. The block redraws in full every frame,
 // so there is nothing finer-grained to mark.
 func (h *hello) Invalidate() {}
-
-// Handle satisfies termmosaic.Widget. The example quits from its own input
-// goroutine, so no key is handled here.
-func (h *hello) Handle(termmosaic.Event) bool { return false }
 
 // Draw paints the block.
 //
@@ -408,6 +517,14 @@ func (h *hello) Draw(buf *buffer.Buffer) {
 		h.tagline.SetBounds(row)
 		h.tagline.Draw(buf)
 		y++
+	}
+	// Both halves of the test, because Budget reports a zero-size region as KEPT
+	// (dropping it would not help), so the budget's answer alone cannot say whether
+	// the help is open. The flag is the mode; the budget only says whether the two
+	// rows it would need are affordable.
+	if h.helpOpen && a.show[regionHelp] {
+		h.help.Draw(buf, buffer.Rect{X: inner.X, Y: y, W: inner.W, H: helpRows})
+		y += helpRows
 	}
 	if a.show[regionNote] {
 		// The paragraph gets the rows the budget kept for it and no more, and it
@@ -474,7 +591,12 @@ func (h *hello) drawFacts(buf *buffer.Buffer, inner buffer.Rect, y, rows int) {
 		}
 		x := inner.X + a.colX[col]
 		x1 := x + a.colW[col]
-		buf.SetStringIn(x, x1, fy, h.facts[i].label, stMuted)
+		// The focus marker goes in the gutter, which is drawn for EVERY fact rather
+		// than only the focused one. A gutter that appears when the focus moves
+		// would shift every label and every value in the column to the right by one
+		// cell, so the grid would reflow on the first key press.
+		h.drawFocusMark(buf, x, x1, fy, i == h.focus)
+		buf.SetStringIn(x+labelCol, x1, fy, h.facts[i].label, stMuted)
 		vx := x + valueCol
 		if vx >= x1 {
 			// Too narrow for a value at all: keep the label and drop the value,
@@ -493,6 +615,26 @@ func (h *hello) drawFacts(buf *buffer.Buffer, inner buffer.Rect, y, rows int) {
 			buf.SetStringIn(vx, x1, fy, h.facts[i].value, h.facts[i].st)
 		}
 	}
+}
+
+// drawFocusMark paints the focus marker in the gutter in front of fact i's label.
+//
+// The unfocused state is a SPACE rather than nothing at all, for the reason given
+// at the call site: the gutter's width must not depend on where the focus is, or
+// the grid would shift under a key press. It is the reason the marker lives in its
+// own column instead of being prefixed to the label.
+func (h *hello) drawFocusMark(buf *buffer.Buffer, x, x1, y int, focused bool) {
+	if x >= x1 {
+		// No gutter in this column, which happens when the column is narrower than
+		// the marker. Clip: a marker drawn one cell past the column's edge would
+		// overwrite the gap or the neighbouring column.
+		return
+	}
+	r := ' '
+	if focused {
+		r = rune(focusMark[0])
+	}
+	buf.Set(x, y, r, stAccent)
 }
 
 // adapt derives the body layout from the block's interior, or returns the
@@ -525,6 +667,15 @@ func (h *hello) adapt(inner buffer.Rect) {
 	// The facts region's size is the only part of the table that depends on the
 	// rect, so it is patched rather than the table rebuilt.
 	h.regions[regionFacts].Size = a.factRows
+
+	// The help's size is patched rather than the table rebuilt, and it is patched
+	// on the focus path too — see toggleHelp, which invalidates the cache so this
+	// re-runs after a '?'.
+	h.regions[regionHelp].Size = 0
+	if h.helpOpen {
+		h.regions[regionHelp].Size = helpRows
+	}
+
 	a.show = geometry.Budget(h.regions[:], inner.H)
 
 	// The one fact whose value depends on the layout is the one reporting the
@@ -658,6 +809,177 @@ func (h *hello) writeIntIn(buf *buffer.Buffer, x, x1, y, v int) int {
 	}
 }
 
+// helpPair is the two-row key help: two KeyHints, because KeyHint is a one-line
+// widget and a two-line hint needs two of them.
+//
+// It is a type rather than two fields so that showing and hiding the help is one
+// field access and cannot be done halfway — a help with only its first line on
+// screen is the kind of half-state that survives a refactor.
+type helpPair struct {
+	nav, exit *form.KeyHint
+}
+
+// newHelpPair builds the two lines.
+//
+// The bindings are written out here rather than derived from a key table because
+// a key table the example also dispatches on would be a second source of truth
+// for the key contract, and the whole point of the contract being written down is
+// that the two cannot disagree. The tests assert that Handle accepts exactly the
+// bindings these two lines name.
+func newHelpPair(helpSt, keySt, bg buffer.Style) *helpPair {
+	p := &helpPair{
+		nav:  form.NewKeyHint(buffer.Rect{}, []form.Binding{{Key: "move", Help: helpNav}}),
+		exit: form.NewKeyHint(buffer.Rect{}, []form.Binding{{Key: "help", Help: helpExit}}),
+	}
+	for _, k := range []*form.KeyHint{p.nav, p.exit} {
+		k.KeyStyle = keySt
+		k.HelpStyle = helpSt
+		k.SeparatorStyle = helpSt
+		k.Background = bg
+	}
+	return p
+}
+
+// Draw paints the two lines into the top row of r.
+//
+// The rect is given rather than remembered so that the two hints cannot disagree
+// about where they are: KeyHint caches its line against its own bounds, and two
+// widgets handed the same rect here are two caches with one key.
+func (p *helpPair) Draw(buf *buffer.Buffer, r buffer.Rect) {
+	if r.Empty() {
+		return
+	}
+	first := buffer.Rect{X: r.X, Y: r.Y, W: r.W, H: 1}
+	if r.H > 1 {
+		p.nav.SetBounds(first)
+		p.nav.Draw(buf)
+		p.exit.SetBounds(buffer.Rect{X: r.X, Y: r.Y + 1, W: r.W, H: 1})
+		p.exit.Draw(buf)
+		return
+	}
+	// One row: the FIRST line only, because the navigation bindings are the ones
+	// whose absence leaves the reader stuck rather than merely uninformed.
+	p.nav.SetBounds(first)
+	p.nav.Draw(buf)
+}
+
+// focusMark is the marker drawn in the focused fact's gutter.
+//
+// It is a plain ASCII character on purpose. Every alternative — a bullet, a
+// right-pointing triangle, a block — is a glyph the reader may not have, and the
+// one cell the gutter costs is not worth spending on a character set the example
+// does not otherwise negotiate. It is also the marker form.Select uses, taken from
+// the catalog rather than invented here, which is the rule ADR 0008 §2 is about.
+const focusMark = form.SelectDefaultMarker
+
+// FocusIndex reports which fact the keyboard is aimed at, which is what the tests
+// assert on after a simulated key and what an application facing a real terminal
+// would read to build its own chrome.
+func (h *hello) FocusIndex() int { return h.focus }
+
+// HelpOpen reports whether the key help is showing.
+func (h *hello) HelpOpen() bool { return h.helpOpen }
+
+// Handle moves the focus marker, toggles the help, and consumes the keys it acts
+// on.
+//
+// It is the whole of the example's key contract, and it is written as a routing
+// table rather than as a widget tree's focus ring because there is nothing to
+// route: the facts are cells this widget draws itself, not catalog widgets with
+// their own Handle. An example that wanted a real focus ring over real widgets
+// would compose widgets/form's Select instead, which is what examples/markets
+// does for its currency pair.
+//
+// Two conventions, both about honesty rather than mechanics:
+//
+//   - A key it does not act on is NOT consumed. Returning true for a key that
+//     changed nothing would make the caller believe the example had handled it.
+//   - The quit keys ARE consumed even though this method does not quit, because
+//     the caller does and would otherwise see a key it had already dealt with.
+func (h *hello) Handle(ev termmosaic.Event) bool {
+	if ev.Kind != termmosaic.EventKey {
+		// A resize belongs to the application, which recomputes bounds and resizes
+		// the renderer; a mouse event belongs to nobody here, because the facts are
+		// not hit targets and claiming one would be a lie about what is clickable.
+		return false
+	}
+	switch ev.Key {
+	case termmosaic.KeyLeft, termmosaic.KeyUp:
+		h.moveFocus(-1)
+		return true
+	case termmosaic.KeyRight, termmosaic.KeyDown:
+		h.moveFocus(1)
+		return true
+	case termmosaic.KeyTab:
+		h.moveFocus(1)
+		return true
+	case termmosaic.KeyBacktab:
+		h.moveFocus(-1)
+		return true
+	case termmosaic.KeyHome:
+		h.setFocus(0)
+		return true
+	case termmosaic.KeyEnd:
+		h.setFocus(len(h.facts) - 1)
+		return true
+	case termmosaic.KeyEscape:
+		return true // the caller quits; see run
+	}
+	switch {
+	case ev.Mod == termmosaic.ModCtrl && (ev.Rune == 'c' || ev.Rune == 'C'):
+		return true
+	case ev.Mod == 0 && ev.Rune == 'q' || ev.Mod == 0 && ev.Rune == 'Q':
+		return true
+	case ev.Mod == 0 && ev.Rune == '?':
+		h.toggleHelp()
+		return true
+	}
+	return false
+}
+
+// toggleHelp shows or hides the key help and invalidates the layout cache.
+//
+// The invalidation is the load-bearing part. The budget's answer depends on
+// whether the help is open (adapt sizes its region from the flag), and the cache
+// is keyed on the interior rectangle alone — so without this the next Draw would
+// reuse the answer computed for the other mode and the screen would show the help
+// in a two-row gap that belonged to a note, or leave a gap where the help was.
+// That is ADR 0007's amendment about caches keyed on too little, applied to a
+// field rather than to a rect.
+func (h *hello) toggleHelp() {
+	h.helpOpen = !h.helpOpen
+	h.lay.valid = false
+}
+
+// moveFocus moves the focus by delta facts, wrapping at both ends.
+//
+// Wrapping rather than clamping, because a focus ring that stops at the end is a
+// dead end: with three facts, clamping would make the right arrow a no-op on the
+// third fact and the reader would conclude the key was broken. The modulo is
+// guarded for an empty list, which is reachable only if every fact is removed and
+// which would otherwise divide by zero.
+func (h *hello) moveFocus(delta int) {
+	n := len(h.facts)
+	if n == 0 {
+		return
+	}
+	h.setFocus(((h.focus+delta)%n + n) % n)
+}
+
+// setFocus aims the keyboard at fact i, clamped into range.
+func (h *hello) setFocus(i int) {
+	if len(h.facts) == 0 {
+		return
+	}
+	if i < 0 {
+		i = 0
+	}
+	if i >= len(h.facts) {
+		i = len(h.facts) - 1
+	}
+	h.focus = i
+}
+
 // Compile-time proof that the example's widget is Minimizable. It is what lets a
 // caller ask the block what it needs, which is the whole of what the framework
 // offers an application facing a too-small terminal.
@@ -770,6 +1092,24 @@ func run() error {
 						stop()
 						return
 					}
+					// Everything else goes to the widget, ON THE RENDER GOROUTINE.
+					// Handle writes the focus index and the help flag and Draw reads
+					// both, so calling it here would be a data race between the input
+					// goroutine and the frame path. Post is the framework's own answer
+					// to exactly that (ADR 0003), and the reason this example posts
+					// rather than calling Handle directly is that it is the pattern an
+					// application is expected to copy.
+					key := ev
+					r.Post(func() {
+						if root.Handle(key) {
+							// A handled key changed the widget's state, so the frame
+							// that described the old state is stale. InvalidateAll
+							// rather than a sub-rectangle: the marker moves between
+							// facts, and naming the two rects it could move between
+							// is a cache this example has no reason to keep.
+							r.InvalidateAll()
+						}
+					})
 				case termmosaic.EventResize:
 					// ADR 0007 §5's order, and nothing else between the two
 					// steps: recompute the root's rectangle, then resize the

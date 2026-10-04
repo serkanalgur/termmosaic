@@ -35,6 +35,6 @@
 │                                                                                                   │ │                            │
 │                                                                                                   │ │                            │
 │                                                                                                   │ │                            │
-│                                                                                                   │ │                            │
 └───────────────────────────────────────────────────────────────────────────────────────────────────┘ └────────────────────────────┘
+[EUR/USD] GBP/USD  JPY/USD  [←→] pair  [home] first  [tab] panel  [space] pause  [r] fetch  [?] keys  [q] quit
 markets  offline: bundled sample, no network  as of 2026-10-02  fetched 14:30:05Z

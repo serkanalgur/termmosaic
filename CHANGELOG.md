@@ -273,9 +273,12 @@ Two performance claims that this release turns from assertion into measurement:
   width lookup that two narrow runes would have needed. The one genuine cost is
   bytes, and it is listed under Known Limitations above.
 
-  The measurement also surfaced a defect this release does **not** fix: the
-  diff's cursor-run suppression assumes one cell per rune, so on a screen of
-  nothing but wide text every glyph is preceded by a cursor-position escape.
-  Correct output, roughly 11× the bytes. It is recorded in ADR 0008's risk list.
+  The measurement also surfaced a defect, which **this release does fix**: the
+  diff's cursor-run suppression assumed one cell per rune, so on a screen of
+  nothing but wide text every glyph was preceded by a cursor-position escape —
+  6,000 moves against 30, and 68,832 bytes against 6,233, for identical output.
+  The run tracker now advances by the glyph's cell width. On the same scene:
+  **60 cursor moves and 19,443 bytes, 3.12× the narrow frame** rather than 11×.
+  The ASCII path is unchanged. See ADR 0008's amendment, finding 4.
 
 [0.1.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.1.0

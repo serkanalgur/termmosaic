@@ -94,8 +94,15 @@ func sampleMarket() *market {
 		"EUR": 0.88511, "GBP": 0.75565, "INR": 96.3300, "JPY": 157.980,
 		"KRW": 1361.270, "MXN": 18.1669, "NOK": 9.62560, "SEK": 10.0292,
 	}
+	// The window. sampleEUR is the capture, transcribed. The other two are SYNTHETIC
+	// and anchored to the capture at both ends — see anchorWindow — because the pair
+	// control has to be demonstrable offline and a fixture carrying one currency would
+	// make its effect on the sparkline unreachable in every test and every golden.
 	m.dates = sampleDates
 	m.history = sampleEUR
+	m.series[primaryPair] = series{dates: sampleDates, rates: sampleEUR}
+	m.series["GBP"] = series{dates: sampleDates, rates: anchorWindow(m.rates["GBP"], m.prev["GBP"])}
+	m.series["JPY"] = series{dates: sampleDates, rates: anchorWindow(m.rates["JPY"], m.prev["JPY"])}
 
 	m.crypto = cryptoBook{
 		"bitcoin":  {USD: 85492.00, Change: 0.7297630},
@@ -128,6 +135,49 @@ var sampleEUR = []float64{
 	0.87100, 0.87260, 0.87032, 0.87237,
 	0.87635, 0.87974, 0.87696, 0.87889,
 	0.88067, 0.88067, 0.88511, 0.89087,
+}
+
+// anchorWindow builds a synthetic window of the same length as sampleEUR whose
+// LAST value is spot and whose second-to-last is prev.
+//
+// Anchoring at both ends is what makes the derived series honest enough to pin a
+// golden over: the two figures a reader actually checks — the spot rate in the KPI
+// tile and the day-on-day change beside it — are the captured ones, because
+// buildFrame reads them from m.rates and m.prev rather than from the window's tail.
+// The shape between them is invented, which is stated here rather than left for a
+// reader to discover from a sparkline that looks plausible.
+//
+// The shape is the captured EUR walk scaled to the target's own range, so a
+// derived pair moves the way its neighbours did rather than in a straight line. A
+// straight line would be easier to read and would be a worse fixture: the meter's
+// zone thresholds and the sparkline's min/max emphases are both exercised by the
+// captured shape, and a derived pair with no shape would exercise neither.
+//
+// It returns nil for a currency the capture has no rate for, which is what makes
+// "no window for this pair" reachable offline rather than only against a live
+// endpoint that dropped a currency.
+func anchorWindow(spot, prev float64) []float64 {
+	if spot <= 0 || prev <= 0 || len(sampleEUR) < 2 {
+		return nil
+	}
+	lo, hi := sampleEUR[0], sampleEUR[0]
+	for _, v := range sampleEUR[1:] {
+		lo, hi = min(lo, v), max(hi, v)
+	}
+	span := hi - lo
+	if span <= 0 {
+		return nil
+	}
+	out := make([]float64, len(sampleEUR))
+	for i, v := range sampleEUR {
+		out[i] = spot + (v-lo)/span*(spot-prev)
+	}
+	// The walk is rescaled so its last two points are exactly prev and spot, which
+	// is where the two anchored figures live.
+	shift := spot - out[len(out)-1]
+	out = append(out[:len(out)-1], spot)
+	out[len(out)-2] = prev + shift
+	return out
 }
 
 // failedSource is a source that always fails, used by the test that pins what the
