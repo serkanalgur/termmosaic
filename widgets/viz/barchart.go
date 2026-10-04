@@ -233,6 +233,12 @@ func (c *BarChart) adapt(in buffer.Rect) {
 		if w < 0 {
 			w = 0
 		}
+		// axisRow is the LABEL COLUMN here, and drawHorizontal reads its X to place
+		// every category's label. Leaving it at the zero Rect put every label at
+		// absolute column 0 — which is inside Bounds only for a chart at the origin,
+		// and is a widget writing outside its own rectangle everywhere else
+		// (ADR 0007 §4).
+		c.axisRow = buffer.Rect{X: in.X, Y: in.Y, W: c.labelW, H: in.H}
 		c.plot = buffer.Rect{X: in.X + c.labelW, Y: in.Y, W: w, H: in.H}
 		c.measureBars()
 		return
