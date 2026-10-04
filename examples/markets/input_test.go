@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -67,7 +68,7 @@ const (
 // it: the coordinates are ONE-BASED, which is the encoding's own convention and the
 // reason a hand-built event with zero-based coordinates is not the same thing.
 func sgr(button, x, y int) string {
-	return "\x1b[<" + itoa(button) + ";" + itoa(x+1) + ";" + itoa(y+1) + "M"
+	return "\x1b[<" + strconv.Itoa(button) + ";" + strconv.Itoa(x+1) + ";" + strconv.Itoa(y+1) + "M"
 }
 
 // wheelAt is one wheel notch at a cell, up or down.
@@ -436,7 +437,7 @@ func TestShortTableHIsScrollableAndClickable(t *testing.T) {
 	renderAt(t, goldenWideW, shortTableH, 1, d)
 	// Above the minimum, or the screen would be drawing the diagnostic and the table
 	// would not exist at all.
-	if !strings.Contains(screenOf(t, goldenWideW, shortTableH, d), "pairs") {
+	if !strings.Contains(screen(t, goldenWideW, shortTableH, 1, d), "pairs") {
 		t.Fatalf("at %dx%d the screen is not drawing the table at all", goldenWideW, shortTableH)
 	}
 	if got, rows := d.table.Bounds().H, d.table.Rows(); got >= rows {
@@ -493,31 +494,6 @@ func TestClickingATabChangesThePair(t *testing.T) {
 	}
 }
 
-// itoa is strconv.Itoa, spelled out because this file must not import strconv for
-// two call sites and the alternative is a fmt.Sprintf, which allocates in a test
-// helper called from the frame path in other examples.
-func itoa(v int) string {
-	if v == 0 {
-		return "0"
-	}
-	neg := v < 0
-	if neg {
-		v = -v
-	}
-	var b [20]byte
-	i := len(b)
-	for v > 0 {
-		i--
-		b[i] = byte('0' + v%10)
-		v /= 10
-	}
-	if neg {
-		i--
-		b[i] = '-'
-	}
-	return string(b[i:])
-}
-
 // ---------------------------------------------------------------------------
 // the pair switch
 // ---------------------------------------------------------------------------
@@ -533,7 +509,7 @@ func TestPairSwitchChangesEveryPanelThatNamesThePair(t *testing.T) {
 	d := live(t)
 	renderAt(t, goldenWideW, goldenWideH, 1, d)
 
-	eur := screenOf(t, goldenWideW, goldenWideH, d)
+	eur := screen(t, goldenWideW, goldenWideH, 1, d)
 	if !strings.Contains(eur, "EUR/USD spot") {
 		t.Fatalf("the screen does not start on EUR:\n%s", eur)
 	}
@@ -550,7 +526,7 @@ func TestPairSwitchChangesEveryPanelThatNamesThePair(t *testing.T) {
 		t.Fatalf("the chooser selected %q, want GBP/USD", got)
 	}
 
-	gbp := screenOf(t, goldenWideW, goldenWideH, d)
+	gbp := screen(t, goldenWideW, goldenWideH, 1, d)
 	if !strings.Contains(gbp, "GBP/USD spot") {
 		t.Errorf("the spot tile was not relabelled:\n%s", gbp)
 	}
@@ -728,7 +704,7 @@ func TestPairSwitchWithNoWindowSaysSoRatherThanDrawingAnotherPairsShape(t *testi
 // only thing standing between the two is the footer's word.
 func TestPauseTogglesAndSaysSo(t *testing.T) {
 	d := live(t)
-	closed := screenOf(t, goldenWideW, goldenWideH, d)
+	closed := screen(t, goldenWideW, goldenWideH, 1, d)
 	if strings.Contains(closed, "PAUSED") {
 		t.Fatalf("a running screen says PAUSED:\n%s", closed)
 	}
@@ -739,7 +715,7 @@ func TestPauseTogglesAndSaysSo(t *testing.T) {
 	if !d.Paused() {
 		t.Fatal("space did not pause")
 	}
-	paused := screenOf(t, goldenWideW, goldenWideH, d)
+	paused := screen(t, goldenWideW, goldenWideH, 1, d)
 	if !strings.Contains(paused, "PAUSED") {
 		t.Errorf("a paused screen does not say so:\n%s", paused)
 	}
@@ -758,7 +734,7 @@ func TestPauseTogglesAndSaysSo(t *testing.T) {
 	if d.Paused() {
 		t.Fatal("the second space did not resume")
 	}
-	resumed := screenOf(t, goldenWideW, goldenWideH, d)
+	resumed := screen(t, goldenWideW, goldenWideH, 1, d)
 	if strings.Contains(resumed, "PAUSED") {
 		t.Errorf("a resumed screen still says PAUSED:\n%s", resumed)
 	}
@@ -772,7 +748,7 @@ func TestPauseTogglesAndSaysSo(t *testing.T) {
 func TestPauseDoesNotChangeTheData(t *testing.T) {
 	d := live(t)
 	renderAt(t, goldenWideW, goldenWideH, 1, d)
-	before := screenOf(t, goldenWideW, goldenWideH, d)
+	before := screen(t, goldenWideW, goldenWideH, 1, d)
 
 	asked := 0
 	d.OnRefresh = func() { asked++ }
@@ -787,7 +763,7 @@ func TestPauseDoesNotChangeTheData(t *testing.T) {
 		t.Errorf("'r' asked for %d fetches while paused, want 1", asked)
 	}
 
-	after := screenOf(t, goldenWideW, goldenWideH, d)
+	after := screen(t, goldenWideW, goldenWideH, 1, d)
 	// The BANDS are compared, not the whole screen: the footer gains "PAUSED" and
 	// the key hint's word changes from "pause" to "resume", both of which are the
 	// pause showing itself and neither of which is the data. Everything above the
@@ -1167,7 +1143,7 @@ func TestUnboundKeysAreNotConsumed(t *testing.T) {
 func TestResizeIsHandledAndKeepsTheLayout(t *testing.T) {
 	d := live(t)
 	renderAt(t, goldenWideW, goldenWideH, 1, d)
-	wide := screenOf(t, goldenWideW, goldenWideH, d)
+	wide := screen(t, goldenWideW, goldenWideH, 1, d)
 
 	if !d.Handle(termmosaic.ResizeEvent(goldenNarrowW, goldenNarrowH)) {
 		t.Fatal("a resize was not consumed")
@@ -1192,12 +1168,6 @@ func TestResizeIsHandledAndKeepsTheLayout(t *testing.T) {
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
-
-// screenOf renders d through the whole stack and returns the screen.
-func screenOf(t *testing.T, w, h int, d *dashboard) string {
-	t.Helper()
-	return screen(t, w, h, 1, d)
-}
 
 // rowsOf renders a bare buffer's rows with trailing blanks trimmed, so two frames
 // can be compared exactly.

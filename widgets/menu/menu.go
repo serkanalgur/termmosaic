@@ -957,8 +957,10 @@ func (m *Menu) drawRow(buf *buffer.Buffer, c *layoutCol, row buffer.Rect, i int,
 		buf.Set(c.submenuX, row.Y, m.submenuRune, m.checkStyle().Resolved())
 	}
 
-	// The marker is drawn LAST and only for the selected, enabled row, so a
-	// disabled item can never be the one wearing it.
+	// The marker is drawn LAST and only for a row that is selected AND enabled, so a
+	// disabled item can never be the one wearing it even if a caller selects one
+	// programmatically — which it can, because selectAt does not second-guess the
+	// index it is handed.
 	if selected && !disabled {
 		mst := m.MarkerStyle
 		if mst.IsUnset() {

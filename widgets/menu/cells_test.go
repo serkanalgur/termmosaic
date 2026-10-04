@@ -235,6 +235,38 @@ func TestMenuDisabledRowCarriesNoMarker(t *testing.T) {
 	}
 }
 
+// TestMenuDisabledRowStaysUnmarkedWhenSelectedProgrammatically is the case the
+// navigation tests cannot reach.
+//
+// No key ever selects a disabled item — that is what the skip rule is for — so the
+// only way a disabled row can be the selected one is a caller calling into the
+// widget directly, which is legal and is what an application restoring a stored
+// selection does. The drawing must hold in that case too, and it is a separate
+// guard from the skip: the skip makes the state unreachable by key, and this makes
+// it unreachable by drawing.
+func TestMenuDisabledRowStaysUnmarkedWhenSelectedProgrammatically(t *testing.T) {
+	m := newMenu(t, 40, 8, tree()...)
+	// Save is the disabled item at index 1.
+	m.selectAt(0, 1)
+	if got := m.Selected(); got != 1 {
+		t.Fatalf("setup: the selection is %d, want 1 — selectAt must accept an index it is handed", got)
+	}
+	buf := drawInto(m, 40, 8)
+	c := &m.lay.cols[0]
+	y := c.itemRect.Y + 1
+	if got := buf.CellAt(c.markerX, y).Ch; got != ' ' {
+		t.Errorf("a programmatically selected DISABLED row wears the marker %q: a disabled item "+
+			"must never look selectable, however it came to be selected", got)
+	}
+	// And it is still drawn and still faint.
+	if got := line(buf, y, 40); !strings.Contains(got, "Save") {
+		t.Errorf("the disabled row is not drawn at all: %q", got)
+	}
+	if got := buf.CellAt(c.labelX, y).Attr; !got.Has(buffer.AttrFaint) {
+		t.Errorf("a selected disabled row is not faint: attr %v", got)
+	}
+}
+
 // TestMenuCheckColumnShowsCheckedAndUnchecked is the toggle signal. Two items, one
 // checked and one not, and they must differ in a CELL — which is the assertion
 // that colour is not the only signal for a checkbox.

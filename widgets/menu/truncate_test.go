@@ -15,14 +15,17 @@ import (
 // mode is precisely that the two disagree — a widget can hold the right string and
 // write only its first run.
 func TestMenuTruncatedLabelKeepsItsMarker(t *testing.T) {
-	// At six cells the label region is three wide, so "Save" cannot fit whole.
-	m := newMenu(t, 6, 4, Item{Label: "Save"}, Item{Label: "New"})
-	buf := drawInto(m, 6, 4)
+	// Four cells wide leaves a label region too narrow for "Save", which is what
+	// makes this test exercise the truncation rather than the fitting path.
+	const w = 4
+	m := newMenu(t, w, 4, Item{Label: "Save"}, Item{Label: "New"})
+	buf := drawInto(m, w, 4)
 	c := &m.lay.cols[0]
 	if c.labelW >= buffer.StringWidth("Save") {
-		t.Skipf("the label region is %d cells at 6 wide, which fits 'Save'; the threshold has moved", c.labelW)
+		t.Fatalf("the label region is %d cells at %d wide, which fits 'Save': the test is not "+
+			"exercising truncation", c.labelW, w)
 	}
-	got := line(buf, c.itemRect.Y, 6)
+	got := line(buf, c.itemRect.Y, w)
 	if !strings.Contains(got, string(buffer.TruncSuffix)) && !strings.Contains(got, string(buffer.AscTruncSuffix)) {
 		t.Errorf("row %d = %q: the truncated label shows no marker, so the user cannot tell it was cut", c.itemRect.Y, got)
 	}

@@ -1,0 +1,40 @@
+┌───────────────────────────────┐ ┌──────────────────────────────┐ ┌──────────────────────────────┐ ┌──────────────────────────────┐
+│EUR/USD spot                   │ │1d change                     │ │window high                   │ │window low                    │
+│0.89087                        │ │+0.65%                        │ │0.89087                       │ │0.85822                       │
+│2026-10-02                     │ │▲ since previous publication  │ │2026-10-02                    │ │2026-09-09                    │
+└───────────────────────────────┘ └──────────────────────────────┘ └──────────────────────────────┘ └──────────────────────────────┘
+
+┌ EUR/USD, last 30d ──────────────────────────────────────────────┐ ┌ spot in window ┐ ┌ 1d move, bps ─────────────────────────────┐
+│⠁⠁⠁⠁⠁⠁⠁⠁⠑⠑⠙⠛                                                     │ │                │ │up                  +| + █            65   │
+│                                                                 │ │      ⠁⠁⠁⠁      │ │                                           │
+│                             ┌ keys ───────────────────────────────────────────────────────────────┐                              │
+│                             │markets — keys and mouse                                             │                              │
+│                             │keyboard                                                             │                              │
+│                             │  tab / shift-tab   next / previous panel                            │                              │
+│                             │  arrows            move within the focused panel                    │                              │
+└─────────────────────────────│  pgup / pgdn       page · home / end  first / last                  │──────────────────────────────┘
+                              │  space             pause or resume the auto refresh                 │
+┌ pairs ──────────────────────│  r                 fetch now                                        │ ┌ largest moves, |bps| ──────┐
+│  pair             rate      │  ?                 show or hide this panel                          │ │CHF ▼  █████████████████████│
+│› CHF/USD       0.82664   ▼ -│  q, esc, ctrl-c    quit                                             │ │KRW ▼  ███████████████████ 9│
+│  KRW/USD       1348.28   ▼ -│                                                                     │ │MXN ▲  ███████████████████ 9│
+│  MXN/USD       18.3350   ▲ +│mouse                                                                │ │BTC ▲  ███████████████ 73   │
+│  BTC/USD      85492.00   ▲ +│  wheel             scroll the pairs table                           │ │EUR ▲  █████████████ 65     │
+│  EUR/USD       0.89087   ▲ +│  click a row       select it and focus the table                    │ │ETH ▲  ███████████ 54       │
+│  ETH/USD       2701.83   ▲ +│  click a tab       change the primary pair                          │ │                            │
+│  SEK/USD       10.0579   ▲ +│                                                                     │ │                            │
+│  GBP/USD       0.75753   ▲ +│mouse capture is ON while this screen runs, and is handed back to the│ │                            │
+│  NOK/USD        9.6494   ▲ +│shell on every exit path — including an error and ctrl-c.            │ │                            │
+│  JPY/USD        157.67   = -│                                                                     │ │                            │
+│  AUD/USD        1.4411   = +│                                                                     │ │                            │
+│  CAD/USD        1.4240   = -└─────────────────────────────────────────────────────────────────────┘ │                            │
+│  INR/USD       96.3200   = -0.01%                                                                 │ │                            │
+│  CNY/USD        6.7046   = +0.00%                                                                 │ │                            │
+│                                                                                                   │ │                            │
+│                                                                                                   │ │                            │
+│                                                                                                   │ │                            │
+│                                                                                                   │ │                            │
+│                                                                                                   │ │                            │
+└───────────────────────────────────────────────────────────────────────────────────────────────────┘ └────────────────────────────┘
+[EUR/USD] GBP/USD  JPY/USD  [←→] pair  [home] first  [tab] panel  [space] pause  [r] fetch  [?] keys  [q] quit
+markets  offline  as of 2026-10-02  fetched 14:30:05Z
