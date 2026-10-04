@@ -1,0 +1,9 @@
+
+ ┌ termmosaic ────────────────────────┐
+ │                                    │
+ │ frame 1                            │
+ │ depth truecolor                    │
+ │ cols  1 column                     │
+ │ press q to quit                    │
+ │                                    │
+ └────────────────────────────────────┘

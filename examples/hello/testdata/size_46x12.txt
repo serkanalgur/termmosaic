@@ -1,0 +1,11 @@
+
+ ┌ termmosaic ──────────────────────────────┐
+ │                                          │
+ │ frame 1              cols  2 columns     │
+ │ depth truecolor                          │
+ │ hello from termmosaic — resize this ter… │
+ │ the layout above is recomputed only when │
+ │ Bounds() changes, so a resize repaints   │
+ │ press q to quit                          │
+ │                                          │
+ └──────────────────────────────────────────┘

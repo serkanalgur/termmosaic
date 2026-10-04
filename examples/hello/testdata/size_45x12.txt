@@ -1,0 +1,11 @@
+
+ ┌ termmosaic ─────────────────────────────┐
+ │                                         │
+ │ frame 1                                 │
+ │ depth truecolor                         │
+ │ cols  1 column                          │
+ │ hello from termmosaic — resize this te… │
+ │                                         │
+ │ press q to quit                         │
+ │                                         │
+ └─────────────────────────────────────────┘

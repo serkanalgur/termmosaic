@@ -14,6 +14,7 @@ import (
 	"github.com/serkanalgur/termmosaic/headless"
 	"github.com/serkanalgur/termmosaic/render"
 	"github.com/serkanalgur/termmosaic/widgets/block"
+	"github.com/serkanalgur/termmosaic/widgets/widgettest"
 )
 
 // update is set by -update to rewrite the golden files.
@@ -28,29 +29,22 @@ const (
 // renderGolden renders n frames of the example's block into a MemorySink and
 // returns the sink.
 //
-// It exercises the whole stack the way a real application does: the renderer,
-// the two-tier diff, the ANSI encoder, and the headless screen model that turns
-// the emitted bytes back into cells.
+// It goes through widgettest.Render, which is the whole point of that package:
+// the widget, the renderer, the two-tier diff, the ANSI encoder and the headless
+// screen model all have to agree, and asserting on anything short of that proves
+// less than it looks like it proves.
 func renderGolden(t *testing.T, frames int) *headless.MemorySink {
 	t.Helper()
-	sink := headless.NewMemorySink(goldenW, goldenH)
-	r := render.New(sink, render.Config{
-		Width:  goldenW,
-		Height: goldenH,
-		Caps:   termmosaic.DefaultCaps(),
-	})
-	root := newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor)
-	r.SetRoot(root)
-	for i := 0; i < frames; i++ {
-		if _, err := r.Render(); err != nil {
-			t.Fatalf("frame %d: %v", i, err)
-		}
-	}
-	if got := sink.UnknownSequences(); got != 0 {
-		t.Fatalf("the headless screen saw %d unrecognised sequences; assertions about it are unsound.\n%s",
-			got, sink.RawString())
-	}
-	return sink
+	return widgettest.Render(t, goldenW, goldenH, frames,
+		newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor))
+}
+
+// renderAt renders the example's block at an arbitrary screen size, which is how
+// the responsive tests get a screen without seven near-copies of renderGolden.
+func renderAt(t *testing.T, w, h, frames int) *headless.MemorySink {
+	t.Helper()
+	return widgettest.Render(t, w, h, frames,
+		newHello(rootBounds(w, h), buffer.DepthTrueColor))
 }
 
 func checkGolden(t *testing.T, name, got string) {
@@ -113,6 +107,286 @@ func TestGoldenScreen(t *testing.T) {
 func TestGoldenStream(t *testing.T) {
 	sink := renderGolden(t, 1)
 	checkGolden(t, "hello.sgr", sink.RawString())
+}
+
+// TestGoldenAtEverySize is the responsive golden: the same widget, at seven
+// sizes spanning every breakpoint this example introduces, plus the degenerate
+// ones.
+//
+// The sizes are chosen to sit either side of both column thresholds rather than
+// at round numbers, because a golden at 60x24 proves nothing about a threshold at
+// 36. twoColW and threeColW are interior widths, and the border plus padding
+// costs four cells, so the corresponding screen widths are twoColW+6 and
+// threeColW+6 — hence 41 and 65 below, chosen to be one cell short of each.
+func TestGoldenAtEverySize(t *testing.T) {
+	for _, tc := range []struct {
+		w, h int
+		name string
+	}{
+		{30, 8, "size_30x8"},   // below MinSize: the diagnostic, not a layout
+		{40, 10, "size_40x10"}, // at MinSize: the sparsest honest layout
+		{45, 12, "size_45x12"}, // one column: interior 39 < twoColW
+		{46, 12, "size_46x12"}, // two columns: interior 40 >= twoColW
+		{65, 16, "size_65x16"}, // still two columns: interior 59 < threeColW
+		{66, 16, "size_66x16"}, // three columns: interior 60 >= threeColW
+		{80, 24, "size_80x24"},
+		{120, 40, "size_120x40"},
+		{200, 60, "size_200x60"},
+		{1, 1, "size_1x1"},
+		{0, 0, "size_0x0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := renderAt(t, tc.w, tc.h, 1)
+			checkGolden(t, tc.name+".txt", sink.String())
+		})
+	}
+}
+
+// TestLayoutChangesWithWidth is the assertion that makes "responsive" mean
+// something: the arrangement must be observably different either side of each
+// threshold, not merely the same layout with different padding.
+//
+// It asserts on the SCREEN rather than on the widget's internals, because the
+// screen is what the user sees and the only thing a responsive claim is about.
+// Three properties, one per band:
+//
+//   - one column: "frame" and "depth" are on DIFFERENT rows, so the facts stack.
+//   - two columns: they are on the SAME row, so the facts sit side by side.
+//   - the "cols" fact reports the count in words, so the block says what it did.
+//
+// The two-column case also proves the column is real rather than a doubled gap:
+// the second column starts past the first column's width.
+func TestLayoutChangesWithWidth(t *testing.T) {
+	// rowOf returns the screen row containing needle, and whether it was found.
+	rowOf := func(sink *headless.MemorySink, needle string) (int, bool) {
+		_, h := sink.Size()
+		for y := 0; y < h; y++ {
+			if strings.Contains(widgettest.Row(sink, y), needle) {
+				return y, true
+			}
+		}
+		return -1, false
+	}
+
+	// Interior = screen - 2*screenMargin - 2 border - 2 padding = screen - 6, so
+	// the band boundaries in screen widths are twoColW+6 = 46 and
+	// threeColW+6 = 66. The cases below sit inside each band rather than on its
+	// edge; TestColumnThresholdsAreWhereTheyAreClaimed covers the edges.
+	for _, tc := range []struct {
+		name     string
+		w, h     int
+		wantCols int
+	}{
+		{"one column", 40, 12, 1},
+		{"two columns", 50, 14, 2},
+		{"three columns", 70, 16, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := renderAt(t, tc.w, tc.h, 1)
+			screen := widgettest.Screen(sink)
+
+			// The block says which arrangement it chose, so the assertion is
+			// readable from the screen without counting columns.
+			wantReport := fmt.Sprintf("%d column%s", tc.wantCols, plural(tc.wantCols))
+			if !strings.Contains(screen, wantReport) {
+				t.Errorf("%dx%d does not report %q.\n%s", tc.w, tc.h, wantReport, screen)
+			}
+
+			// The three facts are laid out column-major over factRows rows, so
+			// their rows say how the grid split: with one column all three stack,
+			// with two the third joins the first, and with three all three share a
+			// row. That progression is the layout changing, not the padding.
+			frameRow, okF := rowOf(sink, "frame")
+			depthRow, okD := rowOf(sink, "depth")
+			colsRow, okC := rowOf(sink, "cols")
+			if !okF || !okD || !okC {
+				t.Fatalf("%dx%d: a fact is missing (frame=%v depth=%v cols=%v).\n%s",
+					tc.w, tc.h, okF, okD, okC, screen)
+			}
+			switch tc.wantCols {
+			case 1:
+				if frameRow == depthRow || depthRow == colsRow {
+					t.Errorf("%dx%d: one column must stack the facts, but they are on rows %d/%d/%d",
+						tc.w, tc.h, frameRow, depthRow, colsRow)
+				}
+			case 2:
+				if frameRow != colsRow {
+					t.Errorf("%dx%d: two columns must put the third fact beside the first, but \"cols\" is on row %d and \"frame\" on %d",
+						tc.w, tc.h, colsRow, frameRow)
+				}
+				if frameRow == depthRow {
+					t.Errorf("%dx%d: two columns over two rows must not put every fact on one row",
+						tc.w, tc.h)
+				}
+			case 3:
+				if frameRow != depthRow || depthRow != colsRow {
+					t.Errorf("%dx%d: three columns must put all three facts on one row, but they are on %d/%d/%d",
+						tc.w, tc.h, frameRow, depthRow, colsRow)
+				}
+			}
+		})
+	}
+}
+
+// plural is the "s" in the fact's own wording, so the expected report string is
+// built by the same rule the example uses rather than hardcoded three times.
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// TestColumnThresholdsAreWhereTheyAreClaimed pins the two numbers the layout
+// switches on, in screen widths, and asserts the switch actually happens on the
+// boundary rather than merely near it. A threshold nobody can trigger is a
+// comment, not a layout.
+func TestColumnThresholdsAreWhereTheyAreClaimed(t *testing.T) {
+	// chrome is what the block spends on the screen before the interior: the
+	// margin on each side plus the border and the padding on each side.
+	const chrome = 2*screenMargin + 2 + 2
+	for _, tc := range []struct {
+		w        int
+		wantCols int
+	}{
+		{twoColW + chrome - 1, 1},
+		{twoColW + chrome, 2},
+		{threeColW + chrome - 1, 2},
+		{threeColW + chrome, 3},
+	} {
+		inner := rootBounds(tc.w, 40)
+		inner = newChrome(inner).Interior()
+		if got := columnsFor(inner.W); got != tc.wantCols {
+			t.Errorf("a %d-wide screen has a %d-wide interior, so columnsFor = %d, want %d",
+				tc.w, inner.W, got, tc.wantCols)
+		}
+	}
+}
+
+// TestColumnsForIsTotal pins the clamp at both ends: an interior of any width,
+// including negative, yields a count in [minCols, maxCols]. The upper clamp is
+// what stops a very wide terminal from producing more columns than there are
+// facts, and the lower one is what stops a degenerate rect producing zero
+// columns and dividing by zero in adapt.
+func TestColumnsForIsTotal(t *testing.T) {
+	for innerW := -5; innerW <= 200; innerW++ {
+		got := columnsFor(innerW)
+		if got < minCols || got > maxCols {
+			t.Fatalf("columnsFor(%d) = %d, outside [%d, %d]", innerW, got, minCols, maxCols)
+		}
+	}
+	if got := columnsFor(1 << 30); got != maxCols {
+		t.Errorf("columnsFor(1<<30) = %d, want the clamp at %d", got, maxCols)
+	}
+}
+
+// TestBelowMinSizeDrawsTheDiagnosticAndNotALayout is the boundary test ADR 0007
+// §4 asks for: at a size under MinSize the widget says so in one line rather
+// than clipping a layout into nonsense, and it still repaints its whole rect so
+// nothing from a larger size is left behind.
+func TestBelowMinSizeDrawsTheDiagnosticAndNotALayout(t *testing.T) {
+	sink := renderAt(t, 30, 8, 1)
+	screen := widgettest.Screen(sink)
+
+	if !strings.Contains(screen, "needs 38x8") {
+		t.Errorf("a 30x8 screen must produce the minimum-size diagnostic.\n%s", screen)
+	}
+	// Below the minimum there is no layout, so none of its parts may appear. The
+	// title stands in for the border here: it lives ON the border, so a screen
+	// showing one has a border, and the assertion cannot name a border rune
+	// because TestBoxDrawingRunesLiveInOneFile requires every border glyph to
+	// come from the table — including from a test that means well.
+	for _, absent := range []string{"termmosaic", "frame", "press q"} {
+		if strings.Contains(screen, absent) {
+			t.Errorf("a 30x8 screen drew %q; below MinSize the block must draw the diagnostic and nothing else.\n%s",
+				absent, screen)
+		}
+	}
+}
+
+// TestMinSizeIsReportedAndHonoured states the Minimizable contract at the
+// application level: the block reports a minimum, and Draw's behaviour changes at
+// exactly that size rather than somewhere near it.
+func TestMinSizeIsReportedAndHonoured(t *testing.T) {
+	h := newHello(buffer.Rect{W: 200, H: 60}, buffer.DepthTrueColor)
+	m := h.MinSize()
+	if m.W != minW || m.H != minH {
+		t.Errorf("MinSize = %dx%d, want %dx%d", m.W, m.H, minW, minH)
+	}
+
+	saysDiagnostic := func(w, h int) bool {
+		buf := buffer.NewBuffer(atLeast1(w), atLeast1(h))
+		newHello(buffer.Rect{W: w, H: h}, buffer.DepthTrueColor).Draw(buf)
+		return strings.Contains(rowText(buf, w), "n")
+	}
+	if saysDiagnostic(minW-1, minH) != true {
+		t.Errorf("at %dx%d the block must show the diagnostic", minW-1, minH)
+	}
+	if saysDiagnostic(minW, minH-1) != true {
+		t.Errorf("at %dx%d the block must show the diagnostic", minW, minH-1)
+	}
+	if saysDiagnostic(minW, minH) != false {
+		t.Errorf("at exactly MinSize the block must draw its layout, not the diagnostic")
+	}
+}
+
+// TestBudgetDropsTheNoteFirstAndNeverTheHint is the height half of
+// responsiveness, asserted through the screen: the low-priority explanatory
+// paragraph appears only when there is height for it, and the pinned hint is
+// never the thing that goes.
+//
+// It uses the note's opening words and the hint's, so a change to either string
+// fails here rather than silently making the test vacuous.
+func TestBudgetDropsTheNoteFirstAndNeverTheHint(t *testing.T) {
+	has := func(sink *headless.MemorySink, needle string) bool {
+		return strings.Contains(widgettest.Screen(sink), needle)
+	}
+	tall := renderAt(t, 60, 14, 1)
+	if !has(tall, "the layout above is recomputed") {
+		t.Errorf("at 60x14 there is height for the note paragraph.\n%s", widgettest.Screen(tall))
+	}
+	if !has(tall, "press q to quit") {
+		t.Errorf("the hint is PrioAlways and must survive every budget.\n%s", widgettest.Screen(tall))
+	}
+
+	// 40x10 is MinSize exactly: enough for the facts and the hint, not enough
+	// for the tagline or the note.
+	short := renderAt(t, 40, 10, 1)
+	if has(short, "the layout above is recomputed") {
+		t.Errorf("at 40x10 there is no height for the note paragraph.\n%s", widgettest.Screen(short))
+	}
+	if !has(short, "press q to quit") {
+		t.Errorf("the hint must still be present at MinSize.\n%s", widgettest.Screen(short))
+	}
+	if !has(short, "depth truecolor") {
+		t.Errorf("the facts are PrioHigh and must outrank the tagline and the note.\n%s", widgettest.Screen(short))
+	}
+}
+
+// TestTaglineTruncatesWithAMarkerWhenNarrow is the width half of responsiveness
+// at the smallest size that still draws a layout: the tagline is present and cut
+// short with an ellipsis, so the user learns there was more.
+func TestTaglineTruncatesWithAMarkerWhenNarrow(t *testing.T) {
+	// 44x12 has one column and an interior too narrow for the whole tagline.
+	narrow := widgettest.Screen(renderAt(t, 44, 12, 1))
+	if !strings.Contains(narrow, "…") {
+		t.Errorf("at 44x12 the tagline does not fit and must end in an ellipsis.\n%s", narrow)
+	}
+	if !strings.Contains(narrow, "hello from termmosaic") {
+		t.Errorf("at 44x12 the tagline must still be visible, truncated rather than dropped.\n%s", narrow)
+	}
+
+	// 120x40 has room for all of it, and the full text must be there with no
+	// marker on the row.
+	wide := widgettest.Screen(renderAt(t, 120, 40, 1))
+	if !strings.Contains(wide, tagline) {
+		t.Errorf("at 120x40 the tagline must read in full.\n%s", wide)
+	}
+	for y, row := range strings.Split(wide, "\n") {
+		if strings.Contains(row, "hello from termmosaic") && strings.Contains(row, "…") {
+			t.Errorf("row %d truncates a tagline that fits: %q", y, row)
+		}
+	}
 }
 
 // TestSecondFrameChangesOnlyTheCounter is the ADR 0002 property stated as a test
@@ -288,27 +562,31 @@ func TestResizeGolden(t *testing.T) {
 	}
 
 	// --- GROW ---------------------------------------------------------------
-	const newW, newH = 72, 18
+	// 200x60 is the size the old fixed 46x9 block failed hardest at: it drew the
+	// same 46x9 there as on a 46x9 terminal. Growing to it exercises the three
+	// column arrangement.
+	const newW, newH = 200, 60
 	resizeTo(t, newW, newH)
 	checkGolden(t, "hello_resized.txt", sink.String())
 
-	// --- SHRINK, below the size the block was built for ----------------------
-	// 30x7 is narrower and shorter than blockW x blockH, so the title, the value
-	// column and the body rows all compete for the same cells.
+	// --- SHRINK, below the block's minimum ----------------------------------
+	// 30x7 is narrower and shorter than MinSize, so the layout, the title and the
+	// facts all disappear and the diagnostic takes over. A shrink is the only step
+	// that can leave a stale row behind, and this is the shrink most likely to.
 	resizeTo(t, 30, 7)
-	if got := root.bounds.W; got != 30 {
-		t.Errorf("the block's width is %d on a 30-wide screen, want the full screen", got)
+	if got, want := root.bounds.W, 30-2*screenMargin; got != want {
+		t.Errorf("the block's width is %d on a 30-wide screen, want the screen less its margins (%d)", got, want)
 	}
 	checkGolden(t, "hello_shrunk.txt", sink.String())
 
 	// --- DEGENERATE ----------------------------------------------------------
-	// 0x0 is the detached-terminal case and 4x2 is below the block's minimum;
-	// both must render without failing and both must leave the renderer able to
-	// come back to a real size.
+	// 0x0 is the detached-terminal case and 4x2 is far below MinSize; both must
+	// render without failing and both must leave the renderer able to come back to
+	// a real size.
 	for _, size := range [][2]int{{0, 0}, {4, 2}, {20, 1}} {
 		resizeTo(t, size[0], size[1])
 		if w, h := r.Size(); w != size[0] || h != size[1] {
-			t.Errorf("Size() = %dx%d, want %dx%d", w, h, size[0], size[1])
+			t.Errorf("Size() = %dx%d, want %dx%d", w, size[0], h, size[1])
 		}
 	}
 
@@ -350,9 +628,84 @@ func assertScreenMatchesAFreshStart(t *testing.T, got *headless.MemorySink, w, h
 	}
 }
 
+// TestRootBoundsGrowsWithTheScreen is the direct statement of the fix: the block
+// must not have a preferred size. At every screen width from MinSize upwards the
+// block takes the whole width less its margins, so a 200x60 terminal gets a
+// 198-wide block rather than the 46x9 the example used to ask for.
+//
+// It also pins the margins: they are a fixed inset, not a proportion, so the
+// block's width is exactly the screen's width less two margins at every size.
+func TestRootBoundsGrowsWithTheScreen(t *testing.T) {
+	for w := minW; w <= 240; w++ {
+		r := rootBounds(w, 40)
+		if want := w - 2*screenMargin; r.W != want {
+			t.Fatalf("at %d wide the block is %d wide, want %d — the block has a maximum size again",
+				w, r.W, want)
+		}
+		if r.X != screenMargin {
+			t.Fatalf("at %d wide the block starts at %d, want the %d-cell margin",
+				w, r.X, screenMargin)
+		}
+	}
+	if got := rootBounds(200, 60); got.W <= 46 {
+		t.Errorf("at 200x60 the block is %d wide; the old fixed 46x9 would have been narrower", got.W)
+	}
+}
+
+// TestRootBoundsIsNeverEmptyOnANonEmptyScreen is the margin rule at its limit.
+// Min(1) on both sides of a one-cell axis overflows the space between them, so
+// the Fill in the middle receives nothing and the block collapses — which means
+// a 1x1 terminal would draw no block at all. marginFor exists to prevent that,
+// and this is the assertion that it does.
+//
+// Every screen with a cell in it must produce a block with a cell in it. A
+// widget that blanks itself at the size where it has least room is the clamp
+// mistake in miniature.
+func TestRootBoundsIsNeverEmptyOnANonEmptyScreen(t *testing.T) {
+	for w := 1; w <= 80; w++ {
+		for h := 1; h <= 40; h++ {
+			r := rootBounds(w, h)
+			if r.Empty() {
+				t.Fatalf("a %dx%d screen produced an empty block; the margin consumed the screen",
+					w, h)
+			}
+			if r.Right() > w || r.Bottom() > h {
+				t.Fatalf("a %dx%d screen produced a %v block, which is off screen", w, h, r)
+			}
+		}
+	}
+	// And at 0x0 the block IS empty, which is the one case where that is correct:
+	// there is nothing to draw into.
+	if r := rootBounds(0, 0); !r.Empty() {
+		t.Errorf("rootBounds(0, 0) = %v, want an empty rect", r)
+	}
+}
+
+// TestMarginForYieldsRatherThanAnnihilating states marginFor's rule directly: it
+// drops the margin on an axis too narrow to carry two of them and at least one
+// cell of block, and keeps it otherwise.
+func TestMarginForYieldsRatherThanAnnihilating(t *testing.T) {
+	for avail := -5; avail <= 40; avail++ {
+		got := marginFor(avail, screenMargin)
+		if got < 0 {
+			t.Fatalf("marginFor(%d) = %d, want a non-negative margin", avail, got)
+		}
+		if avail < 2*screenMargin+1 {
+			if got != 0 {
+				t.Errorf("marginFor(%d) = %d, want 0: the axis cannot carry two margins and a cell",
+					avail, got)
+			}
+			continue
+		}
+		if got != screenMargin {
+			t.Errorf("marginFor(%d) = %d, want %d", avail, got, screenMargin)
+		}
+	}
+}
+
 // TestWriteIntRendersEveryDecimalPlace covers the hand-rolled formatting that
-// replaced fmt.Sprintf on the draw path. It is worth testing precisely because
-// it exists to avoid an allocation: a bug here would be a wrong digit on screen,
+// replaced fmt.Sprintf on the draw path. It is worth testing precisely because it
+// exists to avoid an allocation: a bug here would be a wrong digit on screen,
 // and a "simplification" back to Sprintf would reintroduce the heap traffic
 // TestDrawIsAllocationFree forbids.
 func TestWriteIntRendersEveryDecimalPlace(t *testing.T) {
@@ -366,9 +719,31 @@ func TestWriteIntRendersEveryDecimalPlace(t *testing.T) {
 		if got := strings.TrimRight(rowText(b, next), " "); got != wantDecimal(v) {
 			t.Errorf("writeInt(%d) wrote %q, want %q", v, got, wantDecimal(v))
 		}
-		// Everything before the digits must be untouched.
-		if next > 0 {
-			_ = b.CellAt(0, 0)
+	}
+}
+
+// TestWriteIntInStopsAtItsEdge is the clipping half: a number may not run past
+// its own column into the next one, because a partially written number is worse
+// than none.
+func TestWriteIntInStopsAtItsEdge(t *testing.T) {
+	h := &hello{}
+	for _, tc := range []struct {
+		v, x0, x1, wantCells int
+	}{
+		{123456, 0, 3, 3},
+		{123456, 0, 0, 0},
+		{123456, 5, 2, 0},
+		{7, 0, 1, 1},
+		{7, 3, 4, 1},
+	} {
+		b := buffer.NewBuffer(12, 1)
+		next := h.writeIntIn(b, tc.x0, tc.x1, 0, tc.v)
+		if got := next - tc.x0; got != tc.wantCells {
+			t.Errorf("writeIntIn(_, %d, %d, _, %d) wrote %d cells, want %d",
+				tc.x0, tc.x1, tc.v, got, tc.wantCells)
+		}
+		if next > tc.x1 && tc.x1 > tc.x0 {
+			t.Errorf("writeIntIn(_, %d, %d, _, %d) returned %d, past its edge", tc.x0, tc.x1, tc.v, next)
 		}
 	}
 }
@@ -382,8 +757,8 @@ func rowText(b *buffer.Buffer, n int) string {
 	return sb.String()
 }
 
-// wantDecimal is the reference the hand-rolled formatter is checked against. It
-// is strconv, used only in a test, which is the point: the draw path must not.
+// wantDecimal is the reference the hand-rolled formatter is checked against. It is
+// strconv, used only in a test, which is the point: the draw path must not.
 func wantDecimal(v int) string {
 	if v < 0 {
 		v = 0
@@ -393,12 +768,15 @@ func wantDecimal(v int) string {
 
 // TestGoldenFilesExist fails with a clear instruction rather than a file-not-found
 // error, because that is the first thing anyone hits here. The list includes the
-// shrink and recovery files, so a golden that was never generated is a failure here
-// rather than a confusing diff later.
+// per-size responsive goldens and the shrink and recovery files, so a golden that
+// was never generated is a failure here rather than a confusing diff later.
 func TestGoldenFilesExist(t *testing.T) {
 	names := []string{
 		"hello.txt", "hello.sgr", "hello_frame2.txt",
 		"hello_resized.txt", "hello_shrunk.txt", "hello_recovered.txt",
+		"size_30x8.txt", "size_40x10.txt", "size_45x12.txt", "size_46x12.txt",
+		"size_65x16.txt", "size_66x16.txt", "size_80x24.txt", "size_120x40.txt",
+		"size_200x60.txt", "size_1x1.txt", "size_0x0.txt",
 	}
 	for _, name := range names {
 		if _, err := os.Stat(filepath.Join("testdata", name)); err != nil {
@@ -449,9 +827,15 @@ func TestExampleOwnsNoBorderVocabulary(t *testing.T) {
 // TestExampleTitleAppearsAtExactlyTheTitleThreshold is the functional counterpart:
 // the example's Block shows its title at width 5 and drops it at width 4, which is
 // what the constants above claim.
+//
+// It goes through newChrome rather than newHello because hello gates its whole
+// layout on MinSize, so at width 5 hello draws the diagnostic and never reaches
+// the Block at all. The chrome is the thing under test here, and newChrome is the
+// example's own chrome configuration.
 func TestExampleTitleAppearsAtExactlyTheTitleThreshold(t *testing.T) {
 	showsTitle := func(w int) bool {
-		b := newHello(buffer.Rect{W: w, H: 3}, buffer.DepthTrueColor)
+		b := newChrome(buffer.Rect{W: w, H: 3})
+		b.SetTitleString("termmosaic", stTitle)
 		buf := buffer.NewBuffer(w, 3)
 		b.Draw(buf)
 		return strings.Contains(rowText(buf, w), "t")
@@ -468,9 +852,13 @@ func TestExampleTitleAppearsAtExactlyTheTitleThreshold(t *testing.T) {
 // the example: Draw must be defined for every rectangle, including empty, and
 // must never panic. Every write is bounds-checked, so the assertion is really
 // that the guards short-circuit before they do any work.
+//
+// It walks both axes to 14 so it crosses MinSize in both directions: above it the
+// layout runs, below it the diagnostic runs, and the two paths are different code
+// that could each be the one that panics on a 1-wide rect.
 func TestDrawIsTotalAtEverySize(t *testing.T) {
-	for w := 0; w <= 12; w++ {
-		for h := 0; h <= 12; h++ {
+	for w := 0; w <= 14; w++ {
+		for h := 0; h <= 14; h++ {
 			widget := newHello(buffer.Rect{W: w, H: h}, buffer.DepthTrueColor)
 			b := buffer.NewBuffer(atLeast1(w), atLeast1(h))
 			widget.Draw(b) // must not panic for any size, including 0x0
@@ -478,22 +866,127 @@ func TestDrawIsTotalAtEverySize(t *testing.T) {
 	}
 }
 
+// TestDegenerateSizesRenderWithoutPanic is the same contract one level up, through
+// the renderer rather than through a bare buffer: 0x0 is the detached terminal,
+// 0x24 and 24x0 are the two half-degenerate cases that a one-axis guard is the
+// classic way to miss, and 1x1 is the smallest real terminal.
+//
+// ADR 0007 §4 requires zero bytes written and no Sink call at a zero size, which
+// render.Render already guarantees; what this adds is that the example's own
+// guards do not panic on the way there.
+func TestDegenerateSizesRenderWithoutPanic(t *testing.T) {
+	for _, tc := range [][2]int{{0, 0}, {1, 1}, {0, 24}, {24, 0}, {0, 1}, {1, 0}} {
+		widget := newHello(rootBounds(tc[0], tc[1]), buffer.DepthTrueColor)
+		r := render.New(headless.NewMemorySink(tc[0], tc[1]), render.Config{
+			Width: tc[0], Height: tc[1], Caps: termmosaic.DefaultCaps(),
+		})
+		r.SetRoot(widget)
+		n, err := r.Render()
+		if err != nil {
+			t.Errorf("%dx%d: Render: %v", tc[0], tc[1], err)
+		}
+		if tc[0] == 0 || tc[1] == 0 {
+			if n != 0 {
+				t.Errorf("%dx%d: wrote %d bytes; a zero size must write none", tc[0], tc[1], n)
+			}
+			continue
+		}
+		if n == 0 {
+			t.Errorf("%dx%d: wrote nothing, but a non-degenerate size has something to show", tc[0], tc[1])
+		}
+	}
+}
+
 // TestDrawIsAllocationFree is the widget-side half of ADR 0008 §4: a Draw that
 // builds nothing derived from its size allocates nothing.
 //
-// The Block's title is built once in newHello and its truncation cached per rect;
-// the body writes one integer digit by digit, which for these small values does not
-// escape. If a future change makes Draw call Wrap or Truncate, this fails — which is
-// the point, because that is the most likely performance regression in the catalog
-// and documentation alone does not catch it.
+// The Block's title, the tagline's truncation and the note's wrap are all cached
+// per rect, the body layout is derived once per rect, and the only per-frame work
+// is the frame counter, written digit by digit. If a future change makes Draw call
+// Wrap or Truncate, or re-derive the layout, this fails — which is the point,
+// because that is the most likely performance regression in the catalog and
+// documentation alone does not catch it.
+//
+// It runs at three sizes because the layout differs between them: one column, two
+// columns, and below MinSize where a completely different path draws.
 func TestDrawIsAllocationFree(t *testing.T) {
-	b := buffer.NewBuffer(60, 14)
-	h := newHello(rootBounds(60, 14), buffer.DepthTrueColor)
-	h.Draw(b) // warm any lazily-initialised state
+	for _, tc := range []struct{ w, h int }{
+		{30, 8}, // below MinSize: the diagnostic path
+		{60, 14},
+		{200, 60}, // three columns
+	} {
+		b := buffer.NewBuffer(tc.w, tc.h)
+		h := newHello(rootBounds(tc.w, tc.h), buffer.DepthTrueColor)
+		h.Draw(b) // warm any lazily-initialised state
 
-	if got := testing.AllocsPerRun(100, func() { h.Draw(b) }); got != 0 {
-		t.Errorf("Draw allocated %.1f objects per run, want 0. ADR 0008 §4 forbids calling Wrap, "+
-			"Truncate, or building a []Span inside Draw; cache them on a rect change instead", got)
+		if got := testing.AllocsPerRun(100, func() { h.Draw(b) }); got != 0 {
+			t.Errorf("%dx%d: Draw allocated %.1f objects per run, want 0. ADR 0008 §4 forbids calling "+
+				"Wrap, Truncate, or building a []Span inside Draw; cache them on a rect change instead",
+				tc.w, tc.h, got)
+		}
+	}
+}
+
+// TestAdaptIsSkippedForAnUnchangedRect is the caching rule stated as a test: the
+// cached layout is reused when the rect has not changed, and recomputed when it
+// has. A widget that re-derived everything every frame would still pass the
+// allocation test at zero allocations only by luck, so the keying is asserted
+// directly.
+func TestAdaptIsSkippedForAnUnchangedRect(t *testing.T) {
+	h := newHello(rootBounds(60, 14), buffer.DepthTrueColor)
+	b := buffer.NewBuffer(60, 14)
+
+	h.Draw(b)
+	first := h.lay
+	if !h.lay.valid || h.lay.cols != 2 {
+		t.Fatalf("after one draw the layout is %+v; want a valid two-column layout", first)
+	}
+
+	h.Draw(b)
+	if h.lay.cols != first.cols || h.lay.factRows != first.factRows {
+		t.Errorf("a second draw at the same rect changed the layout: %+v then %+v", first, h.lay)
+	}
+
+	h.bounds = rootBounds(120, 40)
+	b = buffer.NewBuffer(120, 40)
+	h.Draw(b)
+	if h.lay.cols != 3 {
+		t.Errorf("after growing to 120x40 the layout has %d columns, want 3 — the cache did not re-derive",
+			h.lay.cols)
+	}
+	// And the re-derive must be visible on screen, not only in the struct: a
+	// cache that recomputes but is not drawn would satisfy the assertion above.
+	if !strings.Contains(widgettest.Screen(
+		widgettest.Render(t, 120, 40, 1,
+			newHello(rootBounds(120, 40), buffer.DepthTrueColor))), "3 columns") {
+		t.Error("the three-column layout is not on screen at 120x40")
+	}
+}
+
+// TestResizeRepaintsTheWholeRect is ADR 0007 §1 rule 3 at the application level:
+// shrinking must not leave a stale row behind. The sweep goes big, then small, and
+// compares each step against a fresh renderer at the same size — which is the only
+// comparison that can see a leftover row, since a golden for the new size alone
+// would match just as happily with a stale row above it.
+func TestResizeRepaintsTheWholeRect(t *testing.T) {
+	sizes := [][2]int{{200, 60}, {120, 40}, {60, 14}, {40, 10}, {30, 8}, {60, 14}, {200, 60}}
+	sink := headless.NewMemorySink(sizes[0][0], sizes[0][1])
+	r := render.New(sink, render.Config{
+		Width: sizes[0][0], Height: sizes[0][1], Caps: termmosaic.DefaultCaps(),
+	})
+	root := newHello(rootBounds(sizes[0][0], sizes[0][1]), buffer.DepthTrueColor)
+	r.SetRoot(root)
+	if _, err := r.Render(); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range sizes[1:] {
+		sink.Resize(s[0], s[1])
+		r.Resize(s[0], s[1])
+		root.bounds = rootBounds(s[0], s[1])
+		if _, err := r.Render(); err != nil {
+			t.Fatalf("resize to %dx%d: %v", s[0], s[1], err)
+		}
+		assertScreenMatchesAFreshStart(t, sink, s[0], s[1])
 	}
 }
 
