@@ -400,9 +400,13 @@ func (c *BarChart) drawAxis(buf *buffer.Buffer) {
 		if lw > w {
 			lw = w
 		}
+		// Centred in its OWN column, and capped at its own right edge. Capping at the
+		// end of the whole axis row let a label wider than its column run over the
+		// next category's label — "alphabetical" in an eight-cell column rendered as
+		// the next category's first four cells plus the tail of this one. The
+		// horizontal path has always capped at the column.
 		lx := x + geometry.AlignCenter.Offset(w, lw)
-		buf.SetSpansCappedIn(x, row.Right(), row.Y, []buffer.Span{buffer.NewSpan(d.Label, c.LabelStyle)}, c.mark)
-		_ = lx
+		buf.SetSpansCappedIn(lx, x+w, row.Y, []buffer.Span{buffer.NewSpan(d.Label, c.LabelStyle)}, c.mark)
 		x += w
 	}
 }

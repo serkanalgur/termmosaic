@@ -30,6 +30,67 @@ reversed before v1.0.0.
 
 ---
 
+## [0.5.1] — 2026-10-05
+
+A minor bump, and the reason is seven defects: **the style a widget computes for
+one cell was stopping where two code paths diverged, and never reaching the text
+beside it.** Three of the five releases before this existed because of this one
+class.
+
+### Fixed
+
+- **`Dialog`: `ChoiceFocusStyle` never reached the choice label.** The row was
+  filled and marked in the focus style while its *text* was written in the
+  unfocused style, because the label cache is built before focus is known. With
+  default styles the focused choice rendered `attr=none` on an `attr=reverse`
+  row — unreadable dark-on-dark on exactly the row the reader is meant to look
+  at. `drawActions` already had this right via a second cached rendition;
+  `drawChoices` now does the same.
+- **`Button`: `FocusStyle` and `DisabledStyle` reached the ring and the fill but
+  not the label**, so a disabled button rendered blue brackets around
+  default-coloured text. The field's own documentation already said the style was
+  "the style of the whole button — background, label and brackets"; the code did
+  not do that. One function now computes the whole-button rendition, so the
+  cached label and the fill cannot diverge.
+- **`Table`: `SelectedStyle` and `ItemStyle` filled the row but never reached the
+  cell text**, so a selected row showed terminal-default text on the
+  terminal-default background in the middle of a highlighted row. The row style
+  now overrides a single-span cell, matching `List` and `Tree`. **The trade:** on
+  the selected row a cell's own `Style` and its column's `CellStyle` do not show.
+  A cell carrying several spans keeps them, as `drawCell` documents.
+- **`Table`: `HeaderStyle` was documented as "patched with `ItemStyle`" and never
+  was.** `HeadingStyle` is attribute-only, so the header text resolved to the
+  terminal background inside a row just filled with `ItemStyle`. It is patched
+  now. Note a visible consequence of fixing both: the header text also carries
+  `ItemStyle`'s **foreground**, because `Patch` takes FG as well as BG. That is
+  `Patch`'s documented semantics and matches the header's stated intent of
+  sitting on the row background, but it will show for a caller who set `ItemStyle`
+  with a distinct FG.
+- **`Menu`: the check glyph and the submenu arrow were drawn in `ItemStyle` on the
+  selected row.** The marker already had the right fallback — the file's own
+  comment names the hazard: "a marker in ItemStyle on a reversed row would be the
+  one unreadable thing". The check glyph and submenu arrow did not, and now do.
+- **`Radio`: the focus gutter was styled as a focus mark on every row.** A blank
+  cell carried `styles.focus`, which inherits `SelectedStyle`'s `AttrReverse`, so
+  an unfocused group painted a reverse-video stripe down its left edge. The
+  column still exists on every row so labels align; only the rendition was wrong.
+- **`BarChart`: axis labels overran their column.** The centring offset was
+  computed and discarded with `_ = lx`, and the label was capped to the whole
+  axis row, so a label wider than its column overwrote the next category's. The
+  horizontal path already did this correctly.
+- **`paintRow`'s multi-span exception is now documented at both call sites**
+  (`List`, `Tree`), not only in the helper. A reader auditing `List` at the call
+  site would conclude `ItemStyle` reaches every row; for a multi-span item it
+  does not.
+
+### Known Limitations
+
+- `term/terminal_windows_test.go` is still **compile-only** verified
+  (`GOOS=windows go vet`) and has never been executed; the Windows backend still
+  runs zero tests at runtime.
+- The cache-audit gate covers the transitions it names. Other exported raw fields
+  remain the same shape and produce no finding today; see the v0.5.0 entry.
+
 ## [0.5.0] — 2026-10-05
 
 A minor bump, and the reason is the first section: **five exported fields are
@@ -807,6 +868,7 @@ Two performance claims that this release turns from assertion into measurement:
   **60 cursor moves and 19,443 bytes, 3.12× the narrow frame** rather than 11×.
   The ASCII path is unchanged. See ADR 0008's amendment, finding 4.
 
+[0.5.1]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.5.1
 [0.5.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.5.0
 [0.4.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.4.0
 [0.3.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.3.0

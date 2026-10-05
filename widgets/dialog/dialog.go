@@ -325,8 +325,12 @@ type Dialog struct {
 	// of two already-built spans gets written.
 	actLabels, actFocusLabels [][]buffer.Span
 	// choiceLabels holds the truncated label of each VISIBLE choice, from the
-	// scroll offset, so a thousand choices cost three.
-	choiceLabels [][]buffer.Span
+	// scroll offset, so a thousand choices cost three, and
+	// choiceFocusLabels[i] is the same label in ChoiceFocusStyle. Both are
+	// cached for the same reason actLabels and actFocusLabels are: a span
+	// carries its own style, so the only allocation-free way to write a label in
+	// a chosen rendition is to have that rendition already built.
+	choiceLabels, choiceFocusLabels [][]buffer.Span
 	// in is the interior the current cache was built for.
 	in buffer.Rect
 }
@@ -1108,6 +1112,7 @@ func (d *Dialog) layoutActions(in buffer.Rect) {
 // with three.
 func (d *Dialog) rebuildChoices(in buffer.Rect, styles dialogStyles) {
 	d.choiceLabels = d.choiceLabels[:0]
+	d.choiceFocusLabels = d.choiceFocusLabels[:0]
 	if d.choiceShown <= 0 || d.choiceMarkW >= in.W {
 		return
 	}
@@ -1120,6 +1125,8 @@ func (d *Dialog) rebuildChoices(in buffer.Rect, styles dialogStyles) {
 	for i := first; i < first+d.choiceShown && i < len(d.choices); i++ {
 		d.choiceLabels = append(d.choiceLabels,
 			capRow(d.blk.Ascii, d.choices[i], styles.choice, textW))
+		d.choiceFocusLabels = append(d.choiceFocusLabels,
+			capRow(d.blk.Ascii, d.choices[i], styles.choiceFocus, textW))
 	}
 }
 
@@ -1159,6 +1166,13 @@ func (d *Dialog) actionRect(i int) buffer.Rect {
 // choice row carries a truncation marker for the list continuing below it: the
 // marker column and the scroll offset already say how many there are, and a
 // second marker on the same row would be a second thing to read.
+//
+// ChoiceFocusStyle is the style of the whole focused ROW, the label included —
+// not only of its marker and background. A row whose background is reversed and
+// whose text is not is unreadable dark-on-dark on exactly the row the reader is
+// meant to look at, which is why the focused label is a second cached rendition
+// rather than a restyle of the first. A choice label is a plain string, so there
+// is no per-choice style for the row rendition to override: it applies outright.
 func (d *Dialog) drawChoices(buf *buffer.Buffer, in buffer.Rect) {
 	if d.choiceShown <= 0 || d.choiceMarkW >= in.W {
 		return
@@ -1175,14 +1189,16 @@ func (d *Dialog) drawChoices(buf *buffer.Buffer, in buffer.Rect) {
 			break
 		}
 		style := d.cacheStyles.choice
+		label := d.choiceLabels[row]
 		if i == d.FocusedChoice() {
 			style = d.cacheStyles.choiceFocus
+			label = d.choiceFocusLabels[row]
 		}
 		buf.FillRect(buffer.Rect{X: in.X, Y: y, W: in.W, H: 1}, style.Blank())
 		if i == d.FocusedChoice() {
 			buf.SetStringIn(in.X, textX, y, ChoiceMarker, style)
 		}
-		buf.SetSpansCappedIn(textX, in.Right(), y, d.choiceLabels[row], d.mark)
+		buf.SetSpansCappedIn(textX, in.Right(), y, label, d.mark)
 	}
 }
 

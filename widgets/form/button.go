@@ -160,10 +160,33 @@ func (b *Button) buttonRect() buffer.Rect {
 	return buffer.Rect{X: r.X + (r.W-w)/2, Y: y, W: w, H: h}
 }
 
+// fillStyle returns the rendition of the WHOLE button — background, label and
+// ring cells — and which ring glyph it wears.
+//
+// It is one function because the button is one region: FocusStyle and
+// DisabledStyle are documented as the style of the whole button, so the label
+// the cache truncates and the fill Draw paints have to be the same value. When
+// they were computed separately the label kept the unfocused style and a
+// configured FocusStyle reached the two bracket cells only, which also left the
+// no-configuration focus attribute — the one that is supposed to make focus
+// visible with nothing set and under NO_COLOR — visible as two cells of a
+// button.
+func (b *Button) fillStyle(styles buttonStyles) (buffer.Style, string) {
+	switch {
+	case b.Disabled:
+		return styles.disabled, ButtonRingUnfocused
+	case b.focused:
+		return styles.focus, ButtonRingFocused
+	default:
+		return styles.label, ButtonRingUnfocused
+	}
+}
+
 // rebuild recomputes the cached truncated label for a button of w cells.
 func (b *Button) rebuild(w int) {
 	styles := b.styles()
-	b.body = capRow(b.Ascii, b.Label, styles.label, w-2)
+	fill, _ := b.fillStyle(styles)
+	b.body = capRow(b.Ascii, b.Label, fill, w-2)
 	b.cache.store(b.buttonRect())
 	b.cacheStyles = styles
 	b.cacheFocused = b.focused
@@ -195,14 +218,9 @@ func (b *Button) Draw(buf *buffer.Buffer) {
 	}
 
 	// The whole button takes one style, background included, so a focused button
-	// is a filled region rather than three coloured fragments.
-	fill, ring := styles.label, ButtonRingUnfocused
-	switch {
-	case b.Disabled:
-		fill = styles.disabled
-	case b.focused:
-		fill, ring = styles.focus, ButtonRingFocused
-	}
+	// is a filled region rather than three coloured fragments. It is the same value
+	// the cached label was truncated in, so the label and the fill cannot disagree.
+	fill, ring := b.fillStyle(styles)
 	buf.FillRect(br, fill.Blank())
 	if len(b.body) > 0 {
 		x := br.X + 1
