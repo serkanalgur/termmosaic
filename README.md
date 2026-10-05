@@ -58,10 +58,10 @@ elegant its renderer is.
 
 ## Installation
 
-Not yet released as a module version. From a checkout:
+Tagged and released through **v0.5.2**. Pin the version:
 
 ```
-go get github.com/serkanalgur/termmosaic
+go get github.com/serkanalgur/termmosaic@v0.5.2
 ```
 
 ## What's in the box
@@ -98,12 +98,22 @@ go run ./examples/markets    # a live finance dashboard on real ECB data
                            # add --offline to run without a network
 ```
 
+`examples/markets`, on live ECB and CoinGecko data:
+
+![The markets example: four KPI tiles, a 30-day EUR/USD sparkline, a window-position meter, a BarChart of the largest moves in basis points, a virtualised Table of 15 currency pairs, and a KeyHint footer showing the bindings and the last fetch time.](docs/screens/markets.png)
+
+One `Block` per region, a `Split` down the middle, a `Table` over the
+`virtual` engine, and the chart types doing the work the catalog exists for. The
+selected row is drawn with `SelectedStyle` in **both** the row background and
+the cell text — see [v0.5.1](CHANGELOG.md), which fixed the case where it
+reached only the background.
+
 ## Documentation
 
 **[📖 Full documentation →](https://serkanalgur.github.io/termmosaic.github.io/)** — guides, concepts, and a page per widget with real rendered captures at three widths.
 
 - [docs/STATUS.md](docs/STATUS.md) — current state of the design
-- [docs/adr/](docs/adr/) — the eight architecture decisions, with the reasoning
+- [docs/adr/](docs/adr/) — the ten architecture decisions, with the reasoning
 - [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) — how to help
 - [CHANGELOG.md](CHANGELOG.md) — release notes, including known limitations
 
