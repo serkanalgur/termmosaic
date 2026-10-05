@@ -30,6 +30,79 @@ reversed before v1.0.0.
 
 ---
 
+## [0.6.0] — 2026-10-05
+
+A minor bump, and the reason is the longest-deferred item in the project:
+**`keymap`, specified by [ADR 0009](docs/adr/0009-command-and-keymap.md) and
+accepted on 2026-10-05, was implemented.** It was targeted at v0.4.0 and
+shipped in neither v0.3.0 nor v0.4.0; `docs/STATUS.md` carried an apology
+paragraph about that. This is the paragraph's replacement.
+
+### Added
+
+- **`keymap` — named commands, and a key is one way to invoke one.** A new
+  package holding `Command`, `CommandID`, `Binding`, `Entry`, `Ctx` and a
+  16-byte comparable `Chord`, with `ParseChord`/`ChordOf` as the single
+  notation function in both directions.
+- **Resolution by context specificity: focus, then screen, then global, with no
+  numeric priority.** `Dispatch` walks a pre-built candidate slice in rank
+  order, which is what lets both `Enabled` and `Run` decline and fall through.
+  Ties break on registration order.
+- **`Dispatch` is 0 allocs/op on every event kind**, measured and pinned by
+  `TestDispatchIsZeroAllocation` across all eleven paths in ADR 0009 §2's table
+  — miss, match with `Enabled` nil, match with `Enabled` non-nil, `Run`
+  declining, paste, resize, and each mouse case. The benchmark reports 91 ns/op
+  for a hit and 29.5 ns/op for a miss, both zero-alloc.
+- **`Describe` as the single source of discoverability data**, plus `Chords`,
+  and `KeyHint.SetEntries` so a widget's help renders from the registry rather
+  than from a hand-maintained second list.
+- **`Commandable` and `Clickable`, both optional.** A widget that implements
+  neither is fully supported; nothing in the catalog implements them yet, which
+  is the deferred half ADR 0009 §8 scoped separately.
+
+### Changed
+
+- **`Widget.Handle`'s doc comment** now states the precedence: events reach a
+  widget only after the application's keymap has declined them. **No method was
+  added, changed or deprecated**, and the interface is byte-identical.
+- ADR 0009 gained five corrections where its code did not compile or
+  contradicted itself; each is recorded in the ADR and in code. The two worth
+  naming:
+  - **`Ctx` is 152 bytes, not the 128 the prose claimed.** The field list is the
+    specification and it sums to 145, padded to 152; 128 was reachable only as
+    `Event` + `Chord` with neither `Focus` nor `Synthesised`. Pinned by
+    `TestCtxIsOneHundredFiftyTwoBytes`, with the arithmetic in the comment.
+  - **The precedence table contradicted itself on overrides.** One table row put
+    a user override above every scope, while its own justification, the section
+    headed *"Why an override does not outrank a more specific scope"*, and the
+    Consequences section all say the opposite. **Specificity wins, and an
+    override is the within-scope tiebreak** — three passages against one row, and
+    it is the only reading under which a user's global `Esc` does not steal a
+    dialog's.
+
+### Known Limitations
+
+- **A key the keymap consumes shadows a widget's own `switch`.** This is
+  documented on `Widget.Handle` and is the designed outcome, not a defect: a
+  `ScopeFocus` binding is the fix, and it goes inert when focus moves. The
+  registry is told a widget's bounds and its published chords, never what its
+  `Handle` does, so `Warnings` **cannot** report the overlap. `TestTheShadowedKeyIsSilent`
+  asserts that silence deliberately, so the limit is recorded rather than
+  implied.
+- **No real terminal has met `Chord`'s folding rules.**
+  `TestParseChordRoundTrips` walks 467 chords, but that is the specification
+  checking itself. `Ctrl+k` and `Ctrl+K` are two chords because a kitty terminal
+  reports them as two gestures.
+- **Three scopes may be too coarse.** Unchanged from the ADR's own risk list.
+- **No palette.** ADR 0009 §9 puts a `Ctrl+K` palette in scope but explicitly
+  not in that ADR. No persistence, no leader keys, no drag-as-command — all
+  deferred by §8.
+- `Registry` has no `Unregister`, so a command renamed at runtime leaves a
+  chordless row in help. Visible rather than silent.
+- `term/terminal_windows_test.go` is still **compile-only** verified
+  (`GOOS=windows go vet`) and has never been executed; the Windows backend still
+  runs zero tests at runtime.
+
 ## [0.5.2] — 2026-10-05
 
 A minor bump, and the reason is a decision with a number attached:
@@ -929,6 +1002,7 @@ Two performance claims that this release turns from assertion into measurement:
   **60 cursor moves and 19,443 bytes, 3.12× the narrow frame** rather than 11×.
   The ASCII path is unchanged. See ADR 0008's amendment, finding 4.
 
+[0.6.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.6.0
 [0.5.2]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.5.2
 [0.5.1]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.5.1
 [0.5.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.5.0

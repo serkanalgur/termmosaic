@@ -17,11 +17,11 @@ import (
 // terminate promptly.
 const repoRoot = "."
 
-// forbiddenDecls are the names ADR 0007 §1 rule 4 and ADR 0008's extension of it
+// forbiddenDecls are the names ADR 0007 §1 rule 4, ADR 0008 and ADR 0009
 // reserve for the framework. A widget that defines one of them has re-invented
-// shared vocabulary, which is the exact failure both ADRs exist to prevent: three
-// authors, three definitions, and a fix that is a signature change on every
-// widget rather than an edit inside one.
+// shared vocabulary, which is the exact failure all three exist to prevent:
+// three authors, three definitions, and a fix that is a signature change on
+// every widget rather than an edit inside one.
 var forbiddenDecls = []string{
 	// ADR 0007 §1: responsive helpers.
 	"clamp", "fit", "minRows", "Priority", "Region", "Budget",
@@ -32,6 +32,14 @@ var forbiddenDecls = []string{
 	"TruncSuffix", "AscTruncSuffix",
 	"BorderStyle", "BorderGlyphs", "BorderPlain", "BorderRounded",
 	"BorderDouble", "BorderThick", "BorderASCII",
+	// ADR 0009: the command layer. Chord, Command and Binding are the three a
+	// widget is most likely to define privately — "chord" for its own key
+	// matching, "command" for its own button click, "binding" for its own row —
+	// and a widget that defines one has a private version of the framework's,
+	// which is the exact failure ADR 0007 §1 rule 4 exists to prevent.
+	"Command", "CommandID", "Ctx", "Scope", "ScopeGlobal", "ScopeScreen", "ScopeFocus",
+	"Chord", "ParseChord", "ChordOf", "Binding", "Entry", "Registry",
+	"Commandable", "Clickable",
 	// A private glyph table of any other name. Border thresholds are NOT here:
 	// ADR 0007 §1 rule 5 says thresholds are local named constants, and ADR 0008
 	// fixes their VALUES (W >= 2 for a border, W >= 5 for a title) without making
@@ -60,14 +68,35 @@ var declPatterns = []*regexp.Regexp{
 // responsive helper — a different thing that happens to share a name. It is not
 // in scope for either rule.
 var vocabExceptions = map[string]string{
-	"buffer/style.go":       "buffer owns Style",
-	"buffer/span.go":        "buffer owns Span, Wrapped, Wrap and Truncate",
-	"buffer/border.go":      "buffer owns the border glyph table",
-	"buffer/colour.go":      "buffer owns Colour and its sentinels",
-	"geometry/geometry.go":  "geometry is the leaf both buffer and layout import",
-	"geometry/align.go":     "geometry owns Align: cell-free geometry with no dependencies",
-	"render/render.go":      "framework-internal config clamping, predates ADR 0007",
-	"internal/ansi/ansi.go": "internal; ansi.Style is an alias of buffer.Style, not a declaration",
+	"buffer/style.go":         "buffer owns Style",
+	"buffer/span.go":          "buffer owns Span, Wrapped, Wrap and Truncate",
+	"buffer/border.go":        "buffer owns the border glyph table",
+	"buffer/colour.go":        "buffer owns Colour and its sentinels",
+	"geometry/geometry.go":    "geometry is the leaf both buffer and layout import",
+	"geometry/align.go":       "geometry owns Align: cell-free geometry with no dependencies",
+	"render/render.go":        "framework-internal config clamping, predates ADR 0007",
+	"internal/ansi/ansi.go":   "internal; ansi.Style is an alias of buffer.Style, not a declaration",
+	"keymap/command.go":       "keymap owns Command, CommandID and Ctx",
+	"keymap/scope.go":         "keymap owns Scope and its three values",
+	"keymap/chord.go":         "keymap owns Chord, ParseChord and ChordOf",
+	"keymap/registry.go":      "keymap owns Binding and Registry",
+	"keymap/describe.go":      "keymap owns Entry and the discoverability queries",
+	"keymap/participation.go": "keymap owns Commandable and Clickable; they cannot live in widget.go, because their method sets name keymap types and the root package must not import this one",
+	// The two collisions ADR 0009 names and accepts rather than renames.
+	//
+	// form.Binding is a display pair (a key label and a description) and
+	// keymap.Binding is a chord reaching a command. Different things, different
+	// packages, no assignability either way — the ansi.Style collision shape ADR
+	// 0008 removed. ADR 0009 §8 defers reconciling them to the next change to
+	// widgets/form that touches KeyHint, because renaming a shipped widget's
+	// exported type in the same change that introduces a second one is worse
+	// than the collision.
+	//
+	// docsgen.Entry is a widget-catalog row for the documentation generator and
+	// predates the command layer; it is in internal/ and shares nothing with
+	// keymap.Entry but the noun.
+	"widgets/form/keyhint.go":     "form.Binding is the display pair ADR 0009 §8 explicitly leaves in place",
+	"internal/docsgen/docsgen.go": "docsgen.Entry is a documentation-catalog row, unrelated to keymap.Entry",
 }
 
 // TestNoPackageRedefinesSharedVocabulary is the enforceable form of ADR 0007 §1
