@@ -1271,6 +1271,22 @@ job, which is why the palette and help consume `Entry` and never `Binding`.
    both. Trigger: the first application that does. The fix, if it bites, is
    `Warnings()` reporting a chord that is both bound and handled by an attached
    widget, **not** a `Widget` change.
+   **Partly observed, and the observed half is the narrow one.** Two of four
+   example programs now dispatch through a registry, and `examples/search` is the
+   first with a **focusable** widget in a focus ring — a `TextInput` and a `Table`,
+   with `Tab`/`Backtab` moving between them. So the two mechanisms are now in the
+   same application, which is the trigger having fired. What it has *not* shown is
+   the failure this risk is about: `search` uses `Command.Enabled` for every
+   context-dependent binding and declines to bind a single chord a focused widget
+   wants — `Home`/`End` are left to the widgets precisely because a
+   `ScopeScreen` binding outranks both — so its `Handle` and its bindings never
+   compete for the same key, and
+   `TestNoScreenBindingStealsAFocusedWidgetsKey` pins that. It has established
+   that an application *can* mix them safely by construction; it has not observed
+   what happens when one is built without that discipline. `Registry.SetFocus`
+   remains deferred, and `search`'s workaround — tracking focus itself and
+   filtering its hint on `km.Has` — depends on nothing that closure would
+   provide. The risk stays open, and so does `Warnings()`.
 2. **`Chord` normalisation has never been run against a matrix of terminals.**
    Every folding rule in §3 is derived from [ADR 0005](0005-input-decoding.md)
    and `input`'s own tests, none of which have met a real tty — the risk ADR 0005
@@ -1295,6 +1311,21 @@ job, which is why the palette and help consume `Entry` and never `Binding`.
    the wrong shape for a hint line.** See the second 2026-10-05 amendment at the
    end of this document. The trigger's other half, no catalog widget
    implementing `Commandable`, is **still open** and still deferred by §8.
+   **The wrong shape was wrong twice, in the same way, in a second application.**
+   `examples/search` also wanted its hint line to agree with its bindings, and
+   `KeyHint.SetEntries` is now called by **two** example programs
+   (`examples/hello/main.go`, `examples/search/search.go`), both through
+   `DescribeGrouped`. What the two together establish is stronger than the first
+   did alone, and stronger than "the interfaces are unused": an application can
+   have a **fully registry-derived key contract** — every chord, every command,
+   and every hint row written in one place — with `Commandable` unimplemented and
+   unimplemented-by-choice, because `Enabled` is a property of the command rather
+   than of a widget. That is a materially better answer to this risk than the
+   interface simply having no users: the widget-participation design is no longer
+   carrying the discoverability story on its own, so §8's deferral is not
+   blocking. `Clickable` remains unused. What is still missing here is
+   `Registry.SetFocus` (deferred to v1.1), which `search` works around — see the
+   2026-10-05 amendment below.
 6. **The palette's requirements on `Menu` and `Dialog` are stated here and
    implemented there.** If either ships without them, the mismatch is discovered
    at integration rather than here. Trigger: the palette's own PR, which is where
@@ -1447,3 +1478,48 @@ now": an application with real focusable widgets cannot yet ask it. Adding
 `ScopeScreen`, which is also the scope that degrades correctly: a focused child
 added later binds its own arrows at `ScopeFocus` and outranks them by
 specificity, with no change to the example.
+
+## Amendment 2026-10-05 — `examples/search`: `SetFocus` is evidence, not a hypothetical
+
+The second amendment above recorded that `Registry.SetFocus` is **deferred to
+v1.1**, on the reasoning that an application with real focusable widgets cannot
+ask "what can I do right now". That reasoning was sound and it was untested.
+`examples/search` is the application that tests it, and it is the first example
+with a `Focusable` widget in a focus ring — `form.TextInput` and `data.Table`,
+moved with `Tab`/`Backtab`, drawn as a visible ring. It reached three findings,
+and none of them closes the deferral.
+
+**A deferral reasoned from "no application needs this yet" is now a deferral
+reasoned from an application that wanted it and could not have it.** `search`
+tracks focus itself and filters its hint on `km.Has` — "registered and currently
+available" — because `Has` is the only predicate that consults the same liveness
+`Dispatch` does. The query an application makes when focus changes is exactly the
+one the registry cannot answer. That is stronger evidence for the v1.1 item than
+the argument that preceded it, and it is also why the item stays open: the
+workaround is eight lines an application has to write correctly on its own.
+
+**`Describe(ScopeFocus)` is not incomplete — it is over-inclusive.** `inScope`
+returns true on an exact-scope match without consulting liveness at all, so a
+focus-scoped query answers "these bindings are in scope" for a binding whose
+command is currently disabled. Applied to a hint, that advertises the *field's*
+arrow bindings on a screen where the *table* has focus and those arrows move a
+selection: a hint wrong in exactly the pane the reader is looking at. `search`
+reaches for neither `ScopeFocus` nor the question, and says so in its own source.
+
+**Context-dependence does not need a fourth scope.** Every binding in `search` is
+`ScopeScreen` or `ScopeGlobal`, and every context-dependent one is gated with
+`Command.Enabled` — which `dispatchChord` skips, reporting the event unconsumed,
+so the tree gets it. That is the framework's own fallthrough, it is exact, and it
+has a consequence worth recording against risk 1: because a screen-scoped
+binding outranks a focused child, the shape is only safe if the application
+declines to bind chords its focusable widgets want. `search` leaves `Home`/`End`
+to the widgets and binds the ring's ends to `Ctrl+Home`/`Ctrl+End` instead. The
+overlap is now demonstrated as *avoidable by discipline*; it is still not
+demonstrated as *handled by the framework*, and `Warnings()` is still the fix if
+it is not.
+
+**`SetEntries` has two consumers now, not one.** `examples/hello` and
+`examples/search` both build their `KeyHint` from `DescribeGrouped`, and the
+answer to risk 5 was the same both times — one `Entry` per chord renders a
+multi-chord command's description once per chord. No catalog widget implements
+`Commandable` or `Clickable`, and §8's deferral of the first is unchanged.

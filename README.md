@@ -107,11 +107,22 @@ methods and has never changed.
   command palette — both are deliberate, with triggers recorded in
   [ADR 0009](docs/adr/0009-command-and-keymap.md).
 
-One example uses it: [`examples/hello`](examples/hello) dispatches through a
-real `keymap.Registry` — six commands, twelve chords — and renders both its
-pinned hint line and its `?` help overlay from that registry rather than from
-hand-written strings. It is one example of three; `markets` and `dashboard` still
-dispatch by their own `switch`.
+Two examples use it, of four. [`examples/hello`](examples/hello) dispatches
+through a real `keymap.Registry` — six commands, twelve chords — and renders both
+its pinned hint line and its `?` help overlay from that registry rather than from
+hand-written strings. [`examples/search`](examples/search) is the first to put a
+**focusable** widget in a focus ring: a `TextInput` and a `Table`, with
+`Tab`/`Backtab` moving between them, and every context-dependent binding gated by
+`Command.Enabled` rather than by `ScopeFocus` — because `Enabled` false makes
+`Dispatch` skip the command and fall through to the tree, which is what keeps a
+binding from taking a key away from the widget that has focus. `markets` and
+`dashboard` still dispatch by their own `switch`.
+
+The absence of `Commandable` in the catalog is therefore not blocking either of
+them: an application can have a fully registry-derived key contract without it.
+What is still missing is `Registry.SetFocus`, which `examples/search` works around
+by tracking focus itself and filtering its hint on `km.Has` — the one query an
+application makes when focus changes is the one it cannot make.
 
 Per-frame cost is flat in item count — this is the claim the catalog exists to
 back up:
@@ -130,6 +141,8 @@ Ten times the data for seven percent more time, at zero allocations. Run
 go run ./examples/hello       # a responsive bordered panel; '?' for help
 go run ./examples/markets    # a live finance dashboard on real ECB data
                            # add --offline to run without a network
+go run ./examples/search      # Wikipedia search and results, no API key
+                            # add --offline to run on a bundled capture
 ```
 
 `examples/markets`, on live ECB and CoinGecko data:

@@ -1,0 +1,20 @@
+┌ search - wikipedia ────────────────────────────┐
+│                                                │
+│ > query terminal user interface                │
+│                                                │
+│                                                │
+│ ┌ results ───────────────────────────────────┐ │
+│ │  article                words updated      │ │
+│ │> Text-based user int…    1929 2026-09-18  █│ │
+│ └────────────────────────────────────────────┘ │
+│                                                │
+│ ┌ Text-based user interface ─────────────────┐ │
+│ │matching passage - press enter on the table │ │
+│ │for the article text-based user interfaces  │ │
+│ │(TUI) (alternately terminal user interfaces,│ │
+│ │to reflect a dependence upon the properties │ │
+│ └────────────────────────────────────────────┘ │
+│ [Enter] run the search  [Tab] next pane  [Dow… │
+│ search  offline: capture of 2026-10-05  9 of … │
+│                                                │
+└────────────────────────────────────────────────┘

@@ -30,6 +30,85 @@ reversed before v1.0.0.
 
 ---
 
+## [0.7.0] — 2026-10-06
+
+A minor bump, and the reason is a fourth example: **`examples/search`** — the
+first with a focusable widget in it, and therefore the first place the catalog
+and `keymap` meet under load.
+
+### Added
+
+- **`examples/search`** — a search-and-results screen on real Wikipedia data, no
+  API key and no signup: a `form.TextInput` query field, a `data.Table` of
+  results (article / words / updated), and a detail pane fed by the
+  article-summary endpoint. `data.Table` over `data.List` because the word counts
+  span two orders of magnitude, and a right-aligned fixed column lets the eye
+  find the longest article by shape; a `List` renders one string per item and
+  would have had the spacing built in by hand.
+- **Nine golden files and 74 tests**, all asserting on **cells** through the
+  headless harness. No escape-sequence assertion anywhere.
+- **`--offline`** runs the whole screen on a transcribed 2026-10-05 capture of a
+  real response, mirroring `examples/markets`' `source` interface with four
+  implementations (live, offline, empty, failed). The snippet markup is stored
+  **raw** and stripped in the view layer, so the offline path pins the same
+  stripping the live path does. The capture's clock is a pinned constant, not
+  `time.Now()`, because a golden reading the wall clock fails every run.
+
+### What it establishes
+
+- **Context-dependence is expressed with `Command.Enabled`, not `ScopeFocus`.**
+  No binding in the example is focus-scoped, and that is a finding rather than a
+  simplification. No catalog widget implements `keymap.Commandable`, so a
+  focus-scoped binding would mean the *application* declaring keys on a widget's
+  behalf with an owner it picked — which is exactly what `Commandable` exists to
+  stop being necessary for. `Enabled` is documented as "an unavailable command is
+  not run by a key press", and `Dispatch` skips it and keeps looking, so a
+  screen-scoped arrow binding with `Enabled` false while the table has focus is
+  simply not claimed and the event falls through to the tree.
+- **`TextInput` declines `KeyUp`/`KeyDown`/`KeyEnter`/`KeyTab` deliberately**, so
+  the screen owns them. `TestNoScreenBindingStealsAFocusedWidgetsKey` walks every
+  binding against a **per-pane** list of widget-owned chords and fails if the
+  registry claims one — the per-pane split being the whole point, since
+  `TextInput` declines the arrows and `Table` consumes them.
+- **`Home`/`End` are deliberately unbound.** Both widgets claim the bare forms —
+  the field moves the caret, the table selects first and last — and a screen
+  binding outranks both, so binding them would silently break both. The ring's
+  ends are `Ctrl+Home`/`Ctrl+End`, which neither widget consumes.
+- **`q` has to decline.** ADR 0009 §2 asks the registry before the tree, so a
+  global `q` reaches the command before the field sees it. Without a decline this
+  would be a search box you cannot type "quit" into. The decline checks that the
+  field has focus **and** that the chord is an unmodified printable, because
+  `Ctrl-C` arrives as `Ctrl+'c'` — a printable rune with a modifier — and must
+  always quit.
+
+### Known Limitations
+
+- **`Registry.SetFocus` is now evidenced, not hypothetical.** `Search` worked
+  around it by tracking focus itself and filtering the hint on `km.Has`, which
+  means **the one query an application makes when focus changes is the one query
+  it cannot make**. `TestDescribeScopeFocusCannotNarrowToTheFocusedWidget` pins
+  the gap so the workaround cannot be quietly deleted and the gap cannot be
+  quietly forgotten. Still deferred to v1.1.
+- **`Describe(ScopeFocus)` is over-inclusive, not incomplete.** `inScope` returns
+  true for an exact-scope match without consulting liveness, so a focus query
+  reports every focus-scoped binding whatever has focus. Harmless for a help
+  screen, which arguably wants the superset; wrong for a hint. One line, once
+  `SetFocus` exists.
+- **`data.Table` has no `Ascii` flag for its selection marker**, so its default
+  `›` has no ASCII rung and would leak onto a terminal whose caps report no
+  Unicode. The example overrides the marker instead, which makes it an
+  application decision rather than a per-widget one.
+- **`TextInput` does not expose its horizontal scroll offset**, so the example
+  computes the caret cell from the rune index and clamps. Exact for any query
+  shorter than the field, approximate beyond.
+- **The arrow step from the field to the table is one-way.** The table consumes
+  `Up`, so at its first row `Up` moves nothing and the way back is `Shift-Tab`.
+  A ring whose arrows worked both ways would need the table to *decline* `Up` at
+  row 0, which is not something a widget can express. Asserted, not hidden.
+- `term/terminal_windows_test.go` is still **compile-only** verified
+  (`GOOS=windows go vet`) and has never been executed; the Windows backend still
+  runs zero tests at runtime.
+
 ## [0.6.1] — 2026-10-05
 
 A minor bump, and the reason is that the first application to actually use
@@ -1056,6 +1135,7 @@ Two performance claims that this release turns from assertion into measurement:
   **60 cursor moves and 19,443 bytes, 3.12× the narrow frame** rather than 11×.
   The ASCII path is unchanged. See ADR 0008's amendment, finding 4.
 
+[0.7.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.7.0
 [0.6.1]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.6.1
 [0.6.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.6.0
 [0.5.2]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.5.2

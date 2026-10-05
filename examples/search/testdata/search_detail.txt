@@ -1,0 +1,34 @@
+┌ search - wikipedia ──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                                                                                                      │
+│ > query terminal user interface                                                                                      │
+│                                                                                                                      │
+│                                                                                                                      │
+│ ┌ results ──────────────────────────────────────────┐   ┌ Text-based user interface ───────────────────────────────┐ │
+│ │  article                       words updated      │   │Type of interface based on outputting to or controlling a │ │
+│ │> Text-based user interface      1929 2026-09-18   │   │text display In computing, text-based user interfaces     │ │
+│ │  User interface                 5038 2026-09-17   │   │(TUI), is a retronym describing a type of user interface  │ │
+│ │  Terminal emulator              1926 2026-10-05   │   │(UI) common as an early form of human–computer            │ │
+│ │  Pi (AI agent)                   626 2026-09-18   │   │interaction, before the advent of bitmapped displays and  │ │
+│ │  Alsamixer                        87 2026-05-11   │   │modern conventional graphical user interfaces (GUIs). Like│ │
+│ │  Bloomberg Terminal             2811 2026-10-04   │   │modern GUIs, they can use the entire screen area and may  │ │
+│ │  GNOME Terminal                 1431 2026-08-31   │   │accept mouse and other inputs. They may also use color and│ │
+│ │  Aqua (user interface)          4473 2026-10-04   │   │often structure the display using box-drawing characters. │ │
+│ │  Terminal (macOS)                406 2026-05-05   │   │                                                          │ │
+│ │                                                   │   │                                                          │ │
+│ │                                                   │   │                                                          │ │
+│ │                                                   │   │                                                          │ │
+│ │                                                   │   │                                                          │ │
+│ │                                                   │   │                                                          │ │
+│ │                                                   │   │                                                          │ │
+│ │                                                   │   │                                                          │ │
+│ │                                                   │   │                                                          │ │
+│ │                                                   │   │                                                          │ │
+│ │                                                   │   │                                                          │ │
+│ │                                                   │   │                                                          │ │
+│ │                                                   │   │                                                          │ │
+│ │                                                   │   │                                                          │ │
+│ └───────────────────────────────────────────────────┘   └──────────────────────────────────────────────────────────┘ │
+│ [Enter] run the search  [Tab] next pane  [Down] the results  [Q q Esc Ctrl+c] quit                                   │
+│ search  offline: capture of 2026-10-05  9 of 3027 results  09:12:41Z                                                 │
+│                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
