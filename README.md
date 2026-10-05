@@ -10,7 +10,7 @@ A terminal UI framework for Go: a cell-buffer renderer plus a catalog of
 ready-to-use widgets.
 
 > **Status: pre-alpha.** The renderer, input layer and the full widget catalog
-> are built and tested — 19 packages, 650+ tests, zero-allocation frame path —
+> are built and tested — 23 packages, 950+ tests, zero-allocation frame path —
 > but the API is **not stable** and may break before v1.0. See
 > [docs/STATUS.md](docs/STATUS.md) for what is decided, proposed and open, and
 > [docs/adr/](docs/adr/) for the reasoning behind each decision.
@@ -65,7 +65,7 @@ go get github.com/serkanalgur/termmosaic
 
 ## What's in the box
 
-**22 widgets**, built and tested:
+**24 widgets**, built and tested:
 
 | | |
 |---|---|
@@ -73,6 +73,7 @@ go get github.com/serkanalgur/termmosaic
 | **Forms** | `TextInput` `TextArea` `Select` `Checkbox` `Radio` `Toggle` `Tabs` `Button` `KeyHint` |
 | **Data** | `List` `Table` `Tree` `Pager` + the `virtual/` engine |
 | **Visualization** | `ProgressBar` `Gauge` `Meter` `Sparkline` `BarChart` |
+| **Navigation & modality** | `Menu` `Dialog` |
 
 `buffer.Buffer` is not on that list and is not a `Widget` — it has no `Bounds`,
 `Draw` or `Handle`. It is what widgets draw into.
@@ -86,13 +87,14 @@ back up:
 | 100,000 | 14,242 ns | 17,885 ns |
 
 Ten times the data for seven percent more time, at zero allocations. Run
-`examples/dashboard` to see it.
+`examples/markets` to see it against a real 100k-item list.
 
 ## Examples
 
 ```
-go run ./examples/hello       # a bordered panel, resize-aware
-go run ./examples/dashboard   # a live dashboard: list, table, log, meters
+go run ./examples/hello       # a responsive bordered panel; '?' for help
+go run ./examples/markets    # a live finance dashboard on real ECB data
+                           # add --offline to run without a network
 ```
 
 ## Documentation

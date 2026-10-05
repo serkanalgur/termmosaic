@@ -109,7 +109,7 @@ v0.1.0.
 
 ## Widget catalog
 
-**22 widgets, built and tested.** (`buffer.Buffer` is deliberately not counted:
+**24 widgets, built and tested.** (`buffer.Buffer` is deliberately not counted:
 it has `Invalidate()` but no `Bounds`/`Draw`/`Handle`, so it is not a `Widget`
 — it is what widgets draw into.) Flat per-frame cost is the
 claim that matters and it is asserted: List renders 10k items in 13,320 ns and
