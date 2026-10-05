@@ -30,6 +30,30 @@ reversed before v1.0.0.
 
 ---
 
+## [0.4.1] — 2026-10-05
+
+A patch release, and the reason is the only change in it: **the `golang.org/x/term`
+pin moves forward to the newest release that still supports Go 1.23.** No
+TermMosaic code changed and no behaviour changed, which is precisely what a patch
+release is for under the policy above.
+
+### Changed
+
+- **`golang.org/x/term` v0.27.0 → v0.29.0, `golang.org/x/sys` v0.28.0 →
+  v0.30.0.** Bisecting `x/term`'s declared `go` directive showed v0.29.0 is the
+  newest release keeping the `go 1.23` floor: v0.30.0 declares `go 1.23.0`,
+  v0.35.0 and v0.40.0 declare `go 1.24.0`, and v0.46.0 (`@latest`) declares
+  `go 1.26.0`. The Go 1.23 floor in `go.mod` and CI is **unchanged and
+  preserved**; build, vet, gofmt, lint, the Windows cross-build and the full
+  `-race` suite are green on this version.
+
+### Known Limitations
+
+- **The `golang.org/x/term` pin is still required.** v0.29.0 is the ceiling, not
+  a new floor — the pin stays until `x/term` offers a release compatible with a
+  Go version this project has separately agreed to adopt. Re-checking it remains
+  a manual, ongoing cost, exactly as ADR 0001 records.
+
 ## [0.4.0] — 2026-10-05
 
 A minor bump, and the reason is the one widget fix below: **`Tree` label text now

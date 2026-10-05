@@ -57,7 +57,7 @@ const defaultOut = "~/termmosaic.github.io/static/captures"
 
 // version is the tool's own version string, recorded in manifest.json so a
 // capture file can be traced to the program that wrote it.
-const version = "0.4.0"
+const version = "0.4.1"
 
 func main() {
 	out := flag.String("out", defaultOut,
