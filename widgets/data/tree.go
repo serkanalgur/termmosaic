@@ -681,7 +681,13 @@ func (t *Tree) drawRow(dst *buffer.Buffer, row buffer.Rect, i int) {
 		}
 	}
 	dst.SetCell(x, row.Y, st.Resolved().Cell(glyph))
-	dst.SetSpansCappedIn(x+expanderW, row.Right(), row.Y, t.labels[node], t.mark)
+	// The label goes through paintRow so the node's own rendition — ItemStyle as a
+	// fallback, SelectedStyle on the selected row — reaches the text and not only
+	// the expander glyph above it. The rect is the label region alone, so the
+	// fill inside paintRow is a second pass over cells already filled with the
+	// same bg and cannot reach the marker or the indent painted above.
+	label := buffer.Rect{X: x + expanderW, Y: row.Y, W: row.Right() - x - expanderW, H: 1}
+	paintRow(dst, label, t.labels[node], 0, t.mark, bg, st)
 }
 
 // drawScrollbar paints the vertical position thumb, as in List and Table.

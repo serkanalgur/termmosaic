@@ -14,6 +14,20 @@ permissions:
   contents: read
 
 jobs:
+  # Runner images are pinned explicitly rather than via `-latest`.
+  #
+  # `ubuntu-latest` migrates to Ubuntu 26.04 on 2026-10-19, and `macos-latest` /
+  # `windows-latest` move on their own schedules. A `-latest` label therefore
+  # changes the toolchain, the C library, and the shell under this project on
+  # someone else's date, with no commit and no diff to review — a green run on
+  # Friday can be a different environment from the red run on Monday. Pinning
+  # names the version CI actually asserts against, so an OS change becomes a
+  # visible edit here. Bump these deliberately, in a commit that says why.
+  #
+  # Pin the matrix legs too: they are the same `-latest` aliases, so leaving
+  # them unpinned would leave three of the five gates exposed to a silent
+  # migration while the others were safe.
+
   # Primary gate: build, vet, fmt, and race tests across all target platforms.
   test:
     name: test (${{ matrix.os }})
@@ -21,11 +35,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-15, windows-2025]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           # Pinned deliberately: ADR 0001 records that raising this floor is what
           # would unpin golang.org/x/term. See docs/adr/0001-backend-strategy.md.
@@ -60,10 +74,10 @@ jobs:
   # reporting build/vet/test state as if it were formatting state.
   gofmt:
     name: gofmt
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.23"
       - name: Check formatting
@@ -86,14 +100,14 @@ jobs:
   # silently, in whichever direction, on someone else's schedule.
   golangci-lint:
     name: golangci-lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.23"
       - name: Lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14.0
 
@@ -101,10 +115,10 @@ jobs:
   # hot path that ADR 0002 established. Run explicitly so a regression is loud.
   no-alloc:
     name: zero-allocation diff
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.23"
       - name: Assert diff remains zero-allocation
@@ -115,7 +129,7 @@ jobs:
   # cross-compilation for every user.
   cross-compile:
     name: cross-compile ${{ matrix.goos }}/${{ matrix.goarch }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       # goos/goarch are separate matrix keys rather than one "linux/amd64"
@@ -138,8 +152,8 @@ jobs:
           - goos: windows
             goarch: arm64
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.23"
       - name: Build with CGO disabled

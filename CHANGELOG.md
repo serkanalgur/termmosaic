@@ -30,6 +30,124 @@ reversed before v1.0.0.
 
 ---
 
+## [0.4.0] — 2026-10-05
+
+A minor bump, and the reason is the one widget fix below: **`Tree` label text now
+takes the per-node `Style` and `SelectedStyle`.** Styling a program set and the
+widget silently ignored now takes effect, which is the definition of a behaviour
+change and therefore a minor bump under the policy above — a patch release that
+changed behaviour would be a bug in the release, so it is not one.
+
+This is the third and last of the same defect class. v0.3.0 fixed `List` and
+`Table`, which shared it; `Tree` was missed because its row painter computes the
+node's style for the expander glyph and then writes the label through a
+different call, so the computed style stopped at one cell.
+
+**What to do about the Breaking entry.** If you set `Style` on a node, or
+`SelectedStyle` on the `Tree`, and your tree now looks different, that is this
+release working, not a regression, and the new colours are the ones you asked
+for. Nothing has to change to compile or to run. If you worked *around* the old
+behaviour — compensating in your own styles because the widget ignored them —
+that compensation is now double-counting and should come out.
+
+### Breaking
+
+- **`Tree` node styles and `SelectedStyle` now reach the label text.**
+  `Tree.drawRow` computed a per-node content style — the node's own `Style`,
+  falling back to `ItemStyle`, and `SelectedStyle` outright on the selected row —
+  and applied it only to the expander glyph. The label itself was written by a
+  direct `SetSpansCappedIn`, so every style the field documented was computed and
+  then discarded for the text: a node's label rendered in whatever style its own
+  spans carried, and `SelectedStyle` reached the row background but never the
+  glyphs beside the marker. The label is now written through `paintRow`, the
+  same path `List` and `Table` use, over a rect covering the label region alone
+  so the fill cannot reach the marker or the indent painted above it.
+
+  Both fields were already documented as taking effect, so this is a fix to
+  behaviour that contradicted its own documentation rather than a new feature.
+  The visible consequence: a `Tree` node with a `Style`, and the selected row's
+  `SelectedStyle`, are now honoured, with the same precedence `List` documents —
+  the selected row's style wins over the node's, and an unset node `Style` falls
+  back to `ItemStyle`. The expander glyph is unchanged; it was already correct.
+
+  **A multi-span label is the one thing that does not change**, for the same
+  reason `List` did not change it: `paintRow` only applies the override when the
+  row is a single span, because flattening a multi-span row would build a string
+  on the frame path, and the zero-allocation claim forbids it. A label that
+  deliberately carries several styles keeps them. That limit was equally true
+  before; it was just invisible.
+
+  Four tests in `widgets/data/tree_test.go` pin the new behaviour: a node `Style`
+  reaching the label, the `ItemStyle` fallback, a multi-span label keeping its own
+  styles, and the ASCII path. No golden file changed — `widgets/data` has no
+  `testdata`, so nothing in the golden corpus rendered a `Tree`.
+
+### Fixed
+
+- **`Tree` label styles are no longer dropped on the way to the screen.**
+  Restated as the defect itself rather than the consequence, since the
+  consequence above is what a program sees. `drawRow` applied the row style to one
+  cell — the expander — and then wrote the label through a call that took no
+  style at all. The frame path stays zero-allocation: `paintRow`'s single-span
+  override is a field write into a stack array, and the label rect is one value
+  on the stack.
+
+### Changed
+
+- **Every CI action is on a Node 24 major, and every runner image is pinned.**
+  `actions/checkout` v4 → v7, `actions/setup-go` v5 → v7,
+  `golangci/golangci-lint-action` v7 → v9 and `actions/github-script` v7 → v9,
+  each verified to declare `using: node24` rather than assumed from its major.
+  Runner images are pinned by name instead of via `-latest`: `ubuntu-latest` to
+  `ubuntu-24.04`, and the matrix legs from `ubuntu-latest` / `macos-latest` /
+  `windows-latest` to `ubuntu-24.04` / `macos-15` / `windows-2025`. A `-latest`
+  label changes the toolchain, the C library and the shell underneath this
+  project on someone else's date with no commit and no diff to review, so a
+  green run on Friday can be a different environment from the red run on Monday;
+  `ubuntu-latest` migrates to Ubuntu 26.04 on 2026-10-19, which is close enough
+  to be a real date rather than a hypothetical one. The matrix legs are pinned
+  for the same reason — leaving them as `-latest` would leave three of the five
+  gates exposed to a silent migration while the others were safe.
+
+  `go-version: "1.23"` is **deliberately unchanged**, for the reason ADR 0001
+  gives: raising that floor is what would unpin `golang.org/x/term`. `shell:
+  bash` on the `gofmt` step is also retained deliberately — the step is a
+  formatting gate, and a shell swap there is a change in what it asserts.
+
+  **Nothing about this has been executed by GitHub Actions yet.** See Known
+  Limitations.
+
+### Known Limitations
+
+- **The Windows tests are unexecuted, and this release does not change that.**
+  `term/terminal_windows_test.go` is `//go:build windows` and is verified
+  **compile-only**, by `GOOS=windows go vet` — which proves it compiles and not
+  that it passes. It has **never been executed**: not on Windows, not under Wine,
+  not on any machine with a console. CI cross-*builds* Windows and never *runs*
+  the suite there, so the Windows backend still executes **zero tests at
+  runtime**, and the backend itself remains a deliberate loud-error stub. A green
+  Windows CI today would be asserting that a loud error is returned correctly.
+
+- **The Node 24 action upgrades and the runner pinning are unvalidated.** Every
+  version in the table above was verified statically — each action's `action.yml`
+  declares `using: node24`, and each image name is one GitHub publishes. **No
+  GitHub Actions run has exercised any of it.** The repository has not been
+  pushed since these edits were made, so there is no run, green or red, behind
+  any of it, and no badge in this repository currently reflects the new
+  configuration. The first push is the actual test: a major bump to
+  `actions/checkout`, `actions/setup-go`, `golangci-lint-action` or
+  `github-script` can change inputs, defaults or behaviour, and `macos-15` and
+  `windows-2025` are new images for this project even though they are established
+  GitHub ones. Treat a red first run as an expected possibility, not a surprise,
+  and read it before reverting.
+
+- **golangci-lint still runs one version, on one platform, on Linux.** Unchanged
+  by this release and restated because the action moved: the pinned `v2.14.0` is
+  what this repository was verified against locally, `golangci-lint-action` v9 is
+  what will run it, and nothing re-verifies the pair against a newer linter. The
+  action major bump is exactly the kind of change that can surface as a red build
+  at the moment of the upgrade rather than in advance.
+
 ## [0.3.0] — 2026-10-05
 
 A minor bump, and the reason is the two widget fixes below: **both change what
@@ -597,6 +715,7 @@ Two performance claims that this release turns from assertion into measurement:
   **60 cursor moves and 19,443 bytes, 3.12× the narrow frame** rather than 11×.
   The ASCII path is unchanged. See ADR 0008's amendment, finding 4.
 
+[0.4.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.4.0
 [0.3.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.3.0
 [0.2.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.2.0
 [0.1.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.1.0

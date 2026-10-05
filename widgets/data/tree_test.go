@@ -317,3 +317,110 @@ func TestTreeEmptyHierarchyIsLegal(t *testing.T) {
 	tr.Toggle(0)
 	tr.Draw(cellBuf(10, 4))
 }
+
+// cellAtRune returns the x of the first cell in row y holding r, or -1.
+func cellAtRune(buf *buffer.Buffer, r rune, y int) int {
+	for x := 0; x < buf.Width(); x++ {
+		if buf.CellAt(x, y).Rune() == r {
+			return x
+		}
+	}
+	return -1
+}
+
+func TestTreeNodeStyleReachesTheLabel(t *testing.T) {
+	// A Node's own Style is the whole point of the field, and the selected row
+	// takes SelectedStyle outright: a selection that only recoloured the
+	// expander glyph and the background would leave the text unreadable, which is
+	// worse than no selection at all. Both are one paintRow override away and
+	// neither is observable from the background alone.
+	red := buffer.NewColour(255, 0, 0)
+	blue := buffer.NewColour(0, 0, 255)
+	nodeStyle := buffer.NewStyle(red, buffer.DefaultColour, 0)
+	selStyle := buffer.NewStyle(blue, buffer.DefaultColour, 0)
+
+	tr := NewTree(buffer.Rect{X: 0, Y: 0, W: 20, H: 6},
+		Node{Label: "aa", Expanded: true, Style: nodeStyle, Children: []Node{{Label: "bb", Style: nodeStyle}}},
+	)
+	tr.Block().SetBorder(buffer.BorderPlain)
+	tr.SelectedStyle = selStyle
+	buf := cellBuf(20, 6)
+	tr.Draw(buf)
+
+	// Selection defaults to the first row, so row 1 is "aa" and row 2 is "bb".
+	xa := cellAtRune(buf, 'a', 1)
+	xb := cellAtRune(buf, 'b', 2)
+	if xa < 0 || xb < 0 {
+		t.Fatalf("labels not found: aa at %d, bb at %d", xa, xb)
+	}
+	if got := buf.CellAt(xa, 1).FG; got != blue {
+		t.Errorf("selected node's label FG = %s, want SelectedStyle %s", got, blue)
+	}
+	if got := buf.CellAt(xb, 2).FG; got != red {
+		t.Errorf("unselected node's label FG = %s, want the node's own style %s", got, red)
+	}
+}
+
+func TestTreeNodeStyleFallsBackToItemStyle(t *testing.T) {
+	// An unset Node.Style resolves to ItemStyle rather than to the terminal
+	// defaults, which is the same fallback the doc comment claims.
+	green := buffer.NewColour(0, 255, 0)
+	tr := NewTree(buffer.Rect{X: 0, Y: 0, W: 20, H: 5}, Node{Label: "aa", Expanded: true})
+	tr.Block().SetBorder(buffer.BorderPlain)
+	tr.ItemStyle = buffer.NewStyle(green, buffer.DefaultColour, 0)
+	tr.selected = -1
+	buf := cellBuf(20, 5)
+	tr.Draw(buf)
+	x := cellAtRune(buf, 'a', 1)
+	if x < 0 {
+		t.Fatal("label not found")
+	}
+	if got := buf.CellAt(x, 1).FG; got != green {
+		t.Errorf("label FG = %s, want ItemStyle %s", got, green)
+	}
+}
+
+func TestTreeMultiSpanLabelKeepsItsOwnStyles(t *testing.T) {
+	// paintRow's documented contract: a multi-span row keeps its own styles
+	// whatever the row rendition is, because flattening it would build a string on
+	// the frame path and a row carrying several styles is the author saying so.
+	tr := NewTree(buffer.Rect{X: 0, Y: 0, W: 20, H: 4},
+		Node{Expanded: true, Spans: []buffer.Span{
+			{Text: "cc", Style: buffer.NewStyle(buffer.NewColour(255, 0, 0), buffer.DefaultColour, 0)},
+			{Text: "dd", Style: buffer.NewStyle(buffer.NewColour(0, 255, 0), buffer.DefaultColour, 0)},
+		}},
+	)
+	tr.Block().SetBorder(buffer.BorderPlain)
+	tr.SelectedStyle = buffer.NewStyle(buffer.NewColour(0, 0, 255), buffer.DefaultColour, 0)
+	buf := cellBuf(20, 4)
+	tr.Draw(buf)
+	xc := cellAtRune(buf, 'c', 1)
+	xd := cellAtRune(buf, 'd', 1)
+	if xc < 0 || xd < 0 {
+		t.Fatalf("spans not found: cc at %d, dd at %d", xc, xd)
+	}
+	if got := buf.CellAt(xc, 1).FG; got != buffer.NewColour(255, 0, 0) {
+		t.Errorf("first span FG = %s, want red", got)
+	}
+	if got := buf.CellAt(xd, 1).FG; got != buffer.NewColour(0, 255, 0) {
+		t.Errorf("second span FG = %s, want green", got)
+	}
+}
+
+func TestTreeAsciiModeStillDrawsTheLabel(t *testing.T) {
+	// The fix routes the label through paintRow, which also fills; on a narrow
+	// ASCII tree the label must still be truncated rather than run off the row.
+	tr := NewTree(buffer.Rect{X: 0, Y: 0, W: 20, H: 4}, Node{Label: "abcdefghij", Expanded: true})
+	tr.Block().SetBorder(buffer.BorderPlain)
+	tr.Block().Ascii = true
+	buf := cellBuf(20, 4)
+	tr.Draw(buf)
+	first := string(buf.CellAt(cellAtRune(buf, 'a', 1), 1).Rune())
+	if first != "a" {
+		t.Fatalf("label lost in ASCII mode: first cell %q", first)
+	}
+	got := rows(t, 20, 4, tr)
+	if len(got) < 2 || !strings.Contains(got[1], "abcdefghij") {
+		t.Errorf("ASCII row = %q, want the label present", got)
+	}
+}

@@ -24,12 +24,18 @@ permissions:
 jobs:
   x-term-pin:
     name: check x/term pin
-    runs-on: ubuntu-latest
+    # Pinned, not `ubuntu-latest`: this job's entire value is that it runs
+    # unattended on a schedule. `ubuntu-latest` migrates to Ubuntu 26.04 on
+    # 2026-10-19; if that migration broke the probe, this job would start
+    # failing with nobody watching, and a guard that fails unnoticed is worse
+    # than no guard. A pinned image keeps the weekly run reproducible. See the
+    # note above `jobs:` in ci.yml for the full reasoning.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Current pin
         id: pin
@@ -48,7 +54,7 @@ jobs:
       # guard that has silently stopped guarding. `unknown` from the probe above
       # counts as an error too — without a comparison there is nothing to report.
       - name: Open an issue when the pin can be lifted
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           PINNED: ${{ steps.pin.outputs.pinned }}
           LATEST: ${{ steps.latest.outputs.latest }}
