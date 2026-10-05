@@ -38,7 +38,7 @@ break without notice until v1.0.0.**
 | Color model and degradation ladder | **PROPOSED** | Built and working: `Colour` is truecolor/named-16/256 with a redmean quantiser and a `ColourDepth` rung, plus `NO_COLOR`. **Not yet validated.** Nobody has checked the redmean mapping is perceptually acceptable, so treat the 256 and 16 rungs as provisional. The `buffer.Quantiser` interface is the escape hatch for a Lab-space replacement. |
 | Theme and styling system | **DECIDED** — **no theme in v1**; widgets carry `Style` fields, framework defaults are the terminal's own colours plus named attribute styles | One `buffer.Style` value (fg/bg/attr, by value, 12 bytes, 0 allocs) replaces the loose-argument write API; `ansi.Style` becomes an alias of it. Trigger for a theme: the first role two widgets must share. [ADR 0008](adr/0008-style-and-text.md) |
 | Text and span rendering | **DECIDED** — `Span` + `Buffer.SetSpans`, parsed once, wrapped outside `Draw` | A wide glyph's continuation cell takes its **owning span's** style or the row flickers forever. `Wrap`/`Truncate` allocate and are banned from `Draw`. Borders and titles have one vocabulary (`BorderPlain`/`Rounded`/`Double`/`Thick`/`ASCII`, one `Block`). [ADR 0008](adr/0008-style-and-text.md) |
-| Commands and keymap (where the command layer sits, and whether `Widget.Handle` changes) | **DECIDED** — a new `keymap` package sitting **above** `Widget.Handle`; the `Widget` interface is **unchanged** | A named action and a key that reaches it are different things. One normalised `Chord` (`KeySpace` and `Rune ' '` are one chord) is a comparable 16-byte struct, so resolution is a map lookup at **0 allocs**, a property ADR 0009 specifies and a test must pin, **not one that any test pins today: there is no `keymap/` directory, and `TestDispatchIsZeroAllocation` and `TestChordIsSixteenBytes` do not exist.** `keymap` lands in v0.4.0 — **not** v0.3.0, which shipped on 2026-10-05 without it — so `Event.Chord` normalisation, the scope chain and `Describe` are all specified-only. Resolution is **focus > screen > global with no numeric priority**, and a user override wins only within its own scope — so a dialog's `Esc` cannot be stolen. Widgets join through **optional** `Commandable`/`Clickable` interfaces (the `Focusable` pattern) and **v0.2 requires them of zero catalog widgets**. `EventResize` and `EventPaste` never enter a command layer. Help is `Describe`, computed from the same tables `Dispatch` walks, so it cannot drift. A click is a command because the **widget under the pointer says so** — the registry holds no rectangles. The `Ctrl+K` palette is in scope, built on `Menu`+`Dialog`+`TextInput`, and not by this ADR. Deferred with triggers: multi-stroke/leader sequences, command-line args, config persistence, release bindings, drag-as-command. [ADR 0009](adr/0009-command-and-keymap.md) |
+| Commands and keymap (where the command layer sits, and whether `Widget.Handle` changes) | **DECIDED** — a new `keymap` package sitting **above** `Widget.Handle`; the `Widget` interface is **unchanged** | A named action and a key that reaches it are different things. One normalised `Chord` (`KeySpace` and `Rune ' '` are one chord) is a comparable 16-byte struct, so resolution is a map lookup at **0 allocs**, a property ADR 0009 specifies and a test must pin, **not one that any test pins today: there is no `keymap/` directory, and `TestDispatchIsZeroAllocation` and `TestChordIsSixteenBytes` do not exist.** `keymap` was targeted at v0.4.0 — **not** v0.3.0 or v0.4.0, both of which shipped on 2026-10-05 without it — so `Event.Chord` normalisation, the scope chain and `Describe` are all specified-only. Resolution is **focus > screen > global with no numeric priority**, and a user override wins only within its own scope — so a dialog's `Esc` cannot be stolen. Widgets join through **optional** `Commandable`/`Clickable` interfaces (the `Focusable` pattern) and **v0.2 requires them of zero catalog widgets**. `EventResize` and `EventPaste` never enter a command layer. Help is `Describe`, computed from the same tables `Dispatch` walks, so it cannot drift. A click is a command because the **widget under the pointer says so** — the registry holds no rectangles. The `Ctrl+K` palette is in scope, built on `Menu`+`Dialog`+`TextInput`, and not by this ADR. Deferred with triggers: multi-stroke/leader sequences, command-line args, config persistence, release bindings, drag-as-command. [ADR 0009](adr/0009-command-and-keymap.md) |
 | `docs/ARCHITECTURE.md` | **DECIDED** — a short orientation document, not a summary | Reduced to 105 lines at the v0.1.0 release gate. It had grown to 251 lines duplicating ADR reasoning, its decision numbering (5=colour, 6=theme, 7=input) did not match the ADR set, and it still called the colour model OPEN after this table moved it to PROPOSED. It now states what the pieces are, how they fit, and links each ADR — no duplicated reasoning — and preserves the **Non-goals** section verbatim, which is not duplicated anywhere else. |
 | Documentation site | **PROPOSED** — Hugo + Pagefind on GitHub Pages; captures generated in Go from `MemorySink` cells, not screenshots | No browser TTY exists, so the only truthful picture of a widget is the cell grid the renderer produced — which is what `widgets/widgettest` already builds and what the golden tests assert on, so the docs cannot drift from behaviour. **The capture half is built** — `internal/docsgen` (~2,242 lines) and `cmd/capture` (~228 lines), 2,470 lines together, with a one-entry-per-widget registry whose `Entries()` returns
 exactly 24 — `Menu` and `Dialog` are in it — plus plain-text *and* HTML output, a sorted `manifest.json`, `index.json`, and a `-check` mode that fails on a byte difference. **The Hugo/Pagefind site itself is not built.** A live WASM playground is rejected: `docs/ARCHITECTURE.md` lists "no WASM build" as a written non-goal and `term/terminal_windows.go` is a stub, so there is no seam to port. Plan, page tree, per-widget template and effort: [docs/SITE-PLAN.md](SITE-PLAN.md). |
@@ -176,22 +176,91 @@ framework's defaults are the terminal's own colours plus named attribute styles.
 `NO_COLOR` and the 16-colour rung stay encode-time only, so no widget path
 consults them.
 
-## Release gate for v0.3.0 — what closed, and what did not
+## Release gate for v0.4.0 — what closed, and what did not
 
-The current release is **v0.3.0, 2026-10-05** — a minor over v0.2.0, and the
-reason is the pair of `widgets/data` fixes: `List` now passes the per-item style
-it computes to `paintRow`, so `ItemStyle` and `SelectedStyle` actually reach the
-text, and `Table.drawCell`'s "write verbatim" sentinel was `buffer.DefaultStyle`
-where `Style.IsUnset()` compares against `Style{}`, so the guard fired on every
-cell and replaced every cell `Style` and every column `CellStyle` with the
-terminal default. Both change what two library widgets draw, which is the
+The current release is **v0.4.0, 2026-10-05** — a minor over v0.3.0, and the
+reason is one `widgets/data` fix: `Tree.drawRow` computed a per-node content
+style and applied it only to the expander glyph, writing the label through a
+direct `SetSpansCappedIn`, so a node's `Style` and the selected row's
+`SelectedStyle` reached the text not at all. The label now goes through
+`paintRow` — the same path `List` and `Table` use — over a rect covering the
+label region alone. That changes what a library widget draws, which is the
 definition of a behaviour change, and the release policy above puts those in a
 minor — a patch that changed behaviour would be a bug in the release.
 
-Everything else in this release — the allocation assertion, the markets rune
+This closes the defect class. v0.3.0 fixed `List` and `Table`; `Tree` was missed
+because its row painter computed the style for one cell and then took a different
+call for the text beside it, so the computed style stopped where the two paths
+diverged.
+
+The rest of this release — every CI action moved to a Node 24 major
+(`checkout` v4→v7, `setup-go` v5→v7, `golangci-lint-action` v7→v9,
+`github-script` v7→v9) and every runner image pinned by name rather than
+`-latest` (`ubuntu-24.04`, `macos-15`, `windows-2025`) — is test and tooling, and
+none of it is a reason for the bump. `go-version: "1.23"` is deliberately
+unchanged per ADR 0001, and `shell: bash` on the gofmt step is deliberately
+retained. **None of the CI change has been executed by a GitHub Actions run**;
+the versions were verified statically and the first push is the actual test. That
+is recorded under the release's Known Limitations rather than glossed, because a
+green badge in this repository currently attests to the *previous* CI
+configuration.
+
+**Verified baseline at the v0.4.0 gate**, go1.27.1 darwin/arm64: `go build ./...`,
+`go vet ./...` and `gofmt -l .` clean, and `go test ./... -count=1` green across
+all 25 test packages. `GOOS=windows go vet ./...` is the only check that has ever
+covered `term/terminal_windows_test.go`, and it still has never been executed.
+
+**Closed at this gate.**
+
+- **`Tree` node styles and `SelectedStyle` reach the label.** The third and last
+  instance of the defect class v0.3.0 opened in `widgets/data`. `drawRow`
+  computed the content style — node `Style`, falling back to `ItemStyle`, and
+  `SelectedStyle` outright when selected — and applied it to the expander cell
+  only, then wrote the label with a call taking no style at all. The label now
+  goes through `paintRow` over a label-only rect, so the fill cannot reach the
+  marker or the indent. Four tests pin it in `widgets/data/tree_test.go`: node
+  style reaching the label, the `ItemStyle` fallback, a multi-span label keeping
+  its own styles, and the ASCII path. The frame path stays zero-allocation and no
+  golden moved, because `widgets/data` has no `testdata`.
+
+**Not done at this gate.**
+
+- **The CI posture change has never been run.** Every action moved to a Node 24
+  major and every runner image pinned by name, verified statically — each action's
+  `action.yml` declares `using: node24` — and not by a single GitHub Actions run.
+  Nothing has been pushed since. A major bump to any of those four actions can
+  change inputs, defaults or behaviour, and `macos-15` and `windows-2025` are
+  new images for this project. This is the one item at this gate that is both
+  unfinished *and* unobservable locally, which is why it is named here rather
+  than counted as closed.
+- **`term/terminal_windows_test.go` is still compile-only.** Unchanged from
+  v0.3.0 and restated because it is the item most easily mistaken for coverage:
+  `GOOS=windows go vet` proves it compiles, the Windows backend still runs zero
+  tests at runtime, and the tests have never been executed anywhere.
+
+The gate below is the v0.3.0 gate, retained as history.
+
+## The v0.3.0 gate, retained as history
+
+The v0.3.0 gate is preserved below. Its closed claims were true when made and
+are not restated as current work; the items it left open are still open and
+appear in the lists further below.
+
+The v0.3.0 release was 2026-10-05
+([CHANGELOG.md](../CHANGELOG.md)). A minor bump, and the reason is the pair of
+`widgets/data` fixes: `List` now passes the per-item style it computes to
+`paintRow`, so `ItemStyle` and `SelectedStyle` actually reach the text, and
+`Table.drawCell`'s "write verbatim" sentinel was `buffer.DefaultStyle` where
+`Style.IsUnset()` compares against `Style{}`, so the guard fired on every cell and
+replaced every cell `Style` and every column `CellStyle` with the terminal
+default. Both change what two library widgets draw, which is the definition of a
+behaviour change, and the release policy above puts those in a minor — a patch
+that changed behaviour would be a bug in the release.
+
+Everything else in that release — the allocation assertion, the markets rune
 truncation, the Windows type-checked tests, the dependency guard, the untracked
 binaries, the four skips-now-fails, the golangci-lint gate and the badge — is
-test, tooling, packaging or prose, and none of it is a reason for the bump.
+test, tooling, packaging or prose, and none of it was a reason for that bump.
 
 The gate below is the v0.2.0 gate, still the substantive one.
 
@@ -245,8 +314,8 @@ left for someone to rediscover.
 
 - **`keymap` is not implemented.** [ADR 0009](adr/0009-command-and-keymap.md)
   specifies it; the package does not exist. Widgets still dispatch their own keys
-  and there is no command palette. This is a v0.4.0 item — it was targeted at
-  v0.3.0, which shipped on 2026-10-05 without it — and it is the one DECIDED row
+  and there is no command palette. This was targeted at v0.4.0 — and v0.3.0 and
+  v0.4.0 both shipped on 2026-10-05 without it — and it is the one DECIDED row
   in the table above whose implementation is entirely ahead of it.
 - **`form.Tabs` consumes every wheel notch** regardless of where the pointer is,
   so it steals the wheel from whatever is beneath it. The examples work around it
@@ -466,8 +535,11 @@ Answered questions have been removed; the reasoning is preserved in
 The bar this project is measured against:
 
 - SemVer honored from v0.1; **no behavioral change in a patch release**.
-  **MET** — the v0.1.0 → v0.2.0 bump is minor, and the one behavioural change in
-  it (`Post` waking the pacer) is listed under Fixed with its reason.
+  **MET** — every bump so far is minor, v0.1.0 → v0.4.0, and no patch release
+  exists to have violated it. The behavioural changes behind the minors: v0.2.0's
+  `Post` waking the pacer, v0.3.0's `List` and `Table` style fixes, and v0.4.0's
+  `Tree` style fix. Each is listed in
+  [CHANGELOG.md](../CHANGELOG.md) with what changes for a program.
 - A hand-maintained `CHANGELOG.md` with Breaking / Added / Fixed /
   Known Limitations sections. **MET** — [CHANGELOG.md](../CHANGELOG.md) is
   written and carries the sections; v0.2.0 adds Fixed, Added, Changed and
@@ -477,6 +549,12 @@ The bar this project is measured against:
   and `linux/arm64`, and the Windows test file compiles. Nothing has ever been
   *run* on Windows, and the Windows backend is a stub, so a green Windows CI
   would today be asserting that a loud error is returned correctly.
+  **As of the v0.4.0 gate there is additionally no green CI run for the current
+  workflow configuration at all**: every action is on a Node 24 major and every
+  runner image is pinned, verified statically and not by a run. The last green
+  badge attests to the previous configuration, so this criterion is not merely
+  partial on Windows — it is unevidenced on all three platforms until the first
+  push lands.
 - **Every widget has a runnable example and a documented public API. NOT MET,
   and not close.** There are three example programs — `hello`, `markets`,
   `dashboard` — and **zero `func Example` functions in the codebase**. Each of
