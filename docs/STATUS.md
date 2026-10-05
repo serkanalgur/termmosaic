@@ -38,7 +38,7 @@ break without notice until v1.0.0.**
 | Color model and degradation ladder | **PROPOSED** | Built and working: `Colour` is truecolor/named-16/256 with a redmean quantiser and a `ColourDepth` rung, plus `NO_COLOR`. **Not yet validated.** Nobody has checked the redmean mapping is perceptually acceptable, so treat the 256 and 16 rungs as provisional. The `buffer.Quantiser` interface is the escape hatch for a Lab-space replacement. |
 | Theme and styling system | **DECIDED** — **no theme in v1**; widgets carry `Style` fields, framework defaults are the terminal's own colours plus named attribute styles | One `buffer.Style` value (fg/bg/attr, by value, 12 bytes, 0 allocs) replaces the loose-argument write API; `ansi.Style` becomes an alias of it. Trigger for a theme: the first role two widgets must share. [ADR 0008](adr/0008-style-and-text.md) |
 | Text and span rendering | **DECIDED** — `Span` + `Buffer.SetSpans`, parsed once, wrapped outside `Draw` | A wide glyph's continuation cell takes its **owning span's** style or the row flickers forever. `Wrap`/`Truncate` allocate and are banned from `Draw`. Borders and titles have one vocabulary (`BorderPlain`/`Rounded`/`Double`/`Thick`/`ASCII`, one `Block`). [ADR 0008](adr/0008-style-and-text.md) |
-| Commands and keymap (where the command layer sits, and whether `Widget.Handle` changes) | **DECIDED and SHIPPED** — a new `keymap` package sitting **above** `Widget.Handle`; the `Widget` interface is **unchanged** | A named action and a key that reaches it are different things. One normalised `Chord` (`KeySpace` and `Rune ' '` are one chord) is a comparable 16-byte struct, so resolution is a map lookup at **0 allocs** — a property ADR 0009 specifies and **is pinned today**: `TestDispatchIsZeroAllocation` and `TestChordIsSixteenBytes` exist in `keymap/` and pass. **Shipped in v0.6.0** as `keymap/registry.go`, `command.go`, `chord.go`, `scope.go`, `participation.go` and `describe.go`. Resolution is **focus > screen > global with no numeric priority**, and a user override wins only **within its own scope** — so a dialog's `Esc` cannot be stolen. Widgets join through **optional** `Commandable`/`Clickable` interfaces (the `Focusable` pattern); **v0.6 requires them of zero catalog widgets** and ships with none, which is deliberate. `EventResize` and `EventPaste` never enter a command layer. Help is `Describe`, computed from the same tables `Dispatch` walks, so it cannot drift. A click is a command because the **widget under the pointer says so** — the registry holds no rectangles. The `Ctrl+K` palette is in scope, built on `Menu`+`Dialog`+`TextInput`, and **is not built**; new behaviour in `Menu`/`Dialog`, so a v1.1.0 minor. `Event` is untouched: a command is resolved *from* an event, never carried inside one, so no payload is added and the `unsafe.Sizeof(Event{})` guard is unaffected. Deferred with triggers: multi-stroke/leader sequences, command-line args, config persistence, release bindings, drag-as-command. [ADR 0009](adr/0009-command-and-keymap.md) |
+| Commands and keymap (where the command layer sits, and whether `Widget.Handle` changes) | **DECIDED and SHIPPED** — a new `keymap` package sitting **above** `Widget.Handle`; the `Widget` interface is **unchanged** | A named action and a key that reaches it are different things. One normalised `Chord` (`KeySpace` and `Rune ' '` are one chord) is a comparable 16-byte struct, so resolution is a map lookup at **0 allocs** — a property ADR 0009 specifies and **is pinned today**: `TestDispatchIsZeroAllocation` and `TestChordIsSixteenBytes` exist in `keymap/` and pass. **Shipped in v0.6.0** as `keymap/registry.go`, `command.go`, `chord.go`, `scope.go`, `participation.go` and `describe.go`. Resolution is **focus > screen > global with no numeric priority**, and a user override wins only **within its own scope** — so a dialog's `Esc` cannot be stolen. Widgets join through **optional** `Commandable`/`Clickable` interfaces (the `Focusable` pattern); **v0.6 requires them of zero catalog widgets** and ships with none, which is deliberate. `EventResize` and `EventPaste` never enter a command layer. Help is `Describe` (one row per **chord**, for a palette and a help screen) or `DescribeGrouped` (one row per **command**, for a one-line `KeyHint`), computed from the same tables `Dispatch` walks, so it cannot drift; `examples/hello` is the first consumer, and it renders **both** its pinned hint line and its `?` overlay from the registry. A click is a command because the **widget under the pointer says so** — the registry holds no rectangles. The `Ctrl+K` palette is in scope, built on `Menu`+`Dialog`+`TextInput`, and **is not built**; new behaviour in `Menu`/`Dialog`, so a v1.1.0 minor. `Event` is untouched: a command is resolved *from* an event, never carried inside one, so no payload is added and the `unsafe.Sizeof(Event{})` guard is unaffected. Deferred with triggers: multi-stroke/leader sequences, command-line args, config persistence, release bindings, drag-as-command. [ADR 0009](adr/0009-command-and-keymap.md) |
 | Mouse routing (who gets a mouse event) | **DECIDED** — **widgets hit-test themselves**; no framework routing layer | **A widget handles a pointer event only if the pointer is inside its `Bounds()`**, and declining returns `false` so the event reaches what is beneath. Covers every `Mouse` action, wheel included. **`Widget` is unchanged and no exported routing API is added** — the alternative, a `RouteMouse`-style helper or an optional `Hittable` interface, needs new API against a frozen interface, needs a tree walk `Widget` cannot express (there is no `Children()`), and can only answer "which rect" where a widget answers "which cell means what". Fix: `optionList.wheelDelta` gained a `buffer.Rect` and a `Contains`, so `Tabs`, `Select` and `Radio` — which all got the wheel-before-bounds mistake identically — are correct by construction. Two exemptions stated explicitly: a **release** ends a drag wherever the pointer is, and a **drag** continues outside `Bounds` once a press claimed it. `TextInput`/`TextArea` decline the wheel **by decision**, not oversight. This is what gives [ADR 0009](adr/0009-command-and-keymap.md) §6's "hit-testing is the one thing widgets are genuinely better at" its teeth in the shipped catalog. [ADR 0010](adr/0010-mouse-routing.md) |
 | `docs/ARCHITECTURE.md` | **DECIDED** — a short orientation document, not a summary | Reduced to 105 lines at the v0.1.0 release gate. It had grown to 251 lines duplicating ADR reasoning, its decision numbering (5=colour, 6=theme, 7=input) did not match the ADR set, and it still called the colour model OPEN after this table moved it to PROPOSED. It now states what the pieces are, how they fit, and links each ADR — no duplicated reasoning — and preserves the **Non-goals** section verbatim, which is not duplicated anywhere else. |
 | Documentation site | **PROPOSED** — Hugo + Pagefind on GitHub Pages; captures generated in Go from `MemorySink` cells, not screenshots | No browser TTY exists, so the only truthful picture of a widget is the cell grid the renderer produced — which is what `widgets/widgettest` already builds and what the golden tests assert on, so the docs cannot drift from behaviour. **The capture half is built** — `internal/docsgen` (~2,242 lines) and `cmd/capture` (~228 lines), 2,470 lines together, with a one-entry-per-widget registry whose `Entries()` returns
@@ -178,6 +178,74 @@ framework's defaults are the terminal's own colours plus named attribute styles.
 `NO_COLOR` and the 16-colour rung stay encode-time only, so no widget path
 consults them.
 
+## Release gate for v0.6.1 — what closed, and what did not
+
+**v0.6.1**, a minor, and the reason is one new method and one rewired example:
+**the first application to actually use `keymap` found a shape the
+specification had not considered.** A minor and not a patch because
+`Registry.DescribeGrouped` is new exported API on a shipped type; the pinned
+hint line and the help overlay in `examples/hello` are rendered text, so they
+change for every reader of the screenshot and the golden corpus, and that is a
+behaviour change under the release policy above.
+
+**Closed at this gate.**
+
+- **ADR 0009 risk 5 is retired, and the answer to its own question was no.**
+  Risk 5 asked whether `Entry.Chords` as one-row-per-chord is the right shape,
+  triggered by "the first `examples/` change that wants a hint line to agree
+  with a binding". `examples/hello` is that change, and it dispatched through a
+  real `keymap.Registry` — **six commands, twelve chords**, with `q`/`Q`/`Esc`/
+  `Ctrl+c` and `?` at `ScopeGlobal` and the four navigation commands at
+  `ScopeScreen` — with **both** the pinned hint line and the `?` overlay
+  rendered from the registry through `KeyHint.SetEntries`.
+  It is **not** the right shape for a hint: `SetEntries` joins an entry's chords
+  into **one** label, so `Describe`'s output rendered a three-chord command's
+  description **three times**. That is three rows of noise in a line with room
+  for one. The example worked around it with a thirteen-line merge of its own;
+  that workaround is now `Registry.DescribeGrouped(scope)` — one `Entry` per
+  **command** — and it is deleted.
+  **`Describe` is unchanged** and remains one row per chord, which is what ADR
+  0009 §9 specifies for a palette and what a help screen wants. Both queries are
+  views of one internal `describeRows`, so they cannot disagree about which
+  bindings are in scope, about the order, or about which description a binding
+  overrides; `DescribeGrouped` merges `Describe`'s already-sorted rows rather
+  than re-sorting, so neither ordering can drift from the other.
+  Verified: `grep -rn 'termmosaic/keymap' --include='*.go' .` outside `keymap/`
+  returns `widgets/form/keyhint.go` and `examples/hello/` only.
+- **`Widget.Handle` claims nothing in `examples/hello`,** and the hand-written
+  hint string and the test that checked it against `Handle` are both gone. A
+  binding and its description are written **once**, which is the property the
+  v0.6.0 gate said was untested at scale.
+- **The visible consequences are recorded rather than left in a golden diff.**
+  The pinned hint reads `[Q q Esc Ctrl+c] quit  ·  [?] toggle the keys`, where it
+  read `press q to quit  ·  ? keys  ·  arrows move focus` — the navigation is
+  gone from the one-line hint because a merged row per navigation command is
+  wider than the line. The help overlay went from **two rows to three**,
+  because a derived help spells every chord in full where the prose it replaced
+  said "arrows". **17 golden files moved, one row each.**
+
+**Not done at this gate.**
+
+- **No catalog widget implements `Commandable`,** and none implements
+  `Clickable`. Still verified: `grep -rn 'Commandable' widgets/` returns nothing.
+  The example that closed risk 5 is an *application* opting in, which is not a
+  widget contributing its own bindings, so ADR 0009 §8's deferral is untouched.
+  Risk 5's trigger is spent; this is not the same trigger and stays open.
+- **`Registry` has no `SetFocus`, so `Describe(ScopeFocus)` is incomplete before
+  the first dispatch** — the registry only learns what is focused from the
+  `focus` argument `Dispatch` is handed. A palette is unaffected (`ScopeGlobal`,
+  and §2.1's specificity order covers the rest), but an application with real
+  focusable widgets cannot yet ask "what can I do right now". New API on a
+  shipped type, so **deferred to v1.1**. `examples/hello` avoids it by binding
+  its navigation at `ScopeScreen`.
+- **There is still no command palette.** ADR 0009 §9 puts it in scope and
+  explicitly outside that ADR. Unchanged from v0.6.0.
+- **`examples/markets` and `examples/dashboard` still dispatch by their own
+  `switch`** (`examples/markets/dashboard.go:577`,
+  `examples/dashboard/main.go:329`). See risk 2 below.
+
+The gate below is the v0.6.0 gate, retained as history.
+
 ## Release gate for v0.6.0 — what closed, and what did not
 
 **v0.6.0**, a minor, and the reason is one new package: **`keymap` ships.** The
@@ -229,7 +297,7 @@ The gate below is the v0.5.0 gate, retained as history.
 
 ## The v0.5.0 gate, retained as history
 
-The current release is **v0.5.2, 2026-10-05** — [ADR 0010](adr/0010-mouse-routing.md)
+**v0.5.2** was released 2026-10-05 — [ADR 0010](adr/0010-mouse-routing.md)
 settles who receives a mouse event, and the answer fixed three widgets that
 were getting it wrong. **v0.5.0**, a minor, had the reason a
 **breaking API change**: five exported widget fields became private, because each
@@ -676,10 +744,17 @@ risk register:
    which it was not when this was first written — it slipped its stated version
    twice before it landed. `keymap` shipped in v0.6.0, and both named tests
    exist and pass. **What remains open in this item is not the architecture but
-   its exercise**: no catalog widget implements `Commandable`, no example binds a
-   chord, and `Chord`'s folding rules have met no real terminal. Freezing the
+   its exercise**: no catalog widget implements `Commandable`, **one example of
+   three** binds chords, and `Chord`'s folding rules have met no real terminal.
+   Freezing the
    surface is now the right call; freezing it *unused* is the remaining risk,
-   and it is ADR 0009's risks 3 and 5 rather than a gap in this gate list.
+   and it is ADR 0009's risks 2, 3 and 5 rather than a gap in this gate list.
+   **Updated for v0.6.1:** risk 5 is retired — `examples/hello` binds twelve
+   chords across six commands and both of its hints render from the registry —
+   and no catalog widget implements `Commandable` still. What remains is that
+   the mechanism is exercised in **one example of three**, `Chord`'s folding
+   rules have met no real terminal, and the two-mechanism overlap is still
+   unobserved.
 3. **CI green is unevidenced on all three platforms** — the last green badge
    attests to the previous workflow configuration.
 
@@ -736,7 +811,7 @@ promise requires a platform that has not been built.
 | 1 | **Green CI evidence** on the current configuration | Minutes. Every other claim rests on it. |
 | 2 | **Behaviour audit of all 24 widgets** | Three of five releases so far exist because of this defect class. Every find after v1.0.0 is a v1.1.0. |
 | 3 | **Cache-poisoning debug mode** (ADR 0007's expensive half) | What makes #2 mechanical rather than a matter of review. Highest leverage per hour here. |
-| 4 | ~~**`keymap`** (ADR 0009), with the two named tests~~ **CLOSED** | Shipped in v0.6.0 as `keymap/`, above `Widget.Handle` and with `Widget` unchanged. `TestDispatchIsZeroAllocation`, `TestChordIsSixteenBytes` and `TestParseChordRoundTrips` all pass. `KeyHint`'s help surface is no longer empty: `Describe` computes it from the same tables `Dispatch` walks. The package ships with no catalog widget implementing `Commandable` and no palette — both tracked as open, neither blocking. |
+| 4 | ~~**`keymap`** (ADR 0009), with the two named tests~~ **CLOSED** | Shipped in v0.6.0 as `keymap/`, above `Widget.Handle` and with `Widget` unchanged. `TestDispatchIsZeroAllocation`, `TestChordIsSixteenBytes` and `TestParseChordRoundTrips` all pass. `KeyHint`'s help surface is no longer empty: `Describe` computes it from the same tables `Dispatch` walks. **Exercised in v0.6.1** — `examples/hello` dispatches through a registry and `DescribeGrouped` was added for its hint lines. The package still ships with no catalog widget implementing `Commandable` and no palette — both tracked as open, neither blocking. |
 | 5 | ~~**Mouse routing decision + the three wheel defects**~~ **CLOSED** | Decided by [ADR 0010](adr/0010-mouse-routing.md) — widgets hit-test themselves, `Widget` unchanged — and the three wheel defects are fixed and pinned. See below. |
 | 6 | **Colour model: decide it** | A PROPOSED row cannot survive the freeze: if the quantiser is later replaced, every program's 256/16-colour output changes, and that is a v1.1.0 in the first release. |
 | 7 | **`func Example` per widget** | The largest unmet criterion in the project's own bar. Purely additive; zero stability risk. |
@@ -820,8 +895,24 @@ oversight:
   are what it would consume.
 - **Making any catalog widget implement `keymap.Commandable`** — ADR 0009's own
   deferral. The two interfaces are built and **no widget in `widgets/*`
-  implements either**. Trigger is the first `examples/` hint line that needs to
-  agree with a binding.
+  implements either**. `examples/hello` opting in as an *application* in v0.6.1
+  does not change this: a registry an application drives is not a widget
+  contributing its own bindings, and §8's deferral is untouched. The v0.6.0
+  trigger — the first `examples/` hint line that needs to agree with a binding —
+  **has now fired and was answered**, and it was answered on the example side.
+  The remaining trigger for this bullet is the first *catalog widget* whose keys
+  a program would rather name than switch on.
+- **`Registry.SetFocus`** — not built in v0.6.1, and **deferred to v1.1**. The
+  registry learns what is focused only from the `focus` argument `Dispatch` is
+  handed, so `Describe(ScopeFocus)` returns an incomplete answer before the
+  first dispatch, and an application with real focusable widgets cannot ask the
+  question §4 exists to answer. New API on a shipped type, so a minor.
+  `examples/hello` avoids it by binding its navigation at `ScopeScreen`.
+- **`examples/markets` and `examples/dashboard` moving off their own `switch`**
+  onto `keymap` — one example of three did this in v0.6.1 and the other two did
+  not. What is missing is not the migration but the **overlap**: nothing in the
+  tree now has a `keymap` binding and a widget `switch` answering the same key,
+  which is the failure risk 2 above is about.
 - **TextArea rendered selection, table column selection, pager selection, a
   redo stack** — additive widget API, all four fine as v1.1.0.
 - **A theme system** — ADR 0008 decides "no theme in v1", with a trigger: the
@@ -845,10 +936,23 @@ late.
 2. **`keymap`'s two mechanisms overlapping in a real application** — a global
    binding shadowing a widget's own `switch`. Survivable via `Warnings()`, but
    it is a behaviour change, so v1.1.0, and it is the kind of thing that erodes
-   trust in a stable 1.0. **Now higher than it was, because the risk is live:**
-   `keymap` shipped in v0.6.0, so an adopter *can* build the mixed-mechanism
-   example that was the stated mitigation, and has not. Nothing in
-   `examples/` binds a chord or implements `Commandable`.
+   trust in a stable 1.0. **Partly exercised since v0.6.0, and the remaining
+   half is the half that matters.** `examples/hello` is now the mixed-mechanism
+   example the mitigation asked for: it dispatches through a real
+   `keymap.Registry` and its `Handle` claims nothing, which is the *resolved*
+   shape rather than the overlap. The stated mitigation was building such an
+   example **before** the tag, and what it has actually established is narrower
+   than "no application mixes both" — it has established that one application of
+   three has moved off its `switch` entirely.
+   **One example of three is not the mitigation.** `examples/markets`
+   (`dashboard.go:577`) and `examples/dashboard` (`main.go:329`) both still
+   dispatch by their own `switch`, and neither binds a chord or implements
+   `Commandable`. So the *overlap* — a `keymap` global binding shadowing a
+   widget's `switch`, the failure this risk is actually about — is still
+   unobserved in the tree, and `examples/hello` does not observe it: a registry
+   that answers everything leaves `Handle` nothing to shadow. The fix if it
+   bites remains `Warnings()` reporting a chord that is both bound and handled
+   by an attached widget, **not** a `Widget` change.
 3. **`Chord` normalisation disagreeing with a real terminal.** Nothing in its
    folding rules has met a real tty, and the ADR asks for a byte-stream matrix
    that has not been run. A normalisation fix is a behaviour change.

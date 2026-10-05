@@ -20,9 +20,24 @@
 // Home/End move a focus marker through the facts, and the focused fact is marked
 // BOTH ways — a marker glyph in its own gutter and reverse video — so the focus is
 // legible on a monochrome terminal and in a golden file, neither of which can see
-// a colour. '?' reveals two rows of key help. Every one of those keys is decoded
-// by the real input decoder in the tests, so a test cannot pass on an event no
-// terminal would ever send.
+// a colour. '?' reveals three rows of key help. Every one of those keys is
+// decoded by the real input decoder in the tests, so a test cannot pass on an
+// event no terminal would ever send.
+//
+// # The key contract is a registry, not a switch
+//
+// Every key this example answers to is a named command in a keymap.Registry, and
+// both the pinned hint line and the help overlay are rendered from
+// Registry.DescribeGrouped rather than written out as text. A binding and its
+// description are therefore written once: renaming a chord changes what the hint
+// says on the next construction, and there is no second place where a key can be
+// spelled.
+//
+// The event loop below is ADR 0009 §2's four-step order, verbatim: key and mouse
+// events go to km.Dispatch first and fall through to Widget.Handle only when
+// nothing consumed them, a resize is not a command and goes straight to the
+// resize path, and a paste goes to the tree whole. Handle claims nothing, because
+// every key the example answers to is a command.
 //
 // The focus state is MUTATED only on the render goroutine: the input goroutine
 // posts the event through render.Renderer.Post rather than calling Handle itself,
@@ -36,6 +51,9 @@
 //	home / end      first / last fact
 //	?               show or hide the key help
 //	q / esc / ctrl-c quit
+//
+// None of that is written twice: it is a keymap.Registry, and the help panel and
+// the pinned hint line are rendered from it.
 //
 // # What "responsive" means here
 //
@@ -79,6 +97,7 @@ import (
 	"github.com/serkanalgur/termmosaic/buffer"
 	"github.com/serkanalgur/termmosaic/geometry"
 	"github.com/serkanalgur/termmosaic/input"
+	"github.com/serkanalgur/termmosaic/keymap"
 	"github.com/serkanalgur/termmosaic/layout"
 	"github.com/serkanalgur/termmosaic/render"
 	"github.com/serkanalgur/termmosaic/term"
@@ -153,11 +172,13 @@ const (
 	// up down the column rather than stepping with their labels.
 	valueCol = labelCol + 6
 
-	// helpRows is how many rows the key help asks for. It is two because the
-	// bindings are grouped into two lines — navigation on one, the rest on the
-	// other — and a single line long enough to hold them all would be truncated at
-	// every width the example is used at.
-	helpRows = 2
+	// helpRows is how many rows the key help asks for, and it is the number of
+	// lines in helpLines: two facts move the focus ring, two jump it, and two end
+	// the program. It was two when the help was two hand-written strings; a
+	// derived line is wider than a prose one, because it spells every chord in
+	// full rather than saying "arrows", and the panel that lists twelve chords
+	// needs three rows to stay inside the narrowest useful interior.
+	helpRows = 3
 
 	// twoColW and threeColW are the INTERIOR widths at which the fact grid gains
 	// a column. They are interior rather than bounds widths because the interior
@@ -244,29 +265,72 @@ const tagline = "hello from termmosaic — resize this terminal"
 // when there is not.
 const noteText = "the layout above is recomputed only when Bounds() changes, so a resize repaints in full and a steady frame costs nothing."
 
-// The two help lines, and the bindings each one names.
+// The commands this example answers to, and the rows of help they are shown in.
 //
-// They are constants rather than something built from a key table because the
-// example's whole point on this axis is that the text on screen and the keys
-// Handle accepts cannot drift apart silently — and a table of bindings that a
-// test then checks against Handle is the mechanism that makes that true. helpNav
-// and helpExit below are the same two lines.
+// The IDs are the commands' names; the registry holds the chords that reach them
+// and the descriptions shown for them, so a binding and what the screen says
+// about it are written in ONE place. Nothing below names a key that is not
+// bound: the hint line and the help panel are both rendered from
+// keymap.Registry.DescribeGrouped.
 const (
-	helpNav  = "move  arrows, tab, shift-tab, home, end"
-	helpExit = "help  ?            quit  q, esc, ctrl-c"
+	// cmdQuit ends the program. ScopeGlobal: quitting is the application's, and
+	// it must be live on whatever screen is current and whatever has focus.
+	cmdQuit = keymap.CommandID("app.quit")
+	// cmdHelp shows or hides the key help. Also ScopeGlobal, for the same reason.
+	cmdHelp = keymap.CommandID("app.help")
+	// cmdNext and cmdBack move the focus ring on by one fact and back by one.
+	cmdNext = keymap.CommandID("focus.next")
+	cmdBack = keymap.CommandID("focus.back")
+	// cmdFirst and cmdLast are not ring steps: Home and End jump to the ends.
+	cmdFirst = keymap.CommandID("focus.first")
+	cmdLast  = keymap.CommandID("focus.last")
 )
 
-// The hint pinned to the bottom row.
+// Groups for the two halves of the key contract: the keys that work on every
+// screen, and the keys that move this screen's focus ring.
 //
-// It leads with the quit binding because that is the one a first-time reader is
-// looking for, and it names '?' rather than spelling out the navigation, because
-// the navigation is on the other side of a key press and this line is the only
-// thing guaranteed to be on screen.
+// They are what Describe sorts on, which is what makes its output stable across
+// runs and diffable across versions, and they are what a command palette would
+// group its rows by. The help overlay does NOT use them for its row layout —
+// one row per group would put four navigation commands on one line and truncate
+// them — which is why helpLines below exists and describes commands directly.
+const (
+	groupApp   = "app"
+	groupFocus = "focus"
+)
+
+// hintCommands is what the pinned hint line names, in the order it names them:
+// quit first, because that is the key a first-time reader is looking for, and
+// the help toggle second, because the navigation it explains is on the other
+// side of a key press. It is a list of COMMANDS and not of chords, so adding a
+// chord to a command changes what the hint says without anything here changing.
 //
-// The goldens are the regression net for it: TestGoldenScreen and the per-size
-// files contain this exact string, so changing a binding without changing this
-// line fails the diff rather than leaving a lie on screen.
-const hintText = "press q to quit  ·  ? keys  ·  arrows move focus"
+// The navigation is deliberately absent: one merged row per navigation command
+// is wider than the one row the hint is given, and a hint that truncates a
+// binding label tells the reader less than a hint that names the two keys they
+// need first. The overlay is where the navigation is.
+var hintCommands = []keymap.CommandID{cmdQuit, cmdHelp}
+
+// helpLines is the help overlay's row layout: which commands share a line, in
+// the order they appear on it.
+//
+// It names commands and not chords, so a binding can move between lines without
+// a second table, and the grouping is the one the ring has: the keys that go
+// forward share a line with the key that jumps to the first fact, the keys that
+// go back share a line with the key that jumps to the last, and the two
+// application-level commands share the last line.
+//
+// The line count is not a free choice. Describe spells every chord in full
+// rather than saying "arrows", so the panel's twelve chords are about eighty
+// cells of bracketed key labels before a single description is added — which is
+// what the prose help this replaced ("move  arrows, tab, shift-tab, home, end")
+// was foreshortening. At the narrowest interior the block draws at, that needs
+// three rows to fit without truncating a binding label in half.
+var helpLines = [][]keymap.CommandID{
+	{cmdNext, cmdFirst},
+	{cmdBack, cmdLast},
+	{cmdHelp, cmdQuit},
+}
 
 // Region indices into the budget table, in draw order.
 //
@@ -341,24 +405,29 @@ type hello struct {
 	// when the layout is derived rather than rebuilt.
 	regions [numRegions]geometry.Region
 
-	// tagline, note and hint are widgets/basic widgets, so the example composes
-	// the catalog for its prose instead of owning a text renderer. They carry the
-	// block's background, without which composing them would paint the block's
-	// own background away.
+	// tagline, note and hint are the prose the example composes from the catalog.
+	// The tagline and the note are widgets/basic text; the hint is a
+	// widgets/form KeyHint, because a hint line IS a key hint, and rendering it as
+	// a plain string would be the second spelling of "here are the keys" this
+	// example stopped having. Its bindings come from the registry.
 	tagline *basic.Text
 	note    *basic.Paragraph
-	hint    *basic.Text
+	hint    *form.KeyHint
 
-	// help is the key help '?' toggles. It is a pair of widgets/form KeyHints rather
-	// than two more basic.Texts because a key hint is a widget the catalog already
-	// owns, it already truncates through buffer's shared writers with a marker
-	// rather than a clip, and reusing it is what stops the example from growing a
-	// second spelling of "here are the keys".
-	help *helpPair
+	// help is the key help '?' toggles: one KeyHint per line of helpLines, fed
+	// from the registry rather than from a pair of constants.
+	help *helpPanel
+
+	// km is the example's command registry. The widget owns it because this
+	// example IS the application — one screen, one focus ring, and no second place
+	// a binding could be declared — and Dispatch needs it, which is what lets a
+	// golden construct the widget alone and still get a fully wired example.
+	km *keymap.Registry
 
 	// focus is which fact the keyboard is aimed at, and helpOpen whether the key
-	// help is showing. Both are mutated only through Handle, which the application
-	// calls on the render goroutine — see the file comment on why that matters.
+	// help is showing. Both are mutated only by a command's Run, which the event
+	// loop reaches through Renderer.Post — see the file comment on why that
+	// matters.
 	focus    int
 	helpOpen bool
 
@@ -372,14 +441,20 @@ type hello struct {
 	tooSmall []buffer.Span
 }
 
-// newHello returns the example's widget with its chrome and its content
-// configured.
+// newHello returns the example's widget with its chrome, its content and its
+// command registry configured.
 //
 // Every size-independent thing is built here rather than in Draw: the title
-// spans, the tagline, the note, the hint, the fact list and the budget table.
-// The block's cached truncation and the body layout are the only size-derived
-// values, and both are recomputed from Draw's own rect check (ADR 0007 §3).
-func newHello(r buffer.Rect, depth buffer.ColourDepth) *hello {
+// spans, the tagline, the note, the hint, the help lines, the fact list, the
+// budget table and the whole key contract. The block's cached truncation and the
+// body layout are the only size-derived values, and both are recomputed from
+// Draw's own rect check (ADR 0007 §3).
+//
+// quit is what the app.quit command runs. It is a parameter rather than a field
+// because closing a terminal is the application's business and a widget that
+// could end the process would take that decision away from the one place that can
+// undo it; the tests pass a func that records the call instead.
+func newHello(r buffer.Rect, depth buffer.ColourDepth, quit func()) *hello {
 	h := &hello{bounds: r, depth: depth}
 
 	// The Block is configured ONCE, here: the title is constant, so the span
@@ -404,8 +479,8 @@ func newHello(r buffer.Rect, depth buffer.ColourDepth) *hello {
 	h.regions[regionTagline] = geometry.Region{Size: 1, Prio: geometry.PrioNormal}
 	// The help's SIZE is zero while it is closed, and adapt patches it when '?'
 	// toggles. A region that asked for its rows while hidden would push the note
-	// down for content nobody can see, so the two-row gap would be the visible
-	// cost of a closed help.
+	// down for content nobody can see, so the rows would be the visible cost of a
+	// closed help.
 	//
 	// That makes the budget's answer depend on a mode as well as on the rectangle,
 	// which is why toggling invalidates the layout cache: it is the same
@@ -419,18 +494,129 @@ func newHello(r buffer.Rect, depth buffer.ColourDepth) *hello {
 	h.tagline.SetBackground(stBody)
 	h.note = basic.NewParagraphString(buffer.Rect{}, noteText, stMuted)
 	h.note.SetBackground(stBody)
-	h.hint = basic.NewTextString(buffer.Rect{}, hintText, stAccent)
-	h.hint.SetBackground(stBody)
 
-	// The help is two rows of a KeyHint, which is a ONE-LINE widget, so the two
-	// lines are two KeyHints: a second kind of help widget would have been a second
-	// spelling of the same thing. They are held as a pair because they are always
-	// shown and always hidden together.
-	h.help = newHelpPair(stMuted, stAccent, stBody)
+	// The registry is built before the two hints, because both of them are
+	// rendered from it. Nothing here names a chord: DescribeGrouped is the only
+	// source of the text on these two lines, which is what makes "the hint cannot disagree
+	// with the bindings" true by construction rather than by a golden.
+	h.km = newRegistry(h, quit)
+	h.hint = newHintLine(h, stAccent, stBody)
+	h.help = newHelpPanel(h, stMuted, stAccent, stBody)
 
 	h.tooSmall = []buffer.Span{buffer.NewSpan(tooSmallText, stMuted)}
 
 	return h
+}
+
+// newRegistry builds the example's command registry: the commands, the chords
+// that reach them, and the scopes those chords are live in.
+//
+// The scopes are the interesting part, and they are chosen rather than defaulted.
+//
+//   - cmdQuit and cmdHelp are ScopeGlobal. They are the application's own keys —
+//     they work on whatever screen is current and whatever holds focus, and a
+//     dialog that wanted its own Esc would still win over a global Esc by ADR 0009
+//     §2.1's specificity order. A global binding must carry a nil Owner, which is
+//     exactly the assertion Warnings would make about them.
+//   - The four navigation commands are ScopeScreen, owned by this widget, with
+//     km.SetScreen naming it. NOT ScopeFocus, and the reason is worth stating,
+//     because the task's first instinct is that navigation is focus-scoped: a
+//     ScopeFocus binding is live only while the widget that declared it holds
+//     keyboard focus, and in this example NOTHING holds keyboard focus. The facts
+//     are cells the block draws itself, not catalog widgets, and no widget in the
+//     tree implements Focusable — so the ring belongs to the screen and the
+//     screen's scope is the one that says so. ScopeScreen is also the scope that
+//     degrades correctly: a focused child added later would bind its own arrows at
+//     ScopeFocus, outrank these by specificity, and take the keys without this
+//     example having to notice. Under ScopeFocus with Owner == this widget the
+//     reverse would happen: the ring's arrows would go silently dead the moment
+//     something else took focus, which is the worst failure mode in ADR 0009's
+//     bad list ("my key stopped working").
+//
+// Attach is called so the screen-scoped bindings have an attached owner: an
+// un-attached owner is reported by Warnings, and a registry that warns about
+// itself in the example is not demonstrating much.
+func newRegistry(h *hello, quit func()) *keymap.Registry {
+	km := keymap.New()
+	km.Register(
+		keymap.Command{
+			ID: cmdQuit, Desc: "quit", Group: groupApp,
+			Run: func(keymap.Ctx) bool { quit(); return true },
+		},
+		keymap.Command{
+			ID: cmdHelp, Desc: "toggle the keys", Group: groupApp,
+			Run: func(keymap.Ctx) bool { h.toggleHelp(); return true },
+		},
+		keymap.Command{
+			ID: cmdNext, Desc: "next fact", Group: groupFocus,
+			Run: func(keymap.Ctx) bool { h.moveFocus(1); return true },
+		},
+		keymap.Command{
+			ID: cmdBack, Desc: "previous fact", Group: groupFocus,
+			Run: func(keymap.Ctx) bool { h.moveFocus(-1); return true },
+		},
+		keymap.Command{
+			ID: cmdFirst, Desc: "first fact", Group: groupFocus,
+			Run: func(keymap.Ctx) bool { h.setFocus(0); return true },
+		},
+		keymap.Command{
+			ID: cmdLast, Desc: "last fact", Group: groupFocus,
+			Run: func(keymap.Ctx) bool { h.setFocus(len(h.facts) - 1); return true },
+		},
+	)
+
+	// BindString rather than a hand-built keymap.Chord, so the bindings are
+	// written in the same notation the help prints them in: what help says is
+	// what ParseChord accepts, which is the whole point of keymap owning one
+	// spelling of a chord.
+	//
+	// Three spellings here are worth reading twice, because they are what the
+	// decoder produces rather than what reads nicely:
+	//
+	//   - "Ctrl+c", not "Ctrl+C". The decoder reports Ctrl-C as Ctrl+'c', and
+	//     ADR 0009's amendment 4 says a Shift-modified rune is a DIFFERENT chord
+	//     rather than a spelling of the same one, so "Ctrl+C" would be a binding
+	//     no terminal sends. The help therefore prints "Ctrl+c", which round-trips
+	//     through ParseChord and is the chord Ctrl-C actually is.
+	//   - "Q" alongside "q", because the ring this example replaced accepted both
+	//     and a binding that quietly stops accepting one is a regression a reader
+	//     would report as a broken key.
+	//   - "Backtab", because that is what the decoder calls Shift-Tab and what
+	//     Chord.String prints. The prose used to call it "shift-tab"; the hint
+	//     says what the keymap calls it, which is the whole point.
+	for _, spec := range []struct {
+		id     keymap.CommandID
+		scope  keymap.Scope
+		owner  termmosaic.Widget
+		chords []string
+	}{
+		// The application's own keys: live everywhere, owned by nobody.
+		{cmdQuit, keymap.ScopeGlobal, nil, []string{"q", "Q", "Esc", "Ctrl+c"}},
+		{cmdHelp, keymap.ScopeGlobal, nil, []string{"?"}},
+		// This screen's focus ring: live while this block is the current screen.
+		{cmdBack, keymap.ScopeScreen, h, []string{"Left", "Up", "Backtab"}},
+		{cmdNext, keymap.ScopeScreen, h, []string{"Right", "Down", "Tab"}},
+		{cmdFirst, keymap.ScopeScreen, h, []string{"Home"}},
+		{cmdLast, keymap.ScopeScreen, h, []string{"End"}},
+	} {
+		for _, s := range spec.chords {
+			// A malformed binding string is a programming error in a literal
+			// four lines above, so it panics here rather than being carried
+			// around as an error a caller has to remember to check.
+			if err := km.BindString(s, spec.id, spec.scope, spec.owner); err != nil {
+				panic("hello: " + err.Error())
+			}
+		}
+	}
+
+	km.SetScreen(h)
+	// hello is not keymap.Commandable — the facts are cells it draws, not widgets
+	// with bindings of their own — so Attach contributes nothing. It is still
+	// called, because it is what records h as an attached widget, and an
+	// unattached owner is a Warnings entry.
+	km.Attach(h)
+	km.Seal()
+	return km
 }
 
 // newChrome returns the block's chrome — border, background, padding — for a
@@ -811,58 +997,101 @@ func (h *hello) writeIntIn(buf *buffer.Buffer, x, x1, y, v int) int {
 	}
 }
 
-// helpPair is the two-row key help: two KeyHints, because KeyHint is a one-line
-// widget and a two-line hint needs two of them.
+// helpPanel is the key help '?' toggles: one KeyHint per line of helpLines,
+// because KeyHint is a one-line widget and a three-line hint needs three of
+// them.
 //
-// It is a type rather than two fields so that showing and hiding the help is one
-// field access and cannot be done halfway — a help with only its first line on
-// screen is the kind of half-state that survives a refactor.
-type helpPair struct {
-	nav, exit *form.KeyHint
+// It is a type rather than a slice field so that showing and hiding the help is
+// one field access and cannot be done halfway — a help with only its first line
+// on screen is the kind of half-state that survives a refactor.
+type helpPanel struct {
+	lines []*form.KeyHint
 }
 
-// newHelpPair builds the two lines.
+// newHelpPanel builds one line per helpLines entry, each fed from the registry
+// rather than from a literal.
 //
-// The bindings are written out here rather than derived from a key table because
-// a key table the example also dispatches on would be a second source of truth
-// for the key contract, and the whole point of the contract being written down is
-// that the two cannot disagree. The tests assert that Handle accepts exactly the
-// bindings these two lines name.
-func newHelpPair(helpSt, keySt, bg buffer.Style) *helpPair {
-	p := &helpPair{
-		nav:  form.NewKeyHint(buffer.Rect{}, []form.Binding{{Key: "move", Help: helpNav}}),
-		exit: form.NewKeyHint(buffer.Rect{}, []form.Binding{{Key: "help", Help: helpExit}}),
-	}
-	for _, k := range []*form.KeyHint{p.nav, p.exit} {
+// This is the ADR 0009 discoverability path end to end: DescribeGrouped is asked
+// what this screen's context can do, the rows for this line's commands are picked
+// out of that answer, and KeyHint.SetEntries turns them into bindings. Nothing
+// below names a chord, so a renamed key changes this panel on the next
+// construction.
+//
+// DescribeGrouped and not Describe, because a help line is a hint rather than a
+// key list: it is the query whose one command is one row, so a command with three
+// chords contributes one bracketed key column instead of three identical
+// descriptions. The overlay is where Describe's per-chord shape would belong.
+func newHelpPanel(h *hello, helpSt, keySt, bg buffer.Style) *helpPanel {
+	p := &helpPanel{lines: make([]*form.KeyHint, 0, len(helpLines))}
+	entries := h.km.DescribeGrouped(keymap.ScopeScreen)
+	for _, ids := range helpLines {
+		k := form.NewKeyHint(buffer.Rect{}, nil)
+		k.SetEntries(entriesFor(entries, ids))
 		k.KeyStyle = keySt
 		k.HelpStyle = helpSt
 		k.SeparatorStyle = helpSt
 		k.Background = bg
+		p.lines = append(p.lines, k)
 	}
 	return p
 }
 
-// Draw paints the two lines into the top row of r.
+// Draw paints the lines into the rows of r, in order.
 //
-// The rect is given rather than remembered so that the two hints cannot disagree
-// about where they are: KeyHint caches its line against its own bounds, and two
-// widgets handed the same rect here are two caches with one key.
-func (p *helpPair) Draw(buf *buffer.Buffer, r buffer.Rect) {
-	if r.Empty() {
-		return
+// The rect is given rather than remembered so that the hints cannot disagree
+// about where they are: KeyHint caches its line against its own bounds, and
+// several widgets handed rows of the same rect here are several caches with one
+// key.
+func (p *helpPanel) Draw(buf *buffer.Buffer, r buffer.Rect) {
+	for i, k := range p.lines {
+		if i >= r.H {
+			// Fewer rows than lines: stop at the LAST line rather than the
+			// first, because the quit binding is the one whose absence leaves
+			// the reader with no way out that the panel explains.
+			break
+		}
+		k.SetBounds(buffer.Rect{X: r.X, Y: r.Y + i, W: r.W, H: 1})
+		k.Draw(buf)
 	}
-	first := buffer.Rect{X: r.X, Y: r.Y, W: r.W, H: 1}
-	if r.H > 1 {
-		p.nav.SetBounds(first)
-		p.nav.Draw(buf)
-		p.exit.SetBounds(buffer.Rect{X: r.X, Y: r.Y + 1, W: r.W, H: 1})
-		p.exit.Draw(buf)
-		return
+}
+
+// entriesFor picks the rows for ids out of a DescribeGrouped list, in the order
+// asked for. A command that is not present yields nothing rather than a blank
+// row, so a command removed from the registry leaves no trace on screen instead
+// of a description with no key beside it.
+func entriesFor(entries []keymap.Entry, ids []keymap.CommandID) []keymap.Entry {
+	byID := make(map[keymap.CommandID]keymap.Entry, len(entries))
+	for _, e := range entries {
+		byID[e.ID] = e
 	}
-	// One row: the FIRST line only, because the navigation bindings are the ones
-	// whose absence leaves the reader stuck rather than merely uninformed.
-	p.nav.SetBounds(first)
-	p.nav.Draw(buf)
+	out := make([]keymap.Entry, 0, len(ids))
+	for _, id := range ids {
+		if e, ok := byID[id]; ok {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// newHintLine builds the pinned hint: the registry's answer for hintCommands, on
+// one line.
+//
+// It is a KeyHint like the help's, because it is the same kind of widget with
+// the same accessibility rule — the key is bracketed so the line reads without
+// colour — and using a different widget for the same job is how an example ends
+// up with two spellings of one idea.
+func newHintLine(h *hello, st, bg buffer.Style) *form.KeyHint {
+	k := form.NewKeyHint(buffer.Rect{}, nil)
+	k.SetEntries(entriesFor(h.km.DescribeGrouped(keymap.ScopeScreen), hintCommands))
+	// One accent-coloured line, as before: the hint is a single sentence about the
+	// program rather than a table, and the separator is the middot that sentence
+	// used to be written with.
+	k.KeyStyle = st
+	k.HelpStyle = st
+	k.SeparatorStyle = st
+	k.Sep = "  ·  "
+	k.Background = bg
+	return k
 }
 
 // focusMark is the marker drawn in the focused fact's gutter.
@@ -882,70 +1111,22 @@ func (h *hello) FocusIndex() int { return h.focus }
 // HelpOpen reports whether the key help is showing.
 func (h *hello) HelpOpen() bool { return h.helpOpen }
 
-// Handle moves the focus marker, toggles the help, and consumes the keys it acts
-// on.
+// Handle claims nothing.
 //
-// It is the whole of the example's key contract, and it is written as a routing
-// table rather than as a widget tree's focus ring because there is nothing to
-// route: the facts are cells this widget draws itself, not catalog widgets with
-// their own Handle. An example that wanted a real focus ring over real widgets
-// would compose widgets/form's Select instead, which is what examples/markets
-// does for its currency pair.
+// It used to be the example's whole key contract — a switch on ev.Key and a
+// second switch on the modifiers — and it is now empty, because every key this
+// example answers to is a command in km and ADR 0009 §2's order tries the keymap
+// first. Keeping the switch would have been the exact failure the ADR names in
+// its bad list: two mechanisms answering one key, with the winner whichever the
+// reader guesses, and a hint line derived from the registry while a switch
+// underneath answered something else.
 //
-// Two conventions, both about honesty rather than mechanics:
-//
-//   - A key it does not act on is NOT consumed. Returning true for a key that
-//     changed nothing would make the caller believe the example had handled it.
-//   - The quit keys ARE consumed even though this method does not quit, because
-//     the caller does and would otherwise see a key it had already dealt with.
-func (h *hello) Handle(ev termmosaic.Event) bool {
-	if ev.Kind != termmosaic.EventKey {
-		// A resize belongs to the application, which recomputes bounds and resizes
-		// the renderer; a mouse event belongs to nobody here, because the facts are
-		// not hit targets and claiming one would be a lie about what is clickable.
-		return false
-	}
-	switch ev.Key {
-	case termmosaic.KeyLeft, termmosaic.KeyUp:
-		h.moveFocus(-1)
-		return true
-	case termmosaic.KeyRight, termmosaic.KeyDown:
-		h.moveFocus(1)
-		return true
-	case termmosaic.KeyTab:
-		h.moveFocus(1)
-		return true
-	case termmosaic.KeyBacktab:
-		h.moveFocus(-1)
-		return true
-	case termmosaic.KeyHome:
-		h.setFocus(0)
-		return true
-	case termmosaic.KeyEnd:
-		h.setFocus(len(h.facts) - 1)
-		return true
-	case termmosaic.KeyEscape:
-		return true // the caller quits; see run
-	}
-	// A modified rune is a CHORD, not the bare key, which is why the modifiers are
-	// checked rather than only the rune: ctrl-r must not be read as 'r', and a bare
-	// 0x03 must not be read as ctrl-c. The decoder has already made that distinction
-	// — Ctrl-C arrives as Ctrl+'c' rather than as 0x03 — so the check is on the
-	// decoder's own vocabulary rather than on bytes.
-	switch {
-	case ev.Mod == termmosaic.ModCtrl && (ev.Rune == 'c' || ev.Rune == 'C'):
-		return true
-	case ev.Mod == 0:
-		switch ev.Rune {
-		case 'q', 'Q':
-			return true // the caller quits; see run
-		case '?':
-			h.toggleHelp()
-			return true
-		}
-	}
-	return false
-}
+// It stays a method because it is the fallback the event loop calls when nothing
+// consumed an event, and because an application that put this block under
+// something else needs it to be there and honest. The facts are not hit targets,
+// so a mouse event is not claimed either; claiming one would be a lie about what
+// is clickable, and the registry agrees — hello is not keymap.Clickable.
+func (h *hello) Handle(termmosaic.Event) bool { return false }
 
 // toggleHelp shows or hides the key help and invalidates the layout cache.
 //
@@ -1036,7 +1217,19 @@ func run() (err error) {
 	// positions it, it is just never visible.
 	r.SetCursor(render.Cursor{Valid: true, Visible: false})
 
-	root := newHello(rootBounds(w, h), caps.ColourDepth())
+	// quit is closed by whichever goroutine decides the program is finished.
+	// Both the input loop and a signal handler may want to stop the program, and
+	// closing a channel twice panics, so the close goes through sync.Once.
+	//
+	// It is declared BEFORE the root because the root's command registry needs
+	// it: app.quit's handler is this function, so the widget asks the application
+	// to stop rather than deciding for itself. The order of two blocks of
+	// allocation-free setup is the only thing that moved.
+	quit := make(chan struct{})
+	var quitOnce sync.Once
+	stop := func() { quitOnce.Do(func() { close(quit) }) }
+
+	root := newHello(rootBounds(w, h), caps.ColourDepth(), stop)
 	r.SetRoot(root)
 
 	if err := t.EnterRawMode(); err != nil {
@@ -1049,13 +1242,6 @@ func run() (err error) {
 	if err := r.Reset(); err != nil {
 		return err
 	}
-
-	// quit is closed by whichever goroutine decides the program is finished.
-	// Both the input loop and a signal handler may want to stop the program, and
-	// closing a channel twice panics, so the close goes through sync.Once.
-	quit := make(chan struct{})
-	var quitOnce sync.Once
-	stop := func() { quitOnce.Do(func() { close(quit) }) }
 
 	// Input. The Source is built AFTER raw mode, because the kitty keyboard query
 	// it sends is answered on the input stream and is meaningless without raw
@@ -1099,41 +1285,70 @@ func run() (err error) {
 					return
 				}
 				switch ev.Kind {
-				case termmosaic.EventKey:
-					if isQuitKey(ev) {
-						stop()
-						return
-					}
-					// Everything else goes to the widget, ON THE RENDER GOROUTINE.
-					// Handle writes the focus index and the help flag and Draw reads
-					// both, so calling it here would be a data race between the input
-					// goroutine and the frame path. Post is the framework's own answer
-					// to exactly that (ADR 0003), and the reason this example posts
-					// rather than calling Handle directly is that it is the pattern an
-					// application is expected to copy.
+				case termmosaic.EventKey, termmosaic.EventMouse:
+					// ADR 0009 §2's order, all of it. The keymap is asked
+					// first; a key it does not claim falls through to the
+					// tree. A mouse event is offered to the registry too,
+					// because a click is a command when the widget under it
+					// says so — hello does not, so it falls through and the
+					// facts stay the non-targets they have always been.
+					//
+					// The whole thing is POSTED rather than run here, because
+					// a command's Run writes the focus index and the help flag
+					// and Draw reads both: running it on the input goroutine
+					// would be a data race against the frame path. Post is the
+					// framework's own answer to exactly that (ADR 0003), and
+					// it is the pattern an application is expected to copy —
+					// which is also why Dispatch is called here and not by
+					// the framework: the framework owns decoding, the
+					// application owns when its own state may be touched.
 					key := ev
 					r.Post(func() {
+						if _, consumed := root.km.Dispatch(key, root); consumed {
+							// A consumed key changed the widget's state,
+							// or ended the program, so the frame that
+							// described the old state is stale.
+							// InvalidateAll rather than a sub-rectangle:
+							// the marker moves between facts, and
+							// naming the two rects it could move between
+							// is a cache this example has no reason to
+							// keep.
+							r.InvalidateAll()
+							return
+						}
+						// Unconsumed: the tree, exactly as ADR 0003's
+						// frame pipeline says. hello claims nothing, so
+						// this is the whole of the fall-through and it
+						// exists to show the ordering rather than to do
+						// anything.
 						if root.Handle(key) {
-							// A handled key changed the widget's state, so the frame
-							// that described the old state is stale. InvalidateAll
-							// rather than a sub-rectangle: the marker moves between
-							// facts, and naming the two rects it could move between
-							// is a cache this example has no reason to keep.
 							r.InvalidateAll()
 						}
 					})
 				case termmosaic.EventResize:
-					// ADR 0007 §5's order, and nothing else between the two
-					// steps: recompute the root's rectangle, then resize the
-					// renderer. Renderer.Resize never draws, so the whole
-					// interval between the event and the next Render is
-					// available to recompute bounds, and Resize already forces a
-					// full repaint — so the r.InvalidateAll() that used to sit
-					// here was redundant. The pacer then decides when to paint,
-					// which is what coalesces a drag burst into one repaint.
+					// A resize is NOT a command — ADR 0009 §2 rule 1 — and
+					// ADR 0007 §5's order is unchanged: recompute the root's
+					// rectangle, then resize the renderer.
+					// Renderer.Resize never draws, so the whole interval
+					// between the event and the next Render is available to
+					// recompute bounds, and Resize already forces a full
+					// repaint — so the r.InvalidateAll() that used to sit
+					// here was redundant. The pacer then decides when to
+					// paint, which is what coalesces a drag burst into one
+					// repaint.
 					w, h = ev.Size.W, ev.Size.H
 					root.bounds = rootBounds(w, h)
 					r.Resize(w, h)
+				default:
+					// A paste, a focus change or a compose event goes
+					// STRAIGHT to the tree and never through Dispatch
+					// (ADR 0009 §2 step 1). That is ADR 0005 §4's paste
+					// rule enforced one layer up: a paste is one event
+					// however long it is, and re-expanding its characters
+					// into a resolution loop is the cheapest mistake to
+					// make and the most expensive to discover.
+					other := ev
+					r.Post(func() { root.Handle(other) })
 				}
 			}
 		}
@@ -1167,25 +1382,6 @@ func withProbe(cfg input.Config, sink termmosaic.Sink) input.Config {
 		return sink.Flush()
 	}
 	return cfg
-}
-
-// isQuitKey reports whether ev should end the example.
-//
-// These are the keys a person actually reaches for, expressed in the decoder's
-// vocabulary rather than as raw bytes: Ctrl-C arrives as Ctrl+'c' rather than as
-// 0x03, and Escape arrives as KeyEscape only after the decoder has waited out its
-// ambiguity delay. The raw-byte version could not tell an arrow key from four
-// unrelated bytes.
-func isQuitKey(ev termmosaic.Event) bool {
-	switch {
-	case ev.Key == termmosaic.KeyEscape:
-		return true
-	case ev.Rune == 'q' || ev.Rune == 'Q':
-		return ev.Mod == 0
-	case ev.Rune == 'c':
-		return ev.Mod == termmosaic.ModCtrl
-	}
-	return false
 }
 
 func isTerminal(f *os.File) bool {

@@ -4,6 +4,6 @@
  │ > frame 1                          │
  │   depth truecolor                  │
  │   cols  1 column                   │
- │ press q to quit  ·  ? keys  ·  ar… │
+ │ [Q q Esc Ctrl+c] quit  ·  [?] tog… │
  │                                    │
  └────────────────────────────────────┘

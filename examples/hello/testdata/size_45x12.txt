@@ -6,6 +6,6 @@
  │   cols  1 column                        │
  │ hello from termmosaic — resize this te… │
  │                                         │
- │ press q to quit  ·  ? keys  ·  arrows … │
+ │ [Q q Esc Ctrl+c] quit  ·  [?] toggle t… │
  │                                         │
  └─────────────────────────────────────────┘

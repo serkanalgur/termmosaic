@@ -8,6 +8,6 @@
  │ changes, so a resize repaints in full and a steady     │
  │                                                        │
  │                                                        │
- │ press q to quit  ·  ? keys  ·  arrows move focus       │
+ │ [Q q Esc Ctrl+c] quit  ·  [?] toggle the keys          │
  │                                                        │
  └────────────────────────────────────────────────────────┘

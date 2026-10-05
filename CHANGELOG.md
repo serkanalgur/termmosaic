@@ -30,6 +30,60 @@ reversed before v1.0.0.
 
 ---
 
+## [0.6.1] — 2026-10-05
+
+A minor bump, and the reason is that the first application to actually use
+`keymap` found a shape the specification had not considered.
+
+### Added
+
+- **`keymap.Registry.DescribeGrouped(scope)`** — one `Entry` per **command**,
+  carrying every chord in scope for it in canonical order. `Describe` remains
+  one `Entry` per **chord**, which is what ADR 0009 §9 specifies for a command
+  palette, where a row consumes `Chords[0]`.
+  The difference is the consumer, not the data: `form.KeyHint.SetEntries` joins
+  an entry's chords into one label, so a hint line fed `Describe` printed a
+  three-chord command's description **three times**. `examples/hello` worked
+  around it with its own thirteen-line merge; that is now a framework function
+  and the workaround is gone.
+- Both orderings are inherited rather than re-sorted: `DescribeGrouped` merges
+  `Describe`'s already-sorted rows, so entry order and chord order cannot drift
+  apart from each other or from `Describe`.
+
+### Changed
+
+- **`examples/hello` dispatches through `keymap`.** Its key contract is a real
+  registry — six commands, twelve chords, with `q`/`Esc`/`Ctrl+c` and `?` at
+  `ScopeGlobal` and the navigation at `ScopeScreen` — and both the pinned hint
+  line and the `?` overlay render from the registry. This is the first use of
+  `KeyHint.SetEntries` in the tree, and it **retires risk 5 of ADR 0009**.
+  The hand-written hint string and the test that checked it against `Handle`
+  are both gone: a binding and its description are now written **once**, and
+  `Widget.Handle` claims nothing.
+  The navigation keys are at `ScopeScreen`, not `ScopeFocus`, deliberately:
+  nothing in this example holds keyboard focus, so focus-scoping them would make
+  them go silently dead the moment anything else took focus. Screen scope
+  degrades correctly — a focused child added later binds its own arrows and
+  outranks them by specificity, with no change here.
+
+### Known Limitations
+
+- **`Registry` has no `SetFocus`,** so `Describe(ScopeFocus)` returns an
+  incomplete answer before the first dispatch — the registry only learns what
+  is focused by dispatching. An application with real focusable widgets cannot
+  yet answer "what can I do right now" for the focused one. Deferred to v1.1;
+  `examples/hello` avoids it by using `ScopeScreen`.
+- **`Attach` must be called even when no widget implements `Commandable`,**
+  purely so a scope-bound owner is `IsAttached`, because a registry that
+  reports no `Warnings` requires it.
+- **The palette is still not built.** ADR 0009 §9 scopes it out deliberately.
+- **`examples/markets` and `examples/dashboard` still dispatch by their own
+  `switch`,** so the mixed-mechanism risk ADR 0009 names is live in two of
+  three examples.
+- `term/terminal_windows_test.go` is still **compile-only** verified
+  (`GOOS=windows go vet`) and has never been executed; the Windows backend still
+  runs zero tests at runtime.
+
 ## [0.6.0] — 2026-10-05
 
 A minor bump, and the reason is the longest-deferred item in the project:
@@ -1002,6 +1056,7 @@ Two performance claims that this release turns from assertion into measurement:
   **60 cursor moves and 19,443 bytes, 3.12× the narrow frame** rather than 11×.
   The ASCII path is unchanged. See ADR 0008's amendment, finding 4.
 
+[0.6.1]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.6.1
 [0.6.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.6.0
 [0.5.2]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.5.2
 [0.5.1]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.5.1

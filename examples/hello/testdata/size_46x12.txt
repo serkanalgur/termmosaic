@@ -6,6 +6,6 @@
  │ hello from termmosaic — resize this ter… │
  │ the layout above is recomputed only when │
  │ Bounds() changes, so a resize repaints   │
- │ press q to quit  ·  ? keys  ·  arrows m… │
+ │ [Q q Esc Ctrl+c] quit  ·  [?] toggle th… │
  │                                          │
  └──────────────────────────────────────────┘
