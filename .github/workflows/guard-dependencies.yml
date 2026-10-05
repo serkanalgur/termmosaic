@@ -4,9 +4,11 @@ on:
   push:
     branches: [main]
   schedule:
-    # ADR 0001 records golang.org/x/term as pinned to v0.27.0 because @latest
-    # requires Go 1.26. It is not load-bearing and nothing in the code enforces
-    # the pin, so re-check weekly and open an issue when it can be released.
+    # ADR 0001 records golang.org/x/term as pinned to v0.29.0, the newest
+    # release still declaring `go 1.23`. It is not load-bearing and nothing in
+    # the code enforces the pin, so re-check weekly and open an issue when a
+    # newer floor-compatible release exists. Note that a `latest` well past
+    # v0.29.0 is expected and not itself a reason to move — see the issue body.
     - cron: "17 6 * * 1"
 
 # issues: write is scoped to this one job, and only the issue-opening step needs
@@ -115,7 +117,7 @@ jobs:
                 `- pinned: \`${pinned}\``,
                 `- latest: \`${latest}\``,
                 '',
-                'ADR 0001 pins the dependency because `@latest` required a newer Go than this module declares. If `@latest` now builds against the supported floor, raise that floor and unpin.',
+                'ADR 0001 pins the dependency because releases past a known boundary declare a `go` directive higher than this module\'s, and `go mod` then rewrites our own floor to match. Compare against that boundary, not against `@latest`: `x/term` through v0.29.0 declares `go 1.18`, v0.30.0 declares `go 1.23.0` (the trailing `.0` makes it a toolchain directive, so it still moves our `go 1.23` floor), and v0.35.0 and later declare `go 1.24.0` or higher. So a `latest` far above v0.29.0 is expected and is not on its own a reason to move. Find the newest release between the pinned version and `latest` whose directive still leaves our floor at `go 1.23`, and bump to it. Note that reading version numbers will not settle this: test with `go get` in a scratch module and read the resulting `go` line. Only raise the module\'s Go floor, and unpin entirely, when that is a change you have separately agreed to.',
                 '',
                 '_Opened automatically by `.github/workflows/guard-dependencies.yml`. A repeat run seeing the same pinned version adds nothing and stays quiet._',
               ].join('\n'),

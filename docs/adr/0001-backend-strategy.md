@@ -5,6 +5,8 @@
 - **Amended:** 2026-10-04 — recorded the `golang.org/x/term` version pin and the
   verified `CGO_ENABLED=0` cross-compilation status, including the fact that the
   Windows backend is a loud stub.
+- **Amended:** 2026-10-05 — bumped the pin to `x/term` v0.29.0 / `x/sys` v0.30.0
+  and recorded the measured floor boundary; the pin itself is unchanged.
 - **Decides:** [STATUS.md](../STATUS.md) — Core architecture / Backend strategy
 - **Supersedes:** the "Option A / B / C" section of the former
   ARCHITECTURE.md "Decision 1".
@@ -205,8 +207,31 @@ The renderer depends only on `Sink`. The widget/test harness depends only on
 
 | Module | Version | Why |
 |---|---|---|
-| `golang.org/x/sys` | v0.28.0 | Current release compatible with the Go 1.23 floor. |
-| `golang.org/x/term` | **v0.27.0 (pinned)** | `@latest` requires **Go 1.26**, which would break the Go 1.23 floor this ADR commits to. |
+| `golang.org/x/sys` | v0.30.0 | Current release compatible with the Go 1.23 floor. |
+| `golang.org/x/term` | **v0.29.0 (pinned)** | The newest release that keeps the Go 1.23 floor. v0.30.0 and later raise it — see the boundary below. |
+
+The boundary is where a release's **own** `go` directive stops being compatible with
+this module's floor. `go mod` raises this module's floor to the highest directive in
+the build, so a dependency declaring a higher one moves us off `go 1.23`:
+
+| `x/term` | Its own `go` directive | Effect on this module |
+|---|---|---|
+| v0.28.0 | `go 1.18` | floor stays `go 1.23` |
+| **v0.29.0** | **`go 1.18`** | **floor stays `go 1.23` — newest compatible** |
+| v0.30.0 | `go 1.23.0` | floor becomes `go 1.23.0` |
+| v0.35.0 | `go 1.24.0` | floor becomes `go 1.24.0` |
+| v0.46.0 (`@latest`) | `go 1.26.0` | floor becomes `go 1.26.0` |
+
+Note the subtlety at v0.30.0: it declares only `go 1.23.0`, which looks compatible
+with a `go 1.23` floor and is not. The trailing `.0` makes it a toolchain directive
+rather than a language-version one, and `go mod` rewrites our own `go` line to
+`go 1.23.0`. That single character is the whole boundary — which is why the check
+below is a `go get` in a scratch module rather than a reading of the version number.
+
+So the pin is still required and still correct, and `@latest` remains unusable —
+but "unusable" is a statement about v0.30.0 and above, not a permanent property of
+the module. The next person to check this should compare against **v0.30.0**, not
+against `@latest`.
 
 `x/term` is a direct dependency only because `term/terminal_unix.go` needs its
 raw-mode helper; it is not load-bearing for anything else in the design.
@@ -223,7 +248,7 @@ cited as evidence that version floors are fine.
 
 **This is a real, ongoing maintenance cost, not a one-time note.** The pin has
 to be re-checked every time `x/term` publishes: someone must notice the new
-release, confirm whether it still requires Go 1.26, and decide whether to bump.
+release, confirm whether it still declares `go 1.23`, and decide whether to bump.
 Nothing enforces it. The trigger for unpinning is a Go version-floor increase
 that we have separately agreed to — at which point this becomes a routine
 `go get -u`. Until then, expect this line to need revisiting each quarter.
