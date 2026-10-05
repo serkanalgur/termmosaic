@@ -87,21 +87,37 @@ jobs:
             const marker = `<!-- pin-guard:x-term pinned=${pinned} -->`;
             const title = 'golang.org/x/term pin can be lifted';
 
-            const existing = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'open',
-              per_page: 100,
-            });
-            // Pull requests come back in the same listing and must be ignored: a
-            // PR that happens to share the title is not an issue to suppress.
-            const prior = existing.data.find(
-              (i) =>
-                i.pull_request === undefined &&
-                (i.title === title || (i.body || '').includes(marker))
-            );
+            // Search BOTH open and closed issues, newest page first. Searching
+            // only open ones makes closing an answered issue guarantee it gets
+            // reopened on the next run: that is exactly what happened to #7 and
+            // #9, which asked a question already answered in #4.
+            //
+            // The marker embeds the pinned version, so a genuinely newer
+            // pinned/latest pair still opens a new issue. A closed issue with the
+            // SAME marker means "already asked and answered at this pin", which
+            // is the case that must stay quiet.
+            const seen = new Map();
+            for (const state of ['open', 'closed']) {
+              const page = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state,
+                per_page: 100,
+              });
+              // Pull requests come back in the same listing and must be ignored: a
+              // PR that happens to share the title is not an issue to suppress.
+              for (const i of page.data) {
+                if (i.pull_request !== undefined) continue;
+                if (i.title === title || (i.body || '').includes(marker)) {
+                  if (!seen.has(i.number)) seen.set(i.number, i);
+                }
+              }
+            }
+            const prior = [...seen.values()].sort((a, b) => a.number - b.number)[0];
             if (prior) {
-              core.info(`already tracked by #${prior.number}; leaving it alone.`);
+              core.info(
+                `already tracked by #${prior.number} (${prior.state}); leaving it alone.`
+              );
               return;
             }
 
