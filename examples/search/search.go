@@ -1148,12 +1148,12 @@ func solveBands(inner buffer.Rect, y, rest int, wide, showDetail bool) (table, d
 	if wide {
 		xs := layout.Solve(layout.Horizontal, sideBySide(), bandGap, inner.W)
 		return buffer.Rect{
-			X: inner.X + layout.Offset(xs, bandGap, 0),
-			Y: y, W: xs[0], H: rest,
-		}, buffer.Rect{
-			X: inner.X + layout.Offset(xs, bandGap, 2),
-			Y: y, W: xs[2], H: rest,
-		}
+				X: inner.X + layout.Offset(xs, bandGap, 0),
+				Y: y, W: xs[0], H: rest,
+			}, buffer.Rect{
+				X: inner.X + layout.Offset(xs, bandGap, 2),
+				Y: y, W: xs[2], H: rest,
+			}
 	}
 	h := rest - detailRows - bandGap
 	if h < resultMinH {
