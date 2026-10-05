@@ -566,3 +566,230 @@ The bar this project is measured against:
   **MET** — [CHANGELOG.md](../CHANGELOG.md)'s Known Limitations section, plus
   the "Known Limitations" in [docs/adr/](adr/README.md) and the gaps named in
   this document.
+---
+
+# The road to v1.0.0
+
+Written before the work, so the order and the reasoning are on record rather
+than reconstructed afterwards. It states what must close, what deliberately
+will not, and what is deliberately later.
+
+## The verdict
+
+**v1.0.0 is not honest today.** Three things make it so, and they are
+independent — closing any one leaves the other two:
+
+1. **The project's own bar is not met, by the project's own words.** The
+   "Every widget has a runnable example" criterion above reads **NOT MET, and
+   not close**, and calls itself the largest unmet item. Shipping v1.0.0
+   against a bar this document declares unmet is a contradiction in the
+   release, not a judgement call.
+2. **The most consequential architectural decision has never been
+   implemented**, and has already slipped its stated version twice. `keymap` is
+   DECIDED and Accepted, the package does not exist, and both named tests do
+   not exist. A v1.0.0 that freezes the architecture while the one decision
+   about *how an application binds a key* is a spec on disk is freezing the
+   wrong layer first.
+3. **CI green is unevidenced on all three platforms** — the last green badge
+   attests to the previous workflow configuration.
+
+What is genuinely ready: the *signatures*. This codebase has done the hard part
+of stability design already, and done it deliberately.
+
+| Already frozen by decision **and** by a mechanical check | Where |
+|---|---|
+| `Widget` is four methods and stays four — no method added, changed or deprecated | ADR 0007, ADR 0009 |
+| `Event` is append-only; `Key`'s iota block is extended only at the end | [ADR 0005](adr/0005-input-decoding.md) §10 |
+| Padding-free 16-byte `Cell`, 12-byte `Style`, 16-byte `Chord`, `unsafe.Sizeof(Event{})` | test-pinned sizes |
+| `Cells()` is gone; `RowBytes` panics on a view; `diff.Frame` carries `*buffer.Buffer` so old call sites cannot compile | [ADR 0006](adr/0006-subbuffer-cell-access.md) |
+
+That last row is the best stability work in the repo and it is already done:
+a rule enforced by a *type* rather than a comment.
+
+**So the v1.0 promise is really a promise about pixel output, not signatures.**
+The signatures are in good shape. What is not frozen is what a widget *draws*.
+
+## Decision: v1.0.0 supports Linux and macOS
+
+**Decided 2026-10-05.** The Windows backend stays a loud-error stub, and the
+supported matrix is narrowed to say so.
+
+The reasoning, since it amends a criterion above rather than satisfying it:
+[ADR 0001](adr/0001-backend-strategy.md) decides Windows is **late** and calls
+it the "highest-probability source of v1 slippage". The stub is not an
+incomplete feature but the correct posture — "Rather than ship a half-working
+Windows console that passes its own tests on a developer's machine, this stub
+fails every operation loudly so the gap stays visible." A rushed Windows
+backend written to hit a release date is the exact failure the stub exists to
+prevent.
+
+The alternative — amending the *release statement* rather than the code — is
+available at zero engineering cost, and is the honest one. Nothing in the v1.0
+promise requires a platform that has not been built.
+
+**Consequences, all of them required:**
+
+- The "CI green on Linux, macOS, and Windows" criterion is amended to Linux and
+  macOS, with this reason.
+- The Windows CI job either goes or is relabelled **cross-compile-only**,
+  asserting exactly that ADR 0001 commits to and nothing more.
+- "Linux and macOS" appears in the **first screen** of the README, not in
+  Known Limitations. A user who builds for Windows, gets `ErrWindowsStub`, and
+  reads it in a footnote has been misled by the release.
+- `Terminal` and `Sink` stay unchanged, so a Windows backend — ours, or a
+  build-tagged one — is additive later and touches no frozen signature.
+
+## What must close before v1.0.0
+
+| # | Work | Why it gates |
+|---|---|---|
+| 1 | **Green CI evidence** on the current configuration | Minutes. Every other claim rests on it. |
+| 2 | **Behaviour audit of all 24 widgets** | Three of five releases so far exist because of this defect class. Every find after v1.0.0 is a v1.1.0. |
+| 3 | **Cache-poisoning debug mode** (ADR 0007's expensive half) | What makes #2 mechanical rather than a matter of review. Highest leverage per hour here. |
+| 4 | **`keymap`** (ADR 0009), with the two named tests | Slipped twice. `KeyHint`'s help surface would otherwise freeze **empty**, and `Describe` is the answer to the first question an adopter asks. |
+| 5 | **Mouse routing decision + the three wheel defects** | `Select`, `Radio` and `Tabs` consume the wheel without hit-testing, while `Button` and `Toggle` do. See below. |
+| 6 | **Colour model: decide it** | A PROPOSED row cannot survive the freeze: if the quantiser is later replaced, every program's 256/16-colour output changes, and that is a v1.1.0 in the first release. |
+| 7 | **`func Example` per widget** | The largest unmet criterion in the project's own bar. Purely additive; zero stability risk. |
+| 8 | **Documentation accuracy pass** | README says "Thirty-plus widgets" against a catalogue of 24, "the eight architecture decisions" against nine, and "Not yet released as a module version" beside a `go get` line. For a project whose product *is* documented honesty, stale headline numbers are a release blocker. |
+| 9 | **Prose freeze** | Status block, platform matrix, stale gate sections, and the `keymap` apology paragraph, which becomes a shipped-feature statement. |
+
+### 5 is bigger than the defect it is filed under
+
+`docs/STATUS.md` records "`form.Tabs` consumes every wheel notch" as a widget
+defect wanting an ADR. It is a **framework contract gap**, and it affects three
+widgets:
+
+| Widget | Bounds-checks the pointer? | Where |
+|---|---|---|
+| `Button` | **yes** | `form/button.go:237` |
+| `Toggle` | **yes** | `form/toggle.go:196` |
+| `Select` | **no** — consumes unconditionally | `form/select.go:261` |
+| `Radio` | **no** — consumes unconditionally | `form/radio.go:254` |
+| `Tabs` | **no** — consumes unconditionally | `form/tabs.go:331` |
+
+The cause is that the framework has no consistent answer to *who gets a mouse
+event*. Applications route every mouse event to the root and let widgets
+disagree: `examples/markets/main.go:317` hands the click to the board, and each
+widget decides for itself. Three guess wrong.
+
+This is not a small thing to defer. [ADR 0009](adr/0009-command-and-keymap.md)
+§6 names mouse hit-testing as **"the one thing widgets are genuinely better at
+than a global registry"** — and it is a deciding reason for Option A. Freezing
+v1.0 with three widgets mishandling exactly that contradicts the project's own
+decision record.
+
+The decision needed: either widgets hit-test themselves as `Button` and
+`Toggle` already do, or the framework provides a hit-test/routing helper and
+documents who owns the event. The first is the smaller change and matches
+existing behaviour; the second is better and is new API.
+
+## What is deliberately not built before v1.0.0
+
+Named here so their absence at v1.0.0 is a decision on record rather than an
+oversight:
+
+- **A Windows console backend** — v1.1+, additive, interfaces unchanged.
+- **A `Form` container** — ADR 0004's solver plus `layout` already covers
+  composition; a `Form` type would be a second way to do the same thing.
+- **IME / preedit** — ADR 0005's deliberate deferral, with three named seams
+  left open (`EventCompose`, the `*Compose` field, the parser entry point). The
+  cost is documented. CJK users get *wrong* behaviour rather than degraded
+  behaviour; that honesty is the deliverable.
+- **Kitty graphics** — currently an OPEN row, which at v1.0.0 would be a standing
+  invitation to argue about scope after the freeze. **Formally decide "no for
+  v1"**, one sentence in an ADR.
+- **Grapheme-cluster composition** — performance is measured and good; only the
+  decision is open, and the failure is cosmetic.
+- **A `Ctrl+K` palette** — ADR 0009 §9 puts it in scope but explicitly not in
+  that ADR. New behaviour in `Menu`/`Dialog`, so a v1.1.0 minor.
+- **TextArea rendered selection, table column selection, pager selection, a
+  redo stack** — additive widget API, all four fine as v1.1.0.
+- **A theme system** — ADR 0008 decides "no theme in v1", with a trigger: the
+  first role two widgets must share.
+- **A wider lint checklist** — real, self-declared, and not a release gate.
+
+The budget freed by not building these is what pays for items 2 through 7.
+
+## Risks to a clean v1.0.0
+
+The release policy promises **no behavioural change in a patch release**, so
+the practical consequence is: **any behavioural defect found after v1.0.0 is a
+v1.1.0.** The risk register is therefore a list of things likely to be found
+late.
+
+1. **Latent instances of the style-application class.** Highest probability by a
+   wide margin — three of five releases were exactly this. The mechanism is
+   per-widget divergence between the style a painter computes and the writer
+   that carries the text, and it applies to every widget with a row painter, not
+   only the three already fixed. Mitigated by items 2 and 3.
+2. **`keymap`'s two mechanisms overlapping in a real application** — a global
+   binding shadowing a widget's own `switch`. Survivable via `Warnings()`, but
+   it is a behaviour change, so v1.1.0, and it is the kind of thing that erodes
+   trust in a stable 1.0. Mitigated by building a mixed-mechanism example
+   *before* the tag.
+3. **`Chord` normalisation disagreeing with a real terminal.** Nothing in its
+   folding rules has met a real tty, and the ADR asks for a byte-stream matrix
+   that has not been run. A normalisation fix is a behaviour change.
+4. **The colour quantiser being wrong in a way nobody looked for** — the direct
+   cost of freezing a PROPOSED row.
+5. **Windows being discovered by a user after v1.0.0.** Mitigated entirely by
+   saying "Linux and macOS" in the first screen.
+6. **Process risk: `keymap` slips a third time.** It has slipped v0.3.0 and
+   v0.4.0. A third slip turns this document's apology into the README of a
+   stable release, which no later patch can repair.
+
+## Two things `keymap` gets right, worth knowing before building it
+
+Recorded because they change the cost, and because `docs/STATUS.md` line 41
+currently reads as if the frozen `Event` union would change. It would not.
+
+- **`Event` is untouched.** ADR 0009's own delta table: a command is resolved
+  *from* an event and never carried inside one, so **no payload is added and the
+  `unsafe.Sizeof(Event{})` guard is unaffected.** `Chord` is a new type in a new
+  package, reachable only through `keymap.Ctx`. STATUS.md's phrase "`Event.Chord`
+  normalisation" is loose shorthand and should be corrected before the freeze —
+  it reads as though a frozen signature moves, which is the one thing that would
+  make this a breaking change.
+- **Everything is additive.** Two new *optional* interfaces (`Commandable`,
+  `Clickable`) and one new method (`KeyHint.SetEntries`). Adding an optional
+  interface is not a breaking change; adding a method to a struct is not either.
+  So shipping `keymap` after v1.0.0 is SemVer-legal — the reasons to build it
+  first are repetition and freezing an untested surface, not SemVer.
+
+## Two stability hazards found while writing this
+
+Neither is in an ADR, and both would freeze by accident.
+
+1. **`widgets/widgettest` is public and therefore frozen by accident.** It
+   appears in no ADR's stability discussion. User test suites will depend on it
+   whether or not that was intended. Decide it: promote it to a decided surface
+   with its own rules, or move it under `internal/` **before** v1.0.0 — before,
+   because afterwards it is frozen and cannot move.
+2. **The variadic constructors are an open-ended signature.** Three of the 25
+   widget constructors take `...` — `NewList(items ...ListItem)`,
+   `NewTable(cols ...Column)`, `NewTree(nodes ...Node)`. That is the friendliest
+   shape for growth and the subtlest stability hazard: behaviour can be added
+   indefinitely without a compile break, so **the API is stable while the
+   product is not.** The v1.0 policy needs one sentence to cover it: *an option
+   may only be additive; no option may alter the behaviour of a program that
+   does not set it.*
+
+## The sequence
+
+```
+1  green CI evidence          ─┐
+3  cache-poisoning mode       ─┤
+2  behaviour audit of 24      ─┴─► mechanical, then human review of what it finds
+
+6  colour model decided       ─┐
+5  mouse routing + 3 wheels   ─┤
+4  keymap (after 2 and 5)     ─┴─► don't add Commandable to a moving widget
+
+7  func Example sweep         ──► 24, parallelisable
+8  documentation accuracy     ─┐
+9  prose freeze               ─┴─► then the tag
+```
+
+Items 1–3 depend on nothing and can start immediately. Items 2 and 3 are the
+long pole in effort; item 4 is the long pole in sequencing, because everything
+downstream of the documentation freeze waits on it.
