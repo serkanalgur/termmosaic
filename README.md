@@ -7,8 +7,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.23%2B-00ADD8.svg)](go.mod)
 
-A terminal UI framework for Go: a cell-buffer renderer plus a catalog of
-ready-to-use widgets.
+A terminal UI framework for Go: a cell-buffer renderer, a catalog of
+ready-to-use widgets, and a command/keymap layer that binds keys to named
+actions without changing a single widget signature.
 
 > **Status: pre-alpha.** The renderer, input layer and the full widget catalog
 > are built and tested — 25 packages, 966 tests, zero-allocation frame path —
@@ -78,6 +79,31 @@ go get github.com/serkanalgur/termmosaic@v0.5.2
 
 `buffer.Buffer` is not on that list and is not a `Widget` — it has no `Bounds`,
 `Draw` or `Handle`. It is what widgets draw into.
+
+### Commands and key bindings
+
+`keymap` is a separate package, not a widget, and it sits **above**
+`Widget.Handle` rather than inside it — `termmosaic.Widget` is still four
+methods and has never changed.
+
+- One named action, reached by a key **or** a menu item **or** application
+  code. A key that resolves to nothing falls through to the tree exactly as
+  before.
+- `ctrl+k` and `Ctrl+K` are **two** chords — Shift is folded into the rune, and
+  a kitty terminal reports them as two gestures. Modifiers are parsed
+  case-insensitively, and `Space` and a literal space are one chord.
+- Resolution is **focus > screen > global**, with no numeric priority. A
+  screen's own `Esc` cannot be stolen by a global binding; a user's override
+  wins within its own scope.
+- **0 allocations** on the dispatch path. `Chord` is a comparable 16-byte
+  struct, so resolution is a map lookup — pinned by
+  `TestDispatchIsZeroAllocation`, not merely intended.
+- Help is `Describe()`, computed from the same tables `Dispatch` walks, so a
+  help row cannot drift from what the key actually does.
+- Widgets participate **optionally**, via `keymap.Commandable` and
+  `keymap.Clickable`. No catalog widget implements either yet, and there is no
+  command palette — both are deliberate, with triggers recorded in
+  [ADR 0009](docs/adr/0009-command-and-keymap.md).
 
 Per-frame cost is flat in item count — this is the claim the catalog exists to
 back up:

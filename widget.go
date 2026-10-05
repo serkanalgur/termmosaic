@@ -27,7 +27,10 @@ type Widget interface {
 	// goroutine (ADR 0003), which the buffer's dirty accumulator provides.
 	Invalidate()
 	// Handle offers the event to the widget and reports whether it consumed it.
-	// Events are offered to the focused widget first, then to the tree.
+	// Events reach a widget only after the application's keymap has declined
+	// them (ADR 0009), so a binding in a keymap shadows a switch in this
+	// widget. A widget's own key handling is therefore the fallback, not the
+	// primary path, and a key that matters to both should be a command.
 	Handle(Event) bool
 }
 

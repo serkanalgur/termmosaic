@@ -281,7 +281,9 @@ type Command struct {
 
 // Ctx is what a command handler is given.
 //
-// It is passed BY VALUE and is 128 bytes. On a path that runs at most a few
+// It is passed BY VALUE and is 128 bytes — see amendment 1: the shipped size
+// is 152, pinned by TestCtxIsOneHundredFiftyTwoBytes.
+// On a path that runs at most a few
 // hundred times per second, against ADR 0002's 16 ms frame budget, that is the
 // same trade ADR 0005 §8 made for the 112-byte Event: the zero-allocation bar
 // is about not allocating, not about struct copies. Passing *Ctx would put an
@@ -1293,3 +1295,70 @@ job, which is why the palette and help consume `Entry` and never `Binding`.
    implemented there.** If either ships without them, the mismatch is discovered
    at integration rather than here. Trigger: the palette's own PR, which is where
    §9's table must be checked line by line.
+## Amendment 2026-10-05 — implemented, and five places the prose was wrong
+
+The `keymap` package was built in v0.6.0. Building it turned up five points
+where this ADR's prose contradicted the code it specified. All five were found
+while writing the implementation, reported rather than worked around, and fixed
+at the source. Original reasoning is preserved above; this section records what
+changed and why. The spec and its errata are deliberately in one document, so
+the next reader sees both.
+
+**1. `Commandable` and `Clickable` live in `keymap`, not in `widget.go`.** §1's
+file map and §"Forced changes to existing code" both put them in the root
+package beside `Focusable` and `Minimizable`, which is where they read most
+naturally. That is the one arrangement §1's own import-cycle rule forbids: a
+root-package interface named for the keymap cannot name `keymap.Ctx` — or
+`keymap.Scope`, or `keymap.Chord` — without the root package importing the
+package that imports it. The two interfaces are therefore declared in
+`keymap/participation.go`. The consequence for an adopter is nil: a widget
+declares `var _ keymap.Commandable = (*MyWidget)(nil)` and the cycle never
+appears in their code. What the root package keeps is its unchanged `Widget`.
+
+**2. `Ctx` is 152 bytes, not 128.** The field list above — `Event` (ADR 0005's
+112 bytes), `Chord` (16), `Focus` (16), `Synthesised` (bool) — sums to 145, and
+Go pads the struct to the 8-byte alignment its largest field requires: 152. The
+prose figure was an estimate written before the fields were fixed, and it was
+optimistic. `TestCtxIsOneHundredFiftyTwoBytes` pins the real size. The argument
+it supports is unaffected: this is a value on a path that runs at most a few
+hundred times per second, and the property that matters is **0 allocations**,
+which `TestDispatchIsZeroAllocation` pins. Passing `*Ctx` would put an escaping
+pointer on that path and turn a stack copy into a heap object per keystroke,
+which is the reason the ADR gives for by-value in the first place.
+
+**3. §2.1's precedence table contradicted itself about overrides, and
+specificity wins.** The table's rank 1 reads "**User override**, any scope" and
+says it "outranks a default *in the same scope*", then goes on to claim a
+`ScopeScreen` override outranks a `ScopeGlobal` default. Those two statements
+describe two different rules: the first is rank-above-everything-within-a-scope,
+the second is specificity-first. Under the first reading, a global `Bind` of
+`Esc` would outrank the dialog's own `Esc` — which is the exact failure the very
+next paragraph argues against. The shipped rule resolves the contradiction the
+way the paragraph does: **scope specificity orders candidates first, and an
+override is the within-scope tiebreak.** So a user's `app.cancel` on `Esc` wins
+in `ScopeGlobal`, and a screen's `Esc` still wins over it. The paragraph was
+right and the row was wrong.
+
+**4. §3's notation table and §3's normalisation disagreed about `Ctrl+k` versus
+`Ctrl+K`.** The notation prose says modifier names are matched
+**case-insensitively**, "which is what makes `ctrl+k` and `Ctrl+K` the same
+binding" — while the written-form table lists only `Ctrl+K` and its canonical
+form, leaving the reader to guess. They are **two distinct chords**, and
+`ParseChord` accepts either spelling. The case is the *key*, not the modifier:
+the terminal reports `Shift+k` as `ModShift` plus the rune `K`, which is a
+different `Chord` from `Ctrl` plus the rune `k`, and folding them would make a
+documented binding unreachable on the terminal that produces it. Modifier names
+themselves (`ctrl`, `Ctrl`, `CTRL`) are case-insensitive on parse and emitted
+capitalised. The table now says so where a reader will look.
+
+**5. `Entry.Chords` has length 1 in `Describe` output, not "every chord bound to
+this command".** §4 describes `Chords` as "the chords currently bound to `id` in
+scope, in canonical order", which reads as a slice that can hold several. What
+ships is **one `Entry` per chord**: `Describe` walks the resolved binding table
+and emits a separate row for each chord, each with a single-element `Chords`.
+That shape is what §9's palette wants — "a palette row is `Entry.Desc` plus
+`Chords[0]`" — and it is what makes a per-chord help row impossible to
+mis-read, at the cost of a command with three bindings producing three rows
+rather than one row with three chords. Both are defensible; the shipped one is
+pinned by `keymap/describe_test.go`. The field's type stays `[]Chord` because
+that is what a `KeyHint` row and a palette row both consume.

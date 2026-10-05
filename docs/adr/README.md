@@ -148,6 +148,14 @@ original stays and a new one supersedes it, so the reasoning history survives.
   unconsumed key falls through to the tree exactly as today, and the cost of the
   alternative — 24 signatures, plus `TextInput` losing undeclared runes and
   `List` losing its viewport-relative paging — is costed in the ADR itself.
+  **Implemented in v0.6.0** as the `keymap` package, with
+  `TestDispatchIsZeroAllocation`, `TestChordIsSixteenBytes` and
+  `TestParseChordRoundTrips` passing. `termmosaic` itself did not change: the two
+  optional interfaces live in `keymap`, because naming a `keymap` type from the
+  root package would be the import cycle the ADR forbids. The ADR carries a
+  2026-10-05 amendment recording five places its prose contradicted its own
+  code. **No catalog widget implements `Commandable` and there is no command
+  palette** — both deliberate, with triggers in the ADR's §8.
   Widgets participate through **optional** `Commandable` and `Clickable`
   interfaces, the `Focusable`/`Minimizable` pattern, and **v0.2 requires them of
   zero catalog widgets**, which is recorded as a bad consequence rather than

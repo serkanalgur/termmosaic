@@ -3,6 +3,7 @@ package form
 import (
 	"github.com/serkanalgur/termmosaic"
 	"github.com/serkanalgur/termmosaic/buffer"
+	"github.com/serkanalgur/termmosaic/keymap"
 )
 
 // KeyHintSep is the separator KeyHint puts between two bindings when the
@@ -112,6 +113,51 @@ func (k *KeyHint) SetBindings(b []Binding) {
 		k.Bindings = append([]Binding(nil), b...)
 	}
 	k.cache.ok = false
+}
+
+// SetEntries replaces the bindings with rows derived from a command registry,
+// so a form's hints cannot disagree with the program's bindings. It is the
+// ADR 0009 discoverability path for the existing widget.
+//
+// SetEntries accepts what keymap.Registry.Describe returns and nothing else: a
+// hand-written []Binding remains supported for the case where the application
+// has no registry, and both produce identical rows. That is why this is a
+// method and not a change to the Bindings field's type — form.Binding and
+// keymap.Entry are reconciled in a later change, and until then this is the
+// bridge that touches neither type.
+//
+// An Entry with no chords becomes a hint with an empty key, which KeyHint
+// already renders as a bare description.
+func (k *KeyHint) SetEntries(entries []keymap.Entry) {
+	if len(entries) == 0 {
+		k.SetBindings(nil)
+		return
+	}
+	b := make([]Binding, 0, len(entries))
+	for _, e := range entries {
+		b = append(b, Binding{Key: chordsLabel(e.Chords), Help: e.Desc})
+	}
+	k.SetBindings(b)
+}
+
+// chordsLabel renders an entry's chords as one label, because KeyHint's key
+// column is a single string and an Entry is a single row. A command with
+// several chords shows all of them, space-separated.
+func chordsLabel(chords []keymap.Chord) string {
+	switch len(chords) {
+	case 0:
+		return ""
+	case 1:
+		return chords[0].String()
+	}
+	label := make([]byte, 0, 16*len(chords))
+	for i, c := range chords {
+		if i > 0 {
+			label = append(label, ' ')
+		}
+		label = append(label, c.String()...)
+	}
+	return string(label)
 }
 
 // SetSep sets the separator between bindings. It invalidates the cached line,
