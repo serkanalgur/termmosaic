@@ -76,11 +76,25 @@ func truncMark(ascii bool) rune {
 // background. The writing itself — the truncation marker and the wide-glyph rules
 // — is buffer's SetSpansCappedIn: this function decides the row and the lead
 // cells, not how a glyph is placed.
-func paintRow(buf *buffer.Buffer, row buffer.Rect, spans []buffer.Span, lead int, mark rune, bg buffer.Style) {
+//
+// st is the row's CONTENT rendition: it overrides the spans' own styles, which
+// is how a widget's ItemStyle reaches text it did not build and how the selected
+// row takes SelectedStyle outright. Pass the zero Style to write the spans'
+// styles verbatim, and note that a multi-span row keeps them regardless —
+// flattening it would have to build a string on the frame path, and a row that
+// deliberately carries several styles is the author saying so.
+func paintRow(buf *buffer.Buffer, row buffer.Rect, spans []buffer.Span, lead int, mark rune, bg, st buffer.Style) {
 	if row.Empty() {
 		return
 	}
 	buf.FillRect(row, bg.Resolved().Blank())
+	if !st.IsUnset() && len(spans) == 1 {
+		// The common case is one span, so the override is a field write into a
+		// stack array rather than a slice built per row per frame.
+		var one [1]buffer.Span
+		one[0] = buffer.Span{Text: spans[0].Text, Style: st}
+		spans = one[:]
+	}
 	buf.SetSpansCappedIn(row.X+lead, row.Right(), row.Y, spans, mark)
 }
 

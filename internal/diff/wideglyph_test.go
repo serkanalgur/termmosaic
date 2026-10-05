@@ -53,9 +53,6 @@ const (
 	// wideBarGlyphs is how many double-width runes the 36-cell bar holds.
 	// barW is 36 cells, so 18 glyphs and 18 continuation cells.
 	wideBarGlyphs = barW / 2
-	// wideReadoutGlyphs is how many double-width runes each two-cell readout
-	// holds: exactly one, with its continuation beside it.
-	wideReadoutGlyphs = readoutW / 2
 )
 
 // wideFilled and wideEmpty are the wide scene's dynamic glyph sets. Every rune in

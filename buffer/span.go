@@ -111,8 +111,8 @@ func truncate(spans []Span, maxWidth int, marker string) []Span {
 		head, n := cutToWidth(spans[i].Text, budget-used)
 		if n > 0 {
 			out = append(out, Span{Text: head, Style: spans[i].Style})
-			used += n
 		}
+		// No `used += n`: the loop ends here, so nothing reads it again.
 		break
 	}
 

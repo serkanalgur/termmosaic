@@ -1,6 +1,16 @@
 # Binaries
+# `go build ./...` at the repo root emits a binary named after the module
+# (github.com/serkanalgur/termmosaic -> ./termmosaic). The example main
+# packages build into their own directory, and can also be emitted at the
+# root with -o, so both locations are covered.
 /termmosaic
-/examples/*/termmosaic
+/hello
+/markets
+/examples/*/dashboard
+/examples/*/hello
+/examples/*/markets
+# Conventional Go output directory. Nothing in the repo writes to it today,
+# but it is the default install/bin target for future release tooling.
 /bin/
 
 # Go

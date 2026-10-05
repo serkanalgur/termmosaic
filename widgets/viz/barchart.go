@@ -429,7 +429,10 @@ func (c *BarChart) drawBar(buf *buffer.Buffer, r buffer.Rect, d Datum) {
 	}
 	st = st.Resolved()
 	glyph := fillGlyph(c.blk.Ascii)
-	fill := float64(r.H)
+	// Declared without an initialiser: both branches assign it, so a value here
+	// would be dead. A vertical bar is measured against the row height and a
+	// horizontal one against the width.
+	var fill float64
 	if c.Vertical {
 		fill = ratioOf(d.Value, c.scale) * float64(r.H)
 	} else {

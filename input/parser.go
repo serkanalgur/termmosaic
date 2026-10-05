@@ -270,8 +270,15 @@ func (p *Parser) takePaste() termmosaic.Event {
 // needing to know what a resize is. It is deliberately not a way to inject
 // arbitrary events: the parser's job is to be the only thing that turns bytes
 // into events.
+//
+// dst is taken BY VALUE and the grown slice is not returned, so the caller must
+// supply spare capacity: the event is written into dst's backing array and
+// becomes reachable only by extending the caller's own slice over it. A dst with
+// no room left reallocates inside append and the event is lost with the old
+// array, which is why every caller passes a fixed-size scratch array and reads
+// it back through the returned count.
 func (p *Parser) Push(dst []termmosaic.Event, ev termmosaic.Event) int {
-	dst = append(dst, ev)
+	_ = append(dst, ev)
 	// One event appended, not the new length: a caller that already had two
 	// events in dst must still be told "one", or every resize would look like a
 	// batch of resizes.

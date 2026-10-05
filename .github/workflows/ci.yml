@@ -53,6 +53,50 @@ jobs:
       - name: Test (race)
         run: go test ./... -race
 
+  # Dedicated gofmt gate, separate from the matrix job above so the README can
+  # badge a status that means "gofmt" and nothing else. The matrix job still
+  # checks formatting as part of the primary gate; this job exists purely so
+  # the signal is separately addressable and the badge cannot silently start
+  # reporting build/vet/test state as if it were formatting state.
+  gofmt:
+    name: gofmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+  # Dedicated golangci-lint gate, separate from the matrix job above for the same
+  # reason as gofmt: the README badges a status that means "lint" and nothing
+  # else, so a red matrix leg cannot be misread as a lint finding and a lint
+  # finding cannot hide behind a green test run.
+  #
+  # The version is pinned to the exact release the repository was verified
+  # against, for the same reason go-version is pinned in ADR 0001: a lint
+  # upgrade is a change in what CI asserts, and @latest would make that change
+  # silently, in whichever direction, on someone else's schedule.
+  golangci-lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.14.0
+
   # The widget catalog is the product, so guard the zero-allocation claim on the
   # hot path that ADR 0002 established. Run explicitly so a regression is loud.
   no-alloc:

@@ -448,7 +448,8 @@ func (s *Source) armEscape() {
 // It re-checks on every wake rather than sleeping once through, because the
 // answer to "is it still a bare ESC" can change before the delay runs out, and
 // firing KeyEscape into the middle of a sequence that has since arrived would
-// turn a resolution into a lost keystroke.
+// turn a resolution into a lost keystroke. armEscape wakes this goroutine on
+// exactly that signal.
 func (s *Source) escapeLoop() {
 	defer s.wg.Done()
 	defer func() {
@@ -457,6 +458,16 @@ func (s *Source) escapeLoop() {
 		s.escMu.Unlock()
 	}()
 
+	// A wake means more bytes arrived while the timer was running, which can
+	// complete the sequence the ESC was the prefix of. Go back to the top and
+	// re-read the parser's state rather than resolving on the stale timer.
+	//
+	// This is why the loop exists even though every exit below is a return: the
+	// pending ESC survives the arrival of more bytes (the parser is mid-sequence,
+	// not resolved), so escapeRemaining can report pending with time still left.
+	// The delay is therefore recomputed from scratch on each wake, and a stream
+	// of bytes keeps pushing the deadline out instead of letting a stale timer
+	// fire into the middle of a sequence.
 	for {
 		remaining, pending := s.p.escapeRemaining()
 		if !pending {

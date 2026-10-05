@@ -51,7 +51,7 @@ var catalog = []string{
 // here, because the literal catalog still names it.
 func TestManifestCoversEveryWidget(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := Generate(dir); err != nil {
+	if _, err := Generate(dir, "test"); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -270,11 +270,11 @@ func TestNoCaptureIsBlankOrTrivial(t *testing.T) {
 func TestGenerateIsDeterministic(t *testing.T) {
 	a, b := t.TempDir(), t.TempDir()
 
-	resA, err := Generate(a)
+	resA, err := Generate(a, "test")
 	if err != nil {
 		t.Fatalf("first Generate: %v", err)
 	}
-	resB, err := Generate(b)
+	resB, err := Generate(b, "test")
 	if err != nil {
 		t.Fatalf("second Generate: %v", err)
 	}

@@ -69,6 +69,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -532,7 +533,8 @@ func (h *hello) Draw(buf *buffer.Buffer) {
 		// it has more lines than rows and the tail is clipped rather than blanked.
 		h.note.SetBounds(buffer.Rect{X: inner.X, Y: y, W: inner.W, H: noteRows})
 		h.note.Draw(buf)
-		y += noteRows
+		// No `y += noteRows`: the hint below is pinned to inner.Bottom() rather
+		// than stacked after this, so nothing reads y again.
 	}
 	if a.show[regionHint] {
 		// Pinned to the bottom row rather than stacked below the body, so it is
@@ -1000,7 +1002,7 @@ func main() {
 	}
 }
 
-func run() error {
+func run() (err error) {
 	// Fall back to the headless path when stdout is not a terminal, so the
 	// example is runnable in CI and under redirection instead of erroring out.
 	if !isTerminal(os.Stdout) {
@@ -1015,8 +1017,10 @@ func run() error {
 		return err
 	}
 	// Restoring the terminal is not optional on any exit path: a program that
-	// leaves a terminal in raw mode has broken the user's shell.
-	defer t.Close()
+	// leaves a terminal in raw mode has broken the user's shell. So a failure to
+	// do it is itself worth reporting, which is why the deferred close folds its
+	// error into the named return rather than dropping it.
+	defer func() { err = errors.Join(err, t.Close()) }()
 
 	w, h := t.Size()
 	caps := t.Capabilities()

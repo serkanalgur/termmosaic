@@ -50,12 +50,6 @@ func wheelAt(w termmosaic.Widget, x, y int, up bool) bool {
 	})
 }
 
-// pressKey is the rune form of press, for the keys with no escape sequence of
-// their own.
-func pressRune(w termmosaic.Widget, r rune) bool {
-	return w.Handle(termmosaic.KeyEvent(r, 0))
-}
-
 // assertDifferent fails the test when a and b are equal.
 //
 // Every assertion here that compares a rendered value against a WANTED value

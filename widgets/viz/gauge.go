@@ -17,8 +17,6 @@ const (
 	minGaugeH = 5
 	// minGaugeBarW is the narrowest interior that draws the fallback bar.
 	minGaugeBarW = 6
-	// minGaugeBarH is the smallest height that draws the fallback bar.
-	minGaugeBarH = 1
 	// needleTol is how far from the reading, as a fraction of a turn, a dot may be
 	// and still count as part of the needle. At four dots to a cell it is about one
 	// dot wide, which is as thin as the needle can be drawn and still be continuous.

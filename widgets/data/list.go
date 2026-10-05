@@ -475,7 +475,7 @@ func (l *List) drawRow(dst *buffer.Buffer, row buffer.Rect, i int) {
 		bg = l.SelectedStyle
 		st = l.SelectedStyle
 	}
-	paintRow(dst, row, item.spans, l.markerW, l.mark, bg)
+	paintRow(dst, row, item.spans, l.markerW, l.mark, bg, st)
 	if l.markerW > 0 && selected && l.markerRune != 0 {
 		mst := l.MarkerStyle
 		if mst.IsUnset() {

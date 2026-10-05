@@ -23,20 +23,6 @@ func rows(t *testing.T, w, h int, root termmosaic.Widget) []string {
 	return out
 }
 
-// want asserts that row y of a rendered screen equals expect, with both sides
-// trimmed of trailing blanks.
-func want(t *testing.T, got []string, y int, expect string) {
-	t.Helper()
-	if y >= len(got) {
-		t.Fatalf("screen has %d rows, wanted row %d", len(got), y)
-	}
-	g := strings.TrimRight(got[y], " ")
-	e := strings.TrimRight(expect, " ")
-	if g != e {
-		t.Errorf("row %d\n got %q\nwant %q", y, g, e)
-	}
-}
-
 // cellBuf returns a fresh buffer for direct Draw assertions, which is where a
 // cell's STYLE matters and Screen's text alone does not.
 func cellBuf(w, h int) *buffer.Buffer { return buffer.NewBuffer(w, h) }

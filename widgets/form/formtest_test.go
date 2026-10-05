@@ -148,12 +148,6 @@ func paste(t *testing.T, w termmosaic.Widget, payload string) {
 	}
 }
 
-// focusedPair is a widget that takes focus, for tests that need to set it.
-type focusable interface {
-	termmosaic.Widget
-	termmosaic.Focusable
-}
-
 // assertDifferent fails the test if a and b are equal.
 //
 // Every assertion in this package that compares a rendered value against an

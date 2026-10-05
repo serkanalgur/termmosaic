@@ -132,19 +132,6 @@ func (e *editor) setText(s string) {
 // String returns the content as a string.
 func (e *editor) String() string { return string(e.text) }
 
-// setRunes replaces the whole content with a copy of rs. It exists so a caller
-// that already has runes does not have to round-trip through a string.
-func (e *editor) setRunes(rs []rune) {
-	if len(rs) == 0 {
-		e.text = nil
-	} else {
-		e.text = append([]rune(nil), rs...)
-	}
-	e.cursor, e.anchor, e.scroll = 0, 0, 0
-	e.undo = nil
-	e.stale = true
-}
-
 // normalise puts the caret and the anchor back inside the text.
 //
 // It runs at the top of every mutating path, because the state can be made

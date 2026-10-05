@@ -122,6 +122,11 @@ type column struct {
 	// labelPad is the cells of blank label between a truncated label and the
 	// region's right edge, which is what stops a truncated label reading as a
 	// complete word.
+	//
+	//nolint:unused // Reserved for the right-pad pass on truncated labels. It is
+	// kept rather than deleted because it is a documented layout invariant that
+	// the pass is meant to honour, and silently dropping it would lose the record
+	// that the behaviour was intended.
 	labelPad int
 }
 

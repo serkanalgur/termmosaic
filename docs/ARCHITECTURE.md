@@ -6,7 +6,7 @@ each decision's reasoning lives.
 It is deliberately not a second copy of that reasoning. Every architecture decision
 TermMosaic has made is recorded in full — with its evidence, its rejected
 alternatives, and the consequences including the unwelcome ones — in
-**[docs/adr/](adr/README.md)**, which is 4,175 lines across eight ADRs. An earlier
+**[docs/adr/](adr/README.md)**, which is 5,537 lines across nine ADRs. An earlier
 version of this file summarised those decisions here and went stale doing it: its
 decision numbering did not match the ADR set, and it still described the colour model
 as OPEN after STATUS.md had moved it to PROPOSED. A summary that drifts is worse than
@@ -61,18 +61,29 @@ Roughly bottom-up. Each row links the ADR that decided it.
 | `buffer` | `Cell` (16 bytes, padding-free), `Colour` and the degradation ladder, `Style`, `Span`, borders, wrapping, and the cell writers including the range-clipped ones. | [0002](adr/0002-buffer-representation.md), [0006](adr/0006-subbuffer-cell-access.md), [0008](adr/0008-style-and-text.md) |
 | `layout` | The constraint solver: `Length` / `Min` / `Max` / `Percentage` / `Ratio` / `Fill`, plus `Solve` and rectangle composition. Pure Go, no cgo, no terminal. | [0004](adr/0004-layout-engine.md) |
 | `input` | A pure `Decode` under a resumable `Parser`, driven by a `Source` that merges bytes and resize notifications into one ordered stream. | [0005](adr/0005-input-decoding.md) |
-| `term` | The `Terminal` implementation: raw mode, alt screen, capabilities, size. Direct on `golang.org/x/sys`, wrapping no terminal library. | [0001](adr/0001-backend-strategy.md) |
+| `term` | The `Terminal` implementation: raw mode, alt screen, capabilities, size. `term/terminal_unix.go` imports `golang.org/x/term` (which itself wraps `golang.org/x/sys/unix`) plus `x/sys` directly; those two `go.mod` requirements both originate in that one file. Wraps no terminal library. On Windows the backend is a deliberate loud-error stub — see [0001](adr/0001-backend-strategy.md). | [0001](adr/0001-backend-strategy.md) |
 | `headless` | `MemorySink`: a Sink that records the bytes **and maintains the cell grid they would have produced**. This is the assertion surface every widget test uses. | [0001](adr/0001-backend-strategy.md) |
 | `render` | `Renderer`, `Pacer`, `Config`. The retained tree, the dirty rectangles, and the call into the diff. | [0003](adr/0003-renderer-mode.md) |
 | `internal/diff` | The two-tier diff: a per-row byte skip over a per-cell pass, 0 allocations per frame. The most load-bearing code in the project. | [0002](adr/0002-buffer-representation.md) |
 | `internal/ansi` | The encoder. Colour degradation and the escape sequences. | [0001](adr/0001-backend-strategy.md), [0008](adr/0008-style-and-text.md) |
 | `virtual` | The row virtualization engine the List, Table and Tree share: O(visible rows), not O(item count). | [0007](adr/0007-responsive-screens.md) §6 |
-| `widgets/*` | The catalog, in five groups. `block` is the only thing that draws a border or a title; `split` composes children; `basic`, `form`, `data` and `viz` are the widgets. | [0007](adr/0007-responsive-screens.md), [0008](adr/0008-style-and-text.md) |
+| `widgets/*` | The catalog, 24 widgets in seven packages. `block` is the only thing that draws a border or a title; `split` composes children; `basic`, `form`, `data` and `viz` are the widgets; `menu` and `dialog` are the two modal/tree composites. | [0007](adr/0007-responsive-screens.md), [0008](adr/0008-style-and-text.md) |
 | `widgets/widgettest` | Renders a widget through the whole stack into a `MemorySink`, so a widget test asserts on cells rather than on escape sequences. | — |
+| `internal/docsgen` | Renders every catalog widget through `widgettest.Capture` and translates the resulting **cell grid** (not ANSI) into the plain-text and HTML captures the documentation site shows, plus a sorted `manifest.json` and the site's `index.json`. ~2,242 lines. Byte-deterministic by construction: no timestamp, no map iteration in an output path. An explicit hand-written registry rather than reflection, because the constructors are variadic and concrete. | [0001](adr/0001-backend-strategy.md), [0008](adr/0008-style-and-text.md) |
+| `cmd/capture` | The `capture` command: runs `docsgen` and writes into the **site repository's** static directory, so the framework does not carry a second copy of its own pictures. `-check` re-runs and fails on a byte difference; `-out` overrides the destination. ~228 lines. | — |
 
-Dependencies run one way: `widgets` → `render` → `internal/diff` → `buffer` → `geometry`.
-`geometry` imports nothing. There is no cycle, and adding a package at any level does
-not disturb the ones above it.
+Dependencies run one way. Within the drawing half it is
+`widgets/*` → `buffer` / `geometry` / `layout` / `virtual` / `block`, and
+`render` → `internal/diff` → `buffer` → `geometry`.
+
+Note that `render` is **beside** the widgets, not beneath them: no production
+widget package imports `render` or `input`. Only `widgets/widgettest` — the test
+harness — imports `render`, because rendering a widget in isolation is what it is
+for. A widget draws into a `*buffer.Buffer` it is handed; it never reaches for a
+renderer.
+
+`geometry` imports nothing. There is no cycle, and adding a package at any level
+does not disturb the ones above it.
 
 ## Three rules that run through all of it
 

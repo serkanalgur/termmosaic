@@ -407,8 +407,14 @@ func TestClickingARowSelectsItAndFocusesTheTable(t *testing.T) {
 	// reader cannot see.
 	visible := d.table.Bounds().H - 3
 	last := visible - 1
+	// Not a skip: the table's height at the golden size is the code's own output,
+	// not a property of this environment. A layout change that squeezed the body
+	// to one row would silently stop testing the click that must NOT be consumed,
+	// which is the half of this test that has no other coverage. That is a
+	// regression, and it fails here rather than skipping.
 	if last < 1 {
-		t.Skipf("the table shows %d body rows at this size; this test needs two", visible)
+		t.Fatalf("the table shows %d body rows at the golden size; this test needs two, "+
+			"and a body that cannot show two rows cannot show the off-screen-click guard either", visible)
 	}
 	if !click(t, d, clickAt(10, body+last)) {
 		t.Fatal("the second click was not consumed")
@@ -666,8 +672,15 @@ func TestPairSwitchWithNoWindowSaysSoRatherThanDrawingAnotherPairsShape(t *testi
 	// sample windows EUR, GBP and JPY, so this drives the rule through the market
 	// rather than through the board — which is where the rule lives.
 	m := d.market.withPair("AUD")
+	// A legitimate skip, and the only one of its kind in this file: the condition
+	// is a property of the BUNDLED SAMPLE DATA, not of the code's geometry or of
+	// the environment running the test. If the fixture ever grows an AUD window
+	// then there is no "pair with no window" left to assert against, and the
+	// case is genuinely not applicable — the golden would then be what covers it.
+	// Unlike a geometry skip, this one cannot be triggered by a layout change.
 	if _, ok := m.series["AUD"]; ok {
-		t.Skip("the fixture now carries an AUD window; this case is covered by the golden instead")
+		t.Skip("the bundled offline fixture now carries an AUD window, so there is no " +
+			"series-less pair for this case; the golden covers that instead")
 	}
 	if m.hasHistory() {
 		t.Error("a pair with no window reports a history; it would draw another pair's shape")

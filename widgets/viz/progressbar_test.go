@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/serkanalgur/termmosaic/buffer"
-	"github.com/serkanalgur/termmosaic/widgets/block"
 )
 
 // labelledBar returns a bordered progress bar with a label, 30 cells wide.
@@ -163,11 +162,3 @@ func TestProgressBarHandlesNothing(t *testing.T) {
 // innerRow strips a row's frame so a test can count the fill without depending on
 // the chrome.
 func innerRow(row string) string { return unframe(row) }
-
-// blockOf returns a block of the given size with a plain border, for the widgets
-// whose chrome a test configures once.
-func blockOf(w, h int) *block.Block {
-	b := block.New(buffer.Rect{X: 0, Y: 0, W: w, H: h})
-	b.SetBorder(buffer.BorderPlain)
-	return b
-}

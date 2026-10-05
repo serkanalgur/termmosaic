@@ -153,8 +153,13 @@ func TestContinuationCellRoundTripsEqual(t *testing.T) {
 	if c == NewCell('漢', wideStyle) {
 		t.Fatal("continuation flag must distinguish the cell from its left half")
 	}
-	if NewCell('x', DefaultStyle).asContinuation() != NewCell('x', DefaultStyle).asContinuation() {
-		t.Fatal("two identical continuation cells must compare equal")
+	// Two DISTINCT instances, built separately: writing the same expression on
+	// both sides of the comparison compares an expression with itself, which is
+	// always false and so can never fail.
+	c1 := NewCell('y', wideStyle).asContinuation()
+	c2 := NewCell('y', wideStyle).asContinuation()
+	if c1 != c2 {
+		t.Errorf("two identical continuation cells do not compare equal: %+v vs %+v", c1, c2)
 	}
 	if !c.IsContinuation() {
 		t.Fatal("IsContinuation must be true")

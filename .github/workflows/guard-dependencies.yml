@@ -3,21 +3,31 @@ name: guard-dependencies
 on:
   push:
     branches: [main]
-  pull_request:
   schedule:
     # ADR 0001 records golang.org/x/term as pinned to v0.27.0 because @latest
     # requires Go 1.26. It is not load-bearing and nothing in the code enforces
     # the pin, so re-check weekly and open an issue when it can be released.
     - cron: "17 6 * * 1"
 
+# issues: write is scoped to this one job, and only the issue-opening step needs
+# it. The push and the weekly schedule are what can actually raise the issue; a
+# pull_request run has no business writing to the tracker, and for a fork's pull
+# request the token is read-only regardless — so that trigger would silently fail
+# the step rather than skip it, which is worse than not running at all. The
+# pull_request trigger is gone for the same reason it does not belong here: the
+# probe fetches @latest from the network, so its result on someone's branch says
+# nothing about whether main's pin can move, and it costs a full runner on every
+# PR for a check main already does.
 permissions:
   contents: read
-  issues: write
 
 jobs:
   x-term-pin:
     name: check x/term pin
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
 
@@ -33,13 +43,75 @@ jobs:
           go get golang.org/x/term@latest >/dev/null 2>&1 || true
           echo "latest=$(go list -m -f '{{.Version}}' golang.org/x/term 2>/dev/null || echo unknown)" >> "$GITHUB_OUTPUT"
 
-      - name: Report
+      # Deliberately core.setFailed on every error path rather than falling back
+      # to a notice: a guard that cannot open its issue and says nothing is a
+      # guard that has silently stopped guarding. `unknown` from the probe above
+      # counts as an error too — without a comparison there is nothing to report.
+      - name: Open an issue when the pin can be lifted
+        uses: actions/github-script@v7
         env:
           PINNED: ${{ steps.pin.outputs.pinned }}
           LATEST: ${{ steps.latest.outputs.latest }}
-        run: |
-          echo "pinned:  $PINNED"
-          echo "latest:  $LATEST"
-          if [ "$PINNED" != "$LATEST" ]; then
-            echo "::notice title=x/term pin is behind::Pinned $PINNED, latest is $LATEST. If latest now supports Go 1.23, bump the floor and unpin (ADR 0001)."
-          fi
+        with:
+          script: |
+            const pinned = process.env.PINNED.trim();
+            const latest = process.env.LATEST.trim();
+
+            if (!pinned || !latest || latest === 'unknown') {
+              core.setFailed(
+                `could not compare pins (pinned=${pinned}, latest=${latest}); refusing to pass silently`
+              );
+              return;
+            }
+            if (pinned === latest) {
+              core.info(`${pinned} is current; nothing to do.`);
+              return;
+            }
+
+            // The marker is what makes this idempotent. The weekly schedule would
+            // otherwise open a fresh issue every Monday for as long as the pin
+            // stayed put, and the human who fixes it would be buried under them.
+            // The marker names the PINNED version, not just the dependency: a
+            // run that sees the same pin twice is a duplicate and is suppressed,
+            // but a run that sees a genuinely newer pair is a new fact and does
+            // open its own issue. A bare constant marker would conflate the two
+            // and let the guard go quiet forever after the first report.
+            const marker = `<!-- pin-guard:x-term pinned=${pinned} -->`;
+            const title = 'golang.org/x/term pin can be lifted';
+
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            // Pull requests come back in the same listing and must be ignored: a
+            // PR that happens to share the title is not an issue to suppress.
+            const prior = existing.data.find(
+              (i) =>
+                i.pull_request === undefined &&
+                (i.title === title || (i.body || '').includes(marker))
+            );
+            if (prior) {
+              core.info(`already tracked by #${prior.number}; leaving it alone.`);
+              return;
+            }
+
+            const created = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body: [
+                marker,
+                '',
+                `The weekly pin guard found a newer \`golang.org/x/term\` than the pinned one:`,
+                '',
+                `- pinned: \`${pinned}\``,
+                `- latest: \`${latest}\``,
+                '',
+                'ADR 0001 pins the dependency because `@latest` required a newer Go than this module declares. If `@latest` now builds against the supported floor, raise that floor and unpin.',
+                '',
+                '_Opened automatically by `.github/workflows/guard-dependencies.yml`. A repeat run seeing the same pinned version adds nothing and stays quiet._',
+              ].join('\n'),
+            });
+            core.info(`opened #${created.data.number}`);

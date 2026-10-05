@@ -87,6 +87,53 @@ func TestListSelectedStyleOnlyRepaintsThatRow(t *testing.T) {
 	}
 }
 
+func TestListItemStyleReachesTheText(t *testing.T) {
+	// A ListItem's own Style is the whole point of the field, and the selected row
+	// takes SelectedStyle outright: a selection that only recoloured the
+	// background would leave the text unreadable, which is worse than no selection
+	// at all. Both are one paintRow override away and neither is observable from
+	// the background alone.
+	red := buffer.NewColour(255, 0, 0)
+	blue := buffer.NewColour(0, 0, 255)
+	itemStyle := buffer.NewStyle(red, buffer.DefaultColour, 0)
+	selStyle := buffer.NewStyle(blue, buffer.DefaultColour, 0)
+
+	l := NewList(buffer.Rect{X: 0, Y: 0, W: 12, H: 4})
+	l.SetItems([]ListItem{
+		{Label: "ab", Style: itemStyle},
+		{Label: "cd", Style: itemStyle},
+	})
+	l.SelectedStyle = selStyle
+	buf := cellBuf(12, 4)
+	l.Draw(buf)
+
+	// Selection defaults to the first item, so row 0 is the selected one.
+	if got := buf.CellAt(2, 0).FG; got != blue {
+		t.Errorf("selected row's text FG = %s, want SelectedStyle %s", got, blue)
+	}
+	if got := buf.CellAt(2, 1).FG; got != red {
+		t.Errorf("unselected row's text FG = %s, want the item's own style %s", got, red)
+	}
+}
+
+func TestListItemStyleFallsBackToItemStyle(t *testing.T) {
+	// An unset ListItem.Style resolves to ItemStyle rather than to the terminal
+	// defaults, which is the same fallback the doc comment claims and the same one
+	// Table makes per column.
+	green := buffer.NewColour(0, 255, 0)
+	l := NewList(buffer.Rect{X: 0, Y: 0, W: 12, H: 3})
+	l.SetItems([]ListItem{{Label: "ab"}})
+	l.ItemStyle = buffer.NewStyle(green, buffer.DefaultColour, 0)
+	// A negative selection is legal and means every row renders unselected, which
+	// is what a read-only list wants and what keeps ItemStyle the style in play.
+	l.selected = -1
+	buf := cellBuf(12, 3)
+	l.Draw(buf)
+	if got := buf.CellAt(2, 0).FG; got != green {
+		t.Errorf("text FG = %s, want ItemStyle %s", got, green)
+	}
+}
+
 func TestListKeysMoveSelectionAndScrollIntoView(t *testing.T) {
 	l := simpleList(t, 12, 5, 100)
 	focus(l)

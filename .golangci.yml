@@ -1,0 +1,73 @@
+# golangci-lint configuration for TermMosaic.
+#
+# This file exists to state a house style, not to hide findings. The default
+# linter set (errcheck, govet, ineffassign, staticcheck, unused) is left ON in
+# full, and in particular the staticcheck SA rules — the ones that find real
+# defects — stay enabled. What is disabled is a short, named list of
+# opinionated *stylistic* checks from staticcheck's non-default "quickfix" and
+# "stylecheck" families, each of which this codebase makes a deliberate,
+# repeated choice to violate:
+#
+#   QF1001  De Morgan's law. `!(a && b)` is frequently clearer than `!a || !b`
+#           in the predicate where the double negative is the point (a
+#           "not a narrow glyph AND not a wide one" test reads better as
+#           written than as its negation).
+#   QF1005  Expand math.Pow. The explicit `math.Pow(x, 2)` is what the maths
+#           says; `x * x` is faster and less clear, and these are docs
+#           generator shape functions, not hot paths.
+#   QF1008  Embedded field selectors. Where a struct embeds another, spelling
+#           `c.column.active` rather than `c.active` makes the owning type
+#           visible at the use site, which matters when the embedding is a
+#           layout detail rather than a "this is a column" claim.
+#   QF1011 / ST1023  Omit the type in a `var` declaration. This project writes
+#           `var got buffer.Rect = ...` in tests on purpose: the explicit type
+#           is the assertion. Dropping it to `got := ...` would make a
+#           compile-time type check into an inference, and several of these
+#           declarations exist precisely to pin a type.
+#
+# Enabling staticcheck's full `all` set also brings in three stylecheck naming
+# and comment rules that this project cannot satisfy without breaking its own
+# published API, so they are named here too:
+#
+#   ST1003  `Ascii` should be `ASCII`. Renaming an exported struct field on
+#           `basic.Text`, `block.Block` and friends is a source break for every
+#           user, and the project promises the API is unstable but not that it
+#           disappears in a minor release.
+#   ST1020 / ST1022  Doc comments must begin with the symbol's name. Several
+#           comments here lead with the sentence that matters to the reader
+#           ("Caps returns the colour depth...") rather than with the name
+#           they are already standing next to.
+#
+# These are the same category as the five above: naming and formatting, not
+# correctness.
+#
+# None of these is a correctness check. Every one is a readability preference
+# that reasonable maintainers disagree about, which is why they are recorded
+# here once instead of argued about in review. If you believe one of them is
+# wrong for a specific site, change the site — do not add a blanket exclusion
+# and do not add a `//nolint` for a real finding.
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+  settings:
+    staticcheck:
+      # Keep every rule (the SA family included — those are the defect finders)
+      # and turn off only the eight stylistic checks justified above. No SA rule
+      # is disabled, and nothing here filters by severity or path.
+      checks:
+        - all
+        - -QF1001
+        - -QF1005
+        - -QF1008
+        - -QF1011
+        - -ST1003
+        - -ST1020
+        - -ST1022
+        - -ST1023

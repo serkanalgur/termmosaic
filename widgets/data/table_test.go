@@ -74,6 +74,35 @@ func TestTableHeaderIsBoldWithoutColour(t *testing.T) {
 	}
 }
 
+func TestTableCellStylesReachTheText(t *testing.T) {
+	// A cell's own Style, and its column's CellStyle as the fallback, are both
+	// written verbatim: the header's HeadingStyle is applied through an override
+	// parameter, and a body cell must NOT be clobbered by one. DefaultStyle is
+	// what an unset Style RESOLVES to rather than the unset sentinel itself, so
+	// passing it as "no override" silently discards every style a caller set.
+	red := buffer.NewColour(255, 0, 0)
+	green := buffer.NewColour(0, 255, 0)
+
+	own := NewTable(buffer.Rect{X: 0, Y: 0, W: 14, H: 3}, sized("N"))
+	own.SetRows([]Row{{Cells: []Cell{{Text: "7", Style: buffer.NewStyle(red, buffer.DefaultColour, 0)}}}})
+	obuf := buffer.NewBuffer(14, 3)
+	own.Draw(obuf)
+	// The gutter is two cells and the value starts at column 2.
+	if got := obuf.CellAt(2, 0).FG; got != red {
+		t.Errorf("cell's own Style FG = %s, want %s", got, red)
+	}
+
+	col := NewTable(buffer.Rect{X: 0, Y: 0, W: 14, H: 3},
+		Column{Title: []buffer.Span{buffer.NewSpan("N", buffer.DefaultStyle)},
+			CellStyle: buffer.NewStyle(green, buffer.DefaultColour, 0)})
+	col.SetRows([]Row{{Cells: []Cell{{Text: "7"}}}})
+	cbuf := buffer.NewBuffer(14, 3)
+	col.Draw(cbuf)
+	if got := cbuf.CellAt(2, 0).FG; got != green {
+		t.Errorf("CellStyle FG = %s, want %s", got, green)
+	}
+}
+
 func TestTableColumnAlignmentIsHonoured(t *testing.T) {
 	tb := NewTable(buffer.Rect{X: 0, Y: 0, W: 14, H: 3},
 		Column{Title: []buffer.Span{buffer.NewSpan("N", buffer.DefaultStyle)}, Width: 4, Align: geometry.AlignRight})

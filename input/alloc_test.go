@@ -89,14 +89,17 @@ func TestDecodeKeyBurstIsZeroAllocation(t *testing.T) {
 		p := NewParser(cfg)
 		p.Feed(dst[:0], burst)
 	})
-	// Three, and the three are named: the Parser itself, the 64-byte
-	// partial-sequence slot and the paste accumulator. That is a fixed cost per
-	// Parser, paid once when an application starts, and not a per-keystroke one.
-	// TestParserAllocatesNothingPerKeystroke is the version that shows Feed alone
-	// is free; a fourth allocation here would mean the burst is growing a buffer
-	// it should already have had.
-	if allocs != 3 {
-		t.Errorf("a %d-byte burst through NewParser+Feed allocated %v times per run, want exactly 3 (the parser and its two buffers)", len(burst), allocs)
+	// At most three, and the three are named: the Parser itself, the 64-byte
+	// partial-sequence slot and the paste accumulator. NewParser is inlinable, so
+	// in practice the Parser stays on the stack and only the two buffers reach the
+	// heap; three is the non-inlined worst case. Which of the two you observe is
+	// a compiler decision, so the assertion is an upper bound. That is a fixed
+	// cost per Parser, paid once when an application starts, and not a
+	// per-keystroke one. TestParserAllocatesNothingPerKeystroke is the version
+	// that shows Feed alone is free; a fourth allocation here would mean the burst
+	// is growing a buffer it should already have had.
+	if allocs > 3 {
+		t.Errorf("a %d-byte burst through NewParser+Feed allocated %v times per run, want at most 3 (the parser and its two buffers)", len(burst), allocs)
 	}
 }
 
