@@ -286,11 +286,27 @@ func TestParserResetDropsPartialState(t *testing.T) {
 	// Reset is called on raw-mode entry so a half-read sequence from before the
 	// mode change cannot leak into the new mode: a stale ESC would otherwise be
 	// reported as a key press the user never made, minutes later.
+	// The precondition is the point: Reset can only be shown to drop state that
+	// was actually there, so each half of it is asserted rather than assumed.
+	partial := NewParser(Config{})
+	feed(partial, "\x1b[")
+	if len(partial.partial) == 0 {
+		t.Fatal("precondition: an incomplete CSI retained no bytes to drop")
+	}
+	partial.Reset()
+	if len(partial.partial) != 0 {
+		t.Errorf("partial = %q after Reset, want empty", partial.partial)
+	}
+
+	// A paste must be open ACROSS calls for there to be an abandoned one: a paste
+	// whose marker and payload arrive together is decoded whole and never leaves
+	// the accumulator holding anything.
 	p := NewParser(Config{})
-	feed(p, "\x1b[")
-	feed(p, "\x1b[200~partial")
-	if !p.EscapePending() && p.Stats() == (Stats{}) {
-		// no-op; the assertions below are what matter
+	feed(p, "\x1b[200~")
+	feed(p, "partial")
+	if !p.inPaste || string(p.paste) != "partial" {
+		t.Fatalf("precondition: paste not open with its payload held: inPaste=%v paste=%q",
+			p.inPaste, p.paste)
 	}
 	p.Reset()
 
@@ -298,6 +314,9 @@ func TestParserResetDropsPartialState(t *testing.T) {
 	p.now = func() time.Time { return now }
 	if p.EscapePending() {
 		t.Error("EscapePending = true after Reset")
+	}
+	if p.inPaste || len(p.paste) != 0 {
+		t.Errorf("paste state survived Reset: inPaste=%v paste=%q", p.inPaste, p.paste)
 	}
 	// A paste left open by Reset must not swallow the rest of the stream.
 	// The orphaned closing marker is consumed as a tilde form we do not

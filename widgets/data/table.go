@@ -21,10 +21,6 @@ const (
 	// minAutoWidth is the narrowest content-derived column: enough for one
 	// glyph rather than nothing at all.
 	minAutoWidth = 1
-	// headerPrio is the header's drop priority. It is high rather than low on
-	// purpose: the scrollbar is the thing that goes first, because a column
-	// label carries more information than a position indicator.
-	headerPrio = geometry.PrioHigh
 	// scrollbarPrio is the vertical scrollbar's priority against the selection
 	// gutter.
 	scrollbarPrio = geometry.PrioLow
@@ -654,7 +650,11 @@ func (t *Table) drawRow(dst *buffer.Buffer, row buffer.Rect, i int) {
 	cells := t.rows[i].cells
 	for _, c := range t.visCols {
 		if c < len(cells) {
-			t.drawCell(dst, row, c, cells[c].spans, cells[c].width, buffer.DefaultStyle)
+			// The zero Style, NOT DefaultStyle: the override is applied when st is
+			// not unset, and DefaultStyle is a real style rather than the unset
+			// sentinel, so passing it would overwrite every cell's own style with
+			// the terminal default.
+			t.drawCell(dst, row, c, cells[c].spans, cells[c].width, buffer.Style{})
 		}
 	}
 }
@@ -664,8 +664,10 @@ func (t *Table) drawRow(dst *buffer.Buffer, row buffer.Rect, i int) {
 //
 // width is the cell's own content width and st overrides the spans' styles when
 // it is not the zero Style — which is how the header gets HeadingStyle without
-// the caller's spans having to carry it. Pass DefaultStyle to write a cell's own
-// styles verbatim.
+// the caller's spans having to carry it. Pass the zero Style, not DefaultStyle,
+// to write a cell's own styles verbatim: DefaultStyle is what an unset Style
+// RESOLVES to, and it is not itself unset, so passing it would clobber the very
+// styles this parameter exists to preserve.
 func (t *Table) drawCell(buf *buffer.Buffer, row buffer.Rect, c int, spans []buffer.Span, width int, st buffer.Style) {
 	if len(spans) == 0 || t.colW[c] <= 0 {
 		return

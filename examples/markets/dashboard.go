@@ -1248,16 +1248,6 @@ func (d *dashboard) drawTooSmall(buf *buffer.Buffer, r buffer.Rect) {
 	d.diag.Draw(buf)
 }
 
-// drawStatus paints the footer at the bottom row.
-//
-// It is pinned to the last row rather than stacked below the bands, so it is
-// visible at every height instead of being the first thing a grow would reveal.
-func (d *dashboard) drawStatus(buf *buffer.Buffer, r buffer.Rect) {
-	row := buffer.Rect{X: r.X, Y: r.Bottom() - 1, W: r.W, H: 1}
-	d.status.SetBounds(row)
-	d.status.Draw(buf)
-}
-
 // drawNoData paints the failure panel in place of the bands.
 //
 // It occupies the whole area above the footer, because an empty grid of panels

@@ -6,7 +6,6 @@ import (
 
 	"github.com/serkanalgur/termmosaic"
 	"github.com/serkanalgur/termmosaic/buffer"
-	"github.com/serkanalgur/termmosaic/widgets/block"
 	"github.com/serkanalgur/termmosaic/widgets/widgettest"
 )
 
@@ -88,15 +87,6 @@ func drawAll(w termmosaic.Widget, buf *buffer.Buffer, n int) {
 	for i := 0; i < n; i++ {
 		w.Draw(buf)
 	}
-}
-
-// bordered wraps a widget in a plain border of one cell, which is what most of
-// these tests want to exercise: the chrome is part of what is being tested.
-func bordered(w, h int) (buffer.Rect, *block.Block) {
-	r := buffer.Rect{X: 0, Y: 0, W: w, H: h}
-	blk := block.New(r)
-	blk.SetBorder(buffer.BorderPlain)
-	return r, blk
 }
 
 // press offers the decoded key sequence seq to w and reports whether it was

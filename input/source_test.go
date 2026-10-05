@@ -186,7 +186,12 @@ func TestSourceRestoresModesOnClose(t *testing.T) {
 		BracketedPaste:       true,
 		ProbeKitty:           false,
 	})
-	h.t.Close()
+	// Both closes matter and neither is optional: the test is about the modes
+	// being restored, so a transport that failed to close is a failure of the
+	// thing under test rather than noise to discard.
+	if err := h.t.Close(); err != nil {
+		t.Fatalf("transport close: %v", err)
+	}
 	if err := h.s.Close(); err != nil {
 		t.Fatal(err)
 	}

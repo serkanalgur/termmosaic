@@ -181,6 +181,9 @@ type Result struct {
 type Manifest struct {
 	// Tool names the program that produced this manifest.
 	Tool string `json:"tool"`
+	// Version is the release of that program, so a capture on disk can be
+	// traced to the code that wrote it.
+	Version string `json:"version"`
 	// Widths are the column counts every widget was captured at.
 	Widths []int `json:"widths"`
 	// Count is the number of widgets below, and is 22 for this catalog.
@@ -244,17 +247,20 @@ type IndexEntry struct {
 // Generate renders every entry in Entries at every width and writes the
 // captures, the manifest and the index into dir, which is created if absent.
 //
+// The toolVersion is recorded in the manifest so a capture can be traced back to
+// the program that wrote it.
+//
 // It returns the first error it meets, having written whatever preceded it, so
 // a partial run leaves a partial directory rather than an empty one. Nothing is
 // written for a widget whose render fails.
-func Generate(dir string) (Result, error) {
+func Generate(dir, toolVersion string) (Result, error) {
 	entries := Entries()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return Result{}, fmt.Errorf("creating %s: %w", dir, err)
 	}
 
 	result := Result{Dir: dir}
-	manifest := Manifest{Tool: "cmd/capture", Widths: Widths()}
+	manifest := Manifest{Tool: "cmd/capture", Version: toolVersion, Widths: Widths()}
 	index := Index{}
 
 	for _, entry := range entries {

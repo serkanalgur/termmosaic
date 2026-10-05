@@ -25,6 +25,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -656,14 +657,16 @@ func main() {
 
 // run opens the terminal, wires the renderer and the input source, and runs until
 // the user quits.
-func run() error {
+func run() (err error) {
 	t, err := term.Open(os.Stdin, os.Stdout, os.Getenv)
 	if err != nil {
 		return err
 	}
 	// Restoring the terminal is not optional on any exit path: a program that leaves
-	// a terminal in raw mode has broken the user's shell.
-	defer t.Close()
+	// a terminal in raw mode has broken the user's shell. So a failure to do it is
+	// itself worth reporting, which is why the deferred close folds its error into
+	// the named return rather than dropping it.
+	defer func() { err = errors.Join(err, t.Close()) }()
 
 	w, h := t.Size()
 	caps := t.Capabilities()

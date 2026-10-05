@@ -464,10 +464,16 @@ type Pacer struct {
 
 // NewPacer returns a Pacer that renders at the renderer's configured rate.
 func NewPacer(r *Renderer) *Pacer {
-	fps := DefaultTargetFPS
 	r.mu.Lock()
-	fps = r.targetFPS
+	fps := r.targetFPS
 	r.mu.Unlock()
+	// New normalises TargetFPS to at least DefaultTargetFPS, so this cannot be
+	// zero here — but a zero would divide by zero into a zero interval, which
+	// time.NewTicker rejects with a panic rather than a diagnosable error, so the
+	// guard is kept rather than assumed.
+	if fps <= 0 {
+		fps = DefaultTargetFPS
+	}
 	return &Pacer{r: r, every: time.Second / time.Duration(fps)}
 }
 

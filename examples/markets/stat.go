@@ -34,8 +34,6 @@ const (
 	// value row would make two tiles of different heights in a row of fixed height,
 	// and a KPI row that is not level is a KPI row nobody can scan.
 	tileLabelH = 1
-	// tileNoteH is the note row, which carries the arrow and the provenance.
-	tileNoteH = 1
 )
 
 // statTile is a bordered panel with a label, a value and a note.

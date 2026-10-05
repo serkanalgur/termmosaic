@@ -38,6 +38,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -105,7 +106,7 @@ func main() {
 
 // run opens the terminal, wires the renderer, the input source and the fetch
 // goroutine, and runs until the user quits.
-func run(offline bool, interval time.Duration) error {
+func run(offline bool, interval time.Duration) (err error) {
 	// Refuse early rather than half-way through setup: the alt screen is already
 	// active by this point, and returning from it after an error is one more thing
 	// to get right on the way out.
@@ -121,8 +122,10 @@ func run(offline bool, interval time.Duration) error {
 		return err
 	}
 	// Restoring the terminal is not optional on any exit path: a program that
-	// leaves a terminal in raw mode has broken the user's shell.
-	defer t.Close()
+	// leaves a terminal in raw mode has broken the user's shell. So a failure to
+	// do it is itself worth reporting, which is why the deferred close folds its
+	// error into the named return rather than dropping it.
+	defer func() { err = errors.Join(err, t.Close()) }()
 
 	w, h := t.Size()
 	caps := t.Capabilities()

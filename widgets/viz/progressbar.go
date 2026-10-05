@@ -71,7 +71,10 @@ type ProgressBar struct {
 	labelW, percentW int
 	cachedRect       buffer.Rect
 	mark             rune
-	labelSpans       []buffer.Span
+	//nolint:unused // Reserved for the label span cache: kept rather than
+	// deleted because ProgressBar is an exported library widget and this field is
+	// part of its private state that the caching pass is written against.
+	labelSpans []buffer.Span
 }
 
 // NewProgressBar returns a ProgressBar sized r with no value set, which draws an

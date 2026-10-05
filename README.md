@@ -2,7 +2,8 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/serkanalgur/termmosaic.svg)](https://pkg.go.dev/github.com/serkanalgur/termmosaic)
 [![CI](https://github.com/serkanalgur/termmosaic/actions/workflows/ci.yml/badge.svg)](https://github.com/serkanalgur/termmosaic/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/serkanalgur/termmosaic)](https://goreportcard.com/report/github.com/serkanalgur/termmosaic)
+[![gofmt](https://github.com/serkanalgur/termmosaic/actions/workflows/ci.yml/badge.svg?job=gofmt)](https://github.com/serkanalgur/termmosaic/actions/workflows/ci.yml?query=job%3Agofmt)
+[![golangci-lint](https://github.com/serkanalgur/termmosaic/actions/workflows/ci.yml/badge.svg?job=golangci-lint)](https://github.com/serkanalgur/termmosaic/actions/workflows/ci.yml?query=job%3Agolangci-lint)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.23%2B-00ADD8.svg)](go.mod)
 
@@ -10,7 +11,7 @@ A terminal UI framework for Go: a cell-buffer renderer plus a catalog of
 ready-to-use widgets.
 
 > **Status: pre-alpha.** The renderer, input layer and the full widget catalog
-> are built and tested — 23 packages, 950+ tests, zero-allocation frame path —
+> are built and tested — 25 packages, 966 tests, zero-allocation frame path —
 > but the API is **not stable** and may break before v1.0. See
 > [docs/STATUS.md](docs/STATUS.md) for what is decided, proposed and open, and
 > [docs/adr/](docs/adr/) for the reasoning behind each decision.

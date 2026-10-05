@@ -194,29 +194,5 @@ func (f failedSource) Fetch(context.Context) (*market, error) {
 	return m, err
 }
 
-// staleSource is a source that returns a snapshot together with an error, which
-// is the partial case: the screen keeps showing what it had and says which half
-// of the feed is missing.
-type staleSource struct {
-	m   *market
-	err error
-}
-
-func (s staleSource) label() string { return "offline: partial sample" }
-
-func (s staleSource) Fetch(context.Context) (*market, error) {
-	m := *s.m
-	m.failures = []string{oneLine(s.err)}
-	return &m, s.err
-}
-
-// clock is the time source, injected rather than read from the time package
-// directly, so that a test can render a frame and know what the status line says
-// without the golden depending on when the suite ran.
-type clock func() time.Time
-
 // wallClock is the real clock.
 func wallClock() time.Time { return time.Now() }
-
-// fixedClock is a clock stopped at an instant, for tests.
-func fixedClock(at time.Time) clock { return func() time.Time { return at } }

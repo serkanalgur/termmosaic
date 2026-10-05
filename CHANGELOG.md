@@ -30,6 +30,213 @@ reversed before v1.0.0.
 
 ---
 
+## [0.3.0] — 2026-10-05
+
+A minor bump, and the reason is the two widget fixes below: **both change what
+`List` and `Table` put on the screen.** Styling that a program set and the widget
+silently ignored now takes effect, which is the definition of a behaviour change
+and therefore a minor bump under the policy above — a patch release that changed
+behaviour would be a bug in the release, so it is not one.
+
+**What to do about the two Breaking entries.** Read the first one: if you set
+`ItemStyle` or `SelectedStyle` on a `List` and your screen looks different, that
+is this release working, not a regression, and the new colours are the ones you
+asked for. Nothing has to be changed to compile or to run. If you had worked
+*around* the old behaviour — compensating in your own styles because the widget's
+ignored them — that compensation is now double-counting and should come out.
+
+### Breaking
+
+- **`List` item styles and `SelectedStyle` now reach the text.** The per-item
+  style `drawRow` computed for every row was never passed to `paintRow`, so it
+  was computed and discarded: a `List` painted each item's spans with whatever
+  styles the spans themselves carried, and `SelectedStyle` — documented as the
+  selected row's rendition — reached only the background fill, never the glyphs.
+  `paintRow` now takes the content style as an override and `List` supplies it.
+
+  Both public style fields were already documented as taking effect, so this is
+  a fix to behaviour that contradicted its own documentation rather than a new
+  feature. The visible consequence: a `List` item with an `ItemStyle`, and the
+  selected row's `SelectedStyle`, are now honoured. `ItemStyle` on an unselected
+  row and `SelectedStyle` on the selected row both apply, and the selected row's
+  style wins over the item's — which is the precedence the fields describe.
+
+  **A multi-span row is the one thing that does not change.** `paintRow` only
+  applies the override when the row is a single span; flattening a multi-span row
+  would mean building a string on the frame path, which is the allocation this
+  package's zero-allocation claim forbids. A row that deliberately carries
+  several styles keeps them. That limit is documented at `paintRow` and is not a
+  regression — it was equally true before, it was just invisible.
+
+- **`Table` cell styles are no longer overwritten with the terminal default.**
+  `drawCell` was passed `buffer.DefaultStyle` as its "write the spans verbatim"
+  sentinel. That value is wrong for the purpose: `Style.IsUnset()` compares
+  against `Style{}`, and `DefaultStyle` is `Style{DefaultColour, DefaultColour}`
+  — a *resolved* style, not an unset one. So the guard never fired and every
+  cell's `Style` was replaced with the terminal's own colours, along with every
+  column's `CellStyle`. The sentinel is now `buffer.Style{}`.
+
+  The visible consequence: `Table` cell spans and column `CellStyle` now render
+  in the style they were given. A program that set colours on a table column and
+  saw the terminal default will now see its own colours. `HeadingStyle` on the
+  header was unaffected — it is passed as a real override, not as the sentinel —
+  and still works.
+
+  This is a library widget changing what it draws, which is why it is listed here
+  rather than buried under Fixed.
+
+### Fixed
+
+- **A test asserted an allocation count the compiler is allowed to vary.** The
+  input parser's burst test required *exactly* three allocations through
+  `NewParser` + `Feed`. `NewParser` is inlinable, so the `Parser` itself can stay
+  on the stack and only its two buffers reach the heap; two is a valid
+  observation. The assertion is now an upper bound of three. A fourth allocation
+  still fails, which is what the test was actually for.
+
+- **`examples/markets` could cut a multi-byte rune in half.** The status line
+  truncated its error text on a byte index, so one accented or non-Latin
+  character from an API response would be cut mid-rune and leave invalid UTF-8.
+  Truncation now backs up to the last rune start. This is an example program, not
+  library code.
+
+### Added
+
+- **`term/terminal_windows_test.go`.** The Windows backend is a deliberate
+  loud-error stub, so its correct behaviour is a documented set of exact error
+  identities; these tests assert `ErrWindowsStub` by identity rather than by
+  message, because a wrapped or renamed error would remove the only programmatic
+  handle callers have.
+
+  **These tests have never been executed.** CI cross-*builds* Windows but does
+  not run the suite there. They are verified only by type-checking
+  (`GOOS=windows go vet ./...`), which proves they compile and not that they pass.
+  A green Windows CI today would be asserting that a loud error is returned
+  correctly, which is still worth something and is still not the same thing.
+
+### Changed
+
+- **The dependency guard now opens an issue instead of printing a notice.** A
+  `::notice` in a scheduled run scrolls past and is gone by morning, so the
+  weekly `x/term` probe could report the same stale pin forever with nobody
+  reading it. It opens a GitHub issue, deduplicated by a marker naming the
+  pinned version so the human who fixes it is not buried under one identical
+  issue per Monday, and every error path is `core.setFailed` rather than a
+  silent pass — a guard that cannot open its issue and says nothing has stopped
+  guarding. The `pull_request` trigger is gone: the probe hits the network, so
+  its result on a branch says nothing about whether main's pin can move, and a
+  fork's token is read-only regardless, so that step would have failed silently
+  on exactly the contributions most likely to be external.
+
+- **`hello` and `markets` are no longer tracked as committed binaries.** Both had
+  been checked in at the repository root by a `go build`, and `.gitignore` only
+  covered `/termmosaic` and `/examples/*/termmosaic`, so a routine build produced
+  an untracked file that showed up as noise in every future `git status`. They
+  are removed from tracking and ignored.
+
+- **Four tests that skipped themselves now fail instead.** Each was calling
+  `t.Skipf` on a condition that is a property of the *fixture*, not of the
+  environment: the table fitting at 120 columns, the KPI tile having a
+  rectangle at the golden size, the needle's spot not being window-high. A skip
+  on either side of those checks is vacuous — the test asserts nothing and
+  reports success. They are now `t.Fatalf`, which is the honest outcome: if the
+  golden geometry stops producing the geometry the test needs, that is a real
+  failure and CI should say so.
+
+- **golangci-lint is now a CI gate, and the repository carries a config for
+  it.** `golangci-lint run ./...` reported 36 issues on the previous release: 21
+  `unused` and 15 staticcheck, and **not one of the 36 was a defect**. The 21
+  were dead test helpers, unused private constants and two reserved-but-unused
+  struct fields; they are deleted, or in the case of the two fields kept and
+  marked. The 15 were stylistic (`QF1001` De Morgan, `QF1005` `math.Pow`,
+  `QF1008` embedded selectors, `QF1011`/`ST1023` inferred `var` types).
+
+  The lint run is now 0 issues. What was done to reach that matters more than
+  the number:
+
+  - **The dead code was deleted, not silenced.** Every deleted test helper was
+    grepped for references first, across all test files and examples, because a
+    helper that one package's test file stops calling is often still another
+    one's — `blockOf` and `focusable` exist in several packages with the same
+    name and the same purpose, and deleting the wrong copy would have broken a
+    suite. No test was weakened or deleted to make lint pass; the count of tests
+    and of packages is unchanged.
+  - **Two struct fields were deliberately kept.** `labelPad` in
+    `widgets/menu` and `labelSpans` in `widgets/viz` are reserved for passes
+    that are written but not yet wired. Removing a field from an exported
+    widget's private state is a change to a library widget's internals, and the
+    alternative — a blanket `unused` exclusion that hides every dead field in
+    the project forever — costs more than it buys. They carry an inline
+    `//nolint:unused` with the reason, so the exception is visible at the field
+    and the config needs no exclusion list.
+  - **The five stylistic checks are disabled in `.golangci.yml`, with the
+    reasoning written down.** They are opinionated formatting preferences, not
+    correctness rules, and this project makes the opposite choice on purpose in
+    each case. `errcheck`, `ineffassign`, `govet` and staticcheck's SA rules —
+    the checks that find real defects — are all enabled, and none of them was
+    disabled or filtered. The config's comment says this is a house-style
+    decision and not suppression of findings, because that is what it is: no
+    real finding is behind any of those five names.
+
+  Enabling staticcheck's full set also surfaced three more naming and comment
+  rules (`ST1003`, `ST1020`, `ST1022`). `ST1003` wants the exported field `Ascii`
+  renamed to `ASCII` on three widgets, which would be a source break for every
+  user of the library; that one is a real constraint of a pre-1.0 API and not a
+  style preference, so it is named and excluded explicitly rather than left to
+  fail the build.
+
+- **The lint run has its own CI job, badge-pinned to one version.** As with
+  `gofmt`, the job is separate from the matrix so the badge means "lint" and
+  nothing else, and `golangci-lint-action` is pinned to `v2.14.0` rather than
+  `@latest`, for the same reason `go-version` is pinned in ADR 0001: a lint
+  upgrade is a change in what CI asserts, and it should be a commit, not a
+  surprise on someone else's schedule.
+
+- **The Go Report Card badge is gone.** The service shut down in 2025, so the
+  badge was rendering as unavailable in every README view — a permanent visual
+  claim of a failing check that no longer exists. Removing it is the fix; a
+  golangci-lint badge takes its place, pointed at the dedicated job.
+
+- **`cmd/capture` records its own version in `manifest.json`.** The `version`
+  constant existed and was documented as being recorded there, but nothing
+  consumed it, so `golangci-lint` correctly reported it as unused and a
+  capture could not be traced to the program that wrote it. `Manifest` gained a
+  `version` field and `Generate` takes the tool version as a parameter. Output
+  is still byte-deterministic: the version is a constant of the build, not a
+  timestamp.
+
+- **Docs synced to the code.** `docs/STATUS.md` and `docs/ARCHITECTURE.md`
+  corrections only — widget counts, a misleading comment on the wide-column
+  test, and the release-gate self-assessment. No API surface described in the
+  docs changed.
+
+### Known Limitations
+
+- **The Windows tests are unexecuted, and this release does not change that.**
+  See above. CI cross-*builds* Windows and never *runs* the suite there, so
+  `term/terminal_windows_test.go` is verified only by
+  `GOOS=windows go vet ./...`, which proves it compiles and not that it passes.
+  The backend itself is still a deliberate loud-error stub.
+
+- **golangci-lint runs on one version, on one platform, on Linux.** The pinned
+  `v2.14.0` is the release this repository was verified against; nothing in CI
+  re-verifies it against a newer one, so a linter upgrade that introduces a
+  finding will surface as a red build at the moment of the upgrade rather than
+  in advance. `golangci-lint` also type-checks only under the host GOOS in the
+  lint job, so a Windows-only compile error would be caught by the `test` job's
+  `windows-latest` leg and not by lint.
+
+- **`unused` cannot see a whole file's worth of intent.** It reports dead code,
+  not dead *plans*. The two `//nolint:unused` fields are the honest cost of that
+  limit: they are reservations, and this release does not implement them.
+
+- **Nothing was renamed to satisfy a linter.** `Ascii` is still `Ascii` on
+  `basic.Text`, `block.Block` and the other widgets that expose it. The lint
+  configuration accommodates the API rather than the API accommodating the
+  linter, which is the right way round for a pre-1.0 library.
+
+---
+
 ## [0.2.0] — 2026-10-05
 
 A minor bump, and the reason is the framework fix below: `Renderer.Post` now
@@ -390,4 +597,6 @@ Two performance claims that this release turns from assertion into measurement:
   **60 cursor moves and 19,443 bytes, 3.12× the narrow frame** rather than 11×.
   The ASCII path is unchanged. See ADR 0008's amendment, finding 4.
 
+[0.3.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.3.0
+[0.2.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.2.0
 [0.1.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.1.0

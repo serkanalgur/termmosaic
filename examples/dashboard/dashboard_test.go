@@ -243,8 +243,15 @@ func TestDashboardTableScrollsHorizontallyThroughTheScreen(t *testing.T) {
 	// scrolling survives being laid out.
 	board := newDashboard(120, 30)
 	before := strings.Join(screen(t, 120, 30, board), "\n")
+	// A failure, not a skip. The width is fixed by this test at 120 and the
+	// column set is fixed by the table, so "every column fits" is a statement
+	// about the code, not about the environment — it can only come true if the
+	// columns were made narrower. That change is not a reason to stop testing
+	// that horizontal scrolling survives composition; it is the reason the
+	// scrolling has quietly lost the ability to happen at all.
 	if strings.Contains(before, "status") {
-		t.Skip("every column fits at this size; there is nothing to scroll")
+		t.Fatalf("every column already fits at 120 columns, so there is nothing to scroll "+
+			"and this test would assert nothing:\n%s", before)
 	}
 	if !board.Handle(termmosaic.SpecialKeyEvent(termmosaic.KeyTab, 0)) {
 		t.Fatal("tab was not consumed")

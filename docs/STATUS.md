@@ -28,7 +28,7 @@ break without notice until v1.0.0.**
 
 | Item | State | Notes |
 |---|---|---|
-| Backend strategy (own vs wrapped vs pluggable) | **DECIDED** — pluggable, own the core | Two narrow interfaces (`Terminal`, `Sink`), direct `golang.org/x/sys` impl, headless memory sink. Wraps no terminal library: tcell's flush measured 280,814 ns/op vs our 7,133 ns/op on a one-row-dirty frame. [ADR 0001](adr/0001-backend-strategy.md) |
+| Backend strategy (own vs wrapped vs pluggable) | **DECIDED** — pluggable, own the core | Two narrow interfaces (`Terminal`, `Sink`), an impl on `golang.org/x/term` plus `x/sys` directly, headless memory sink. Wraps no terminal library: tcell's flush measured 280,814 ns/op vs our 7,133 ns/op on a one-row-dirty frame. [ADR 0001](adr/0001-backend-strategy.md) |
 | Cell buffer representation (AoS vs SoA) | **DECIDED** — AoS, padding-free 16-byte `Cell` | **Overturned the prior SoA leaning.** Measured: packed-AoS row skip ties with SoA (5,373 vs 5,128 ns/op) and is 4.4× faster when all rows are dirty (147.2 vs 636.7). OpenTUI's advantage is Zig's `mem.eql`, not SoA. [ADR 0002](adr/0002-buffer-representation.md) |
 | Renderer mode (immediate vs retained vs hybrid) | **DECIDED** — hybrid | Retained widget tree invalidated by rectangle; widgets describe themselves on demand. No reconciler, no Elm loop. [ADR 0003](adr/0003-renderer-mode.md) |
 | Layout engine (own constraints vs flexbox) | **DECIDED** — constraint-based, own solver | `Length`/`Min`/`Max`/`Percentage`/`Ratio`/`Fill`. Yoga rejected: cgo breaks `CGO_ENABLED=0` cross-compilation. [ADR 0004](adr/0004-layout-engine.md) |
@@ -38,17 +38,25 @@ break without notice until v1.0.0.**
 | Color model and degradation ladder | **PROPOSED** | Built and working: `Colour` is truecolor/named-16/256 with a redmean quantiser and a `ColourDepth` rung, plus `NO_COLOR`. **Not yet validated.** Nobody has checked the redmean mapping is perceptually acceptable, so treat the 256 and 16 rungs as provisional. The `buffer.Quantiser` interface is the escape hatch for a Lab-space replacement. |
 | Theme and styling system | **DECIDED** — **no theme in v1**; widgets carry `Style` fields, framework defaults are the terminal's own colours plus named attribute styles | One `buffer.Style` value (fg/bg/attr, by value, 12 bytes, 0 allocs) replaces the loose-argument write API; `ansi.Style` becomes an alias of it. Trigger for a theme: the first role two widgets must share. [ADR 0008](adr/0008-style-and-text.md) |
 | Text and span rendering | **DECIDED** — `Span` + `Buffer.SetSpans`, parsed once, wrapped outside `Draw` | A wide glyph's continuation cell takes its **owning span's** style or the row flickers forever. `Wrap`/`Truncate` allocate and are banned from `Draw`. Borders and titles have one vocabulary (`BorderPlain`/`Rounded`/`Double`/`Thick`/`ASCII`, one `Block`). [ADR 0008](adr/0008-style-and-text.md) |
-| Commands and keymap (where the command layer sits, and whether `Widget.Handle` changes) | **DECIDED** — a new `keymap` package sitting **above** `Widget.Handle`; the `Widget` interface is **unchanged** | A named action and a key that reaches it are different things. One normalised `Chord` (`KeySpace` and `Rune ' '` are one chord) is a comparable 16-byte struct, so resolution is a map lookup at **0 allocs**, pinned by `TestDispatchIsZeroAllocation`. Resolution is **focus > screen > global with no numeric priority**, and a user override wins only within its own scope — so a dialog's `Esc` cannot be stolen. Widgets join through **optional** `Commandable`/`Clickable` interfaces (the `Focusable` pattern) and **v0.2 requires them of zero catalog widgets**. `EventResize` and `EventPaste` never enter a command layer. Help is `Describe`, computed from the same tables `Dispatch` walks, so it cannot drift. A click is a command because the **widget under the pointer says so** — the registry holds no rectangles. The `Ctrl+K` palette is in scope, built on `Menu`+`Dialog`+`TextInput`, and not by this ADR. Deferred with triggers: multi-stroke/leader sequences, command-line args, config persistence, release bindings, drag-as-command. [ADR 0009](adr/0009-command-and-keymap.md) |
+| Commands and keymap (where the command layer sits, and whether `Widget.Handle` changes) | **DECIDED** — a new `keymap` package sitting **above** `Widget.Handle`; the `Widget` interface is **unchanged** | A named action and a key that reaches it are different things. One normalised `Chord` (`KeySpace` and `Rune ' '` are one chord) is a comparable 16-byte struct, so resolution is a map lookup at **0 allocs**, a property ADR 0009 specifies and a test must pin, **not one that any test pins today: there is no `keymap/` directory, and `TestDispatchIsZeroAllocation` and `TestChordIsSixteenBytes` do not exist.** `keymap` lands in v0.4.0 — **not** v0.3.0, which shipped on 2026-10-05 without it — so `Event.Chord` normalisation, the scope chain and `Describe` are all specified-only. Resolution is **focus > screen > global with no numeric priority**, and a user override wins only within its own scope — so a dialog's `Esc` cannot be stolen. Widgets join through **optional** `Commandable`/`Clickable` interfaces (the `Focusable` pattern) and **v0.2 requires them of zero catalog widgets**. `EventResize` and `EventPaste` never enter a command layer. Help is `Describe`, computed from the same tables `Dispatch` walks, so it cannot drift. A click is a command because the **widget under the pointer says so** — the registry holds no rectangles. The `Ctrl+K` palette is in scope, built on `Menu`+`Dialog`+`TextInput`, and not by this ADR. Deferred with triggers: multi-stroke/leader sequences, command-line args, config persistence, release bindings, drag-as-command. [ADR 0009](adr/0009-command-and-keymap.md) |
 | `docs/ARCHITECTURE.md` | **DECIDED** — a short orientation document, not a summary | Reduced to 105 lines at the v0.1.0 release gate. It had grown to 251 lines duplicating ADR reasoning, its decision numbering (5=colour, 6=theme, 7=input) did not match the ADR set, and it still called the colour model OPEN after this table moved it to PROPOSED. It now states what the pieces are, how they fit, and links each ADR — no duplicated reasoning — and preserves the **Non-goals** section verbatim, which is not duplicated anywhere else. |
-| Documentation site | **PROPOSED** — Hugo + Pagefind on GitHub Pages; captures generated in Go from `MemorySink` cells, not screenshots | No browser TTY exists, so the only truthful picture of a widget is the cell grid the renderer produced — which is what `widgets/widgettest` already builds and what the golden tests assert on, so the docs cannot drift from behaviour. **Not built.** A live WASM playground is rejected: `docs/ARCHITECTURE.md` lists "no WASM build" as a written non-goal and `term/terminal_windows.go` is a stub, so there is no seam to port. Plan, page tree, per-widget template and effort: [docs/SITE-PLAN.md](SITE-PLAN.md). |
+| Documentation site | **PROPOSED** — Hugo + Pagefind on GitHub Pages; captures generated in Go from `MemorySink` cells, not screenshots | No browser TTY exists, so the only truthful picture of a widget is the cell grid the renderer produced — which is what `widgets/widgettest` already builds and what the golden tests assert on, so the docs cannot drift from behaviour. **The capture half is built** — `internal/docsgen` (~2,242 lines) and `cmd/capture` (~228 lines), 2,470 lines together, with a one-entry-per-widget registry whose `Entries()` returns
+exactly 24 — `Menu` and `Dialog` are in it — plus plain-text *and* HTML output, a sorted `manifest.json`, `index.json`, and a `-check` mode that fails on a byte difference. **The Hugo/Pagefind site itself is not built.** A live WASM playground is rejected: `docs/ARCHITECTURE.md` lists "no WASM build" as a written non-goal and `term/terminal_windows.go` is a stub, so there is no seam to port. Plan, page tree, per-widget template and effort: [docs/SITE-PLAN.md](SITE-PLAN.md). |
 
 ### Decisions
 
-The seven core architecture rows above are **DECIDED** — the first four on
-2026-10-03, input decoding, sub-buffer cell access, responsive screen
-composition and style/theme/text on 2026-10-04, and commands and the keymap on
-2026-10-05 — and are recorded in full, with
-rejected alternatives, in [docs/adr/](adr/README.md).
+The core architecture rows above that carry **DECIDED** — backend strategy, cell
+representation, renderer mode, layout engine, input decoding, sub-buffer cell
+access, responsive composition, style/theme/text, and commands and the keymap —
+were decided on 2026-10-03 (the first four), 2026-10-04 (input decoding,
+sub-buffer cell access, responsive composition, style/theme/text) and 2026-10-05
+(commands and keymap), and are recorded in full, with rejected alternatives, in
+[docs/adr/](adr/README.md).
+
+Two of them are DECIDED with nothing built under them. The colour model is
+**PROPOSED**, and `keymap` is DECIDED but unimplemented — a decision without an
+implementation is still a decision, and the distinction matters when reading this
+table: DECIDED means "will not be reopened", not "shipped".
 
 Decisions 1 and 2 were made **empirically** — a scratch benchmark module was
 built outside the repo and measured on darwin/arm64 (Apple M1). The headline
@@ -116,22 +124,34 @@ claim that matters and it is asserted: List renders 10k items in 13,320 ns and
 100k in 14,242 — 7% for ten times the data — and Table likewise, both at zero
 allocations.
 
-**Core** — `Block`, `Text`, `Paragraph`, `Split`. Plus the non-widget
+The catalog is enumerated here in full, all 24, so the count above is checkable
+against this list rather than against a claim:
+
+**Core (4)** — `Block`, `Text`, `Paragraph`, `Split`. Plus the non-widget
 primitives they build on: `buffer.Buffer`, `layout`, `buffer.Span`.
 `Block` is the only thing in the catalog that draws a border or a title.
 
-**Forms** — `TextInput`, `TextArea`, `Select`, `Checkbox`, `Radio`, `Toggle`,
+**Forms (9)** — `TextInput`, `TextArea`, `Select`, `Checkbox`, `Radio`, `Toggle`,
 `Tabs`, `Button`, `KeyHint`. A `Form` container was **not** built; ADR 0004's
 solver plus `layout` covers composition, and a `Form` type would have been a
 second way to do the same thing.
 
-**Data** — `List`, `Table`, `Tree`, `Pager`, plus the `virtual/` engine they
+**Data (4)** — `List`, `Table`, `Tree`, `Pager`, plus the `virtual/` engine they
 share (flat cost from 10 to 1,000,000 items, asserted).
 
-**Visualization** — `ProgressBar`, `Gauge`, `Meter`, `Sparkline`, `BarChart`.
+**Visualization (5)** — `ProgressBar`, `Gauge`, `Meter`, `Sparkline`, `BarChart`.
 `Sparkline` and `Gauge` use Braille for sub-cell resolution; `Gauge` degrades
 to a bar when the rect or terminal cannot hold a dial. These five are the gap in
 every comparable framework — OpenTUI has 13.4k stars and ships none of them.
+
+**Composites (2)** — `Menu`, `Dialog`. Both new in v0.2.0. `Menu` is a navigable
+tree with submenus to arbitrary depth; `Dialog` is a modal with `VariantInfo`,
+`VariantConfirm` and `VariantChoice`. `Dialog` is the largest widget in the
+repository. Both are containers: they compose other widgets and each has its own
+`Draw`, so both count toward the 24.
+
+`Menu` and `Dialog` were the two entries this list used to omit, which is how a
+list of 22 sat under a claim of 24. The count was right; the enumeration was not.
 
 **Responsiveness is decided**, in [ADR 0007](adr/0007-responsive-screens.md),
 because three coders build independent widget sets against a shared vocabulary.
@@ -156,8 +176,117 @@ framework's defaults are the terminal's own colours plus named attribute styles.
 `NO_COLOR` and the 16-colour rung stay encode-time only, so no widget path
 consults them.
 
-## Release gate for v0.1.0 — what closed, and what did not
+## Release gate for v0.3.0 — what closed, and what did not
 
+The current release is **v0.3.0, 2026-10-05** — a minor over v0.2.0, and the
+reason is the pair of `widgets/data` fixes: `List` now passes the per-item style
+it computes to `paintRow`, so `ItemStyle` and `SelectedStyle` actually reach the
+text, and `Table.drawCell`'s "write verbatim" sentinel was `buffer.DefaultStyle`
+where `Style.IsUnset()` compares against `Style{}`, so the guard fired on every
+cell and replaced every cell `Style` and every column `CellStyle` with the
+terminal default. Both change what two library widgets draw, which is the
+definition of a behaviour change, and the release policy above puts those in a
+minor — a patch that changed behaviour would be a bug in the release.
+
+Everything else in this release — the allocation assertion, the markets rune
+truncation, the Windows type-checked tests, the dependency guard, the untracked
+binaries, the four skips-now-fails, the golangci-lint gate and the badge — is
+test, tooling, packaging or prose, and none of it is a reason for the bump.
+
+The gate below is the v0.2.0 gate, still the substantive one.
+
+**v0.2.0** was released 2026-10-05
+([CHANGELOG.md](../CHANGELOG.md)). A minor bump, and the reason is the first fix
+below: `Renderer.Post` now wakes the frame pacer, which **is** a behavioural
+change.
+
+**Verified baseline at this gate**, go1.27.1 darwin/arm64: `go build ./...`,
+`go vet ./...`, `gofmt -l .` and `golangci-lint run ./...` all clean (the last
+at 0 issues against the pinned v2.14.0, down from 36), and
+`go test ./... -race -count=1`
+fully green across all 25 test packages — ~830 tests in 80 files, against 62
+golden files.
+
+Recorded so that nothing below is silently open. "Closed" means it is done and
+verified; "not done" means it is still open and is named as such rather than
+left for someone to rediscover.
+
+**Closed.**
+
+- **`Renderer.Post` no longer deadlocks the pacer.** `needsFrameLocked` did not
+  consider queued callbacks, while `Pacer.Run` gates every frame on
+  `NeedsFrame()` and posted callbacks only run *inside* `Render`. An app that
+  updates the screen from `Post` — the mutation path ADR 0003 documents as safe
+  against a concurrent `Draw` — painted its first frame and idled forever. The
+  new `examples/markets` hit it live, and `--offline` masked it from every test,
+  because the instant fetch is already queued by the time the first frame runs.
+  Fixed.
+- **The diff no longer emits a cursor move before every wide glyph.** Run
+  suppression compared against `lastX+1`, but a wide glyph advances the terminal
+  cursor by two. 6,000 wide glyphs cost 6,000 CUP escapes against the narrow
+  scene's 30; the tracker now advances by the glyph's **cell width**, cutting
+  68,832 bytes to 19,443 for identical output. This closes the one defect the
+  v0.1.0 gate recorded as deliberately unfixed.
+- **`BarChart` draws horizontal-mode category labels in place.** `adapt` never
+  set `axisRow`, so every label went to absolute column 0 — inside `Bounds` only
+  for a chart at the origin, and outside its own rectangle everywhere else.
+- **`Menu` and `Dialog` exist**, with keyboard traversal, focus save and restore,
+  and per-widget key, cell and golden tests. `Dialog` alone brings six test files
+  and its own golden corpus; `Menu` five.
+- **`examples/markets`** — a live dashboard on real data with no API key, three
+  reflowing bands, and `--offline` so tests and CI never touch the network.
+  **Keyboard and mouse** work in all three examples.
+- **`examples/hello` is genuinely responsive** rather than clamped.
+- **The capture generator is built**: `internal/docsgen` and `cmd/capture`, the
+  cell-grid-to-HTML path and a `-check` determinism gate. The Hugo/Pagefind site
+  still is not.
+
+**Not done, and deliberately so.**
+
+- **`keymap` is not implemented.** [ADR 0009](adr/0009-command-and-keymap.md)
+  specifies it; the package does not exist. Widgets still dispatch their own keys
+  and there is no command palette. This is a v0.4.0 item — it was targeted at
+  v0.3.0, which shipped on 2026-10-05 without it — and it is the one DECIDED row
+  in the table above whose implementation is entirely ahead of it.
+- **`form.Tabs` consumes every wheel notch** regardless of where the pointer is,
+  so it steals the wheel from whatever is beneath it. The examples work around it
+  with application-level routing; the widget is unchanged. This wants an ADR
+  decision and has none.
+- **The documentation site is still not built** — only the capture half is.
+  Separate work, separate repository.
+- **The colour quantiser is still unvalidated.** PROPOSED, not DECIDED.
+- **tmux / screen DCS passthrough is still missing.** Deferred with a trigger.
+- **IME / preedit is not implemented**, by ADR 0005's deliberate deferral. The
+  cost is documented rather than mitigated.
+- **The cache-poisoning debug mode is still not built.** ADR 0007's expensive
+  half, still a convention rather than a check. Not a release gate.
+- **`TextArea` has no rendered selection, and there is no `Form` container, no
+  table column selection, no pager selection and no redo stack.** Each would be
+  a widget API addition; none is in scope for a release gate.
+- **Every widget still lacks a `func Example`** — see the definition of usable
+  library below. Three example *programs* exist; zero runnable per-widget
+  examples do.
+- **The lint gate is narrower than the checklist above suggests.** It is
+  `golangci-lint run ./...` at a pinned v2.14.0 on Linux, with `errcheck`,
+  `ineffassign`, `govet`, staticcheck's SA rules and `unused` enabled and the
+  five opinionated stylistic checks disabled by a written decision in
+  `.golangci.yml`. It is not a second opinion on the ADR checklist, it is not
+  re-verified against newer linter releases, and `unused` cannot distinguish a
+  dead field from a reserved one — which is why `labelPad` and `labelSpans` are
+  kept with an inline `//nolint:unused` instead of being deleted from library
+  widgets.
+- **`term/terminal_windows_test.go` has still never been executed.** CI
+  cross-builds Windows and never runs the suite there, so those assertions are
+  verified by `GOOS=windows go vet ./...` alone: they compile, and nothing more
+  is claimed for them.
+
+## The v0.1.0 gate, retained as history
+
+The v0.1.0 gate is preserved below. Its closed claims were true when made and
+are not restated as current work; the items it left open are still open and
+appear in the lists above.
+
+**Closed.**
 Recorded so that nothing below is silently open. "Closed" means it is done and
 verified; "not done" means it is still open and is named as such rather than
 left for someone to rediscover.
@@ -188,7 +317,9 @@ left for someone to rediscover.
 - **Wide-glyph paths are benchmarked.** See the open-questions entry below for the
   numbers and for the one defect found and deliberately not fixed.
 
-**Not done, and deliberately so.**
+**Not done at v0.1.0.** Superseded by the v0.2.0 list above; retained verbatim so
+the gate is not rewritten. One item has since closed: the diff's cursor-move
+overhead on wide glyphs, fixed in v0.2.0.
 
 - **The cache-poisoning debug mode is still not built.** ADR 0007's expensive half,
   still a convention rather than a check. Not a release gate.
@@ -281,7 +412,13 @@ Answered questions have been removed; the reasoning is preserved in
   2026-10-04:** `CGO_ENABLED=0` builds are now verified for `windows` and
   `linux/arm64`, so the packaging half of the risk is closed — but the Windows
   backend is a **stub that returns a loud error** from every console operation,
-  not a working console. The remaining risk is entirely the runtime half.
+  not a working console. **Updated 2026-10-05:** `term/terminal_windows_test.go`
+  now exists and pins that documented error contract. It is `//go:build windows`
+  and has been verified **compile-only**, via `GOOS=windows go vet`. It has
+  **never been executed** — not on Windows, not under Wine, not on any machine
+  with a console. So the runtime half of this risk is exactly as open as it was:
+  the tests raise the floor on what a Windows implementation would have to
+  satisfy, and nothing more. The remaining risk is entirely the runtime half.
 - **Color model and degradation ladder** — moved from OPEN to **PROPOSED**;
   see the table row above. Built and working, not yet perceptually validated.
   The **theme/styling system** is no longer in this list:
@@ -329,9 +466,25 @@ Answered questions have been removed; the reasoning is preserved in
 The bar this project is measured against:
 
 - SemVer honored from v0.1; **no behavioral change in a patch release**.
+  **MET** — the v0.1.0 → v0.2.0 bump is minor, and the one behavioural change in
+  it (`Post` waking the pacer) is listed under Fixed with its reason.
 - A hand-maintained `CHANGELOG.md` with Breaking / Added / Fixed /
-  Known Limitations sections. **MET for v0.1.0** — [CHANGELOG.md](../CHANGELOG.md)
-  is written and carries all four sections.
+  Known Limitations sections. **MET** — [CHANGELOG.md](../CHANGELOG.md) is
+  written and carries the sections; v0.2.0 adds Fixed, Added, Changed and
+  Known Limitations.
 - CI green on Linux, macOS, and Windows across supported architectures.
-- Every widget has a runnable example and a documented public API.
+  **PARTIALLY MET.** `CGO_ENABLED=0` cross-compiles are verified for `windows`
+  and `linux/arm64`, and the Windows test file compiles. Nothing has ever been
+  *run* on Windows, and the Windows backend is a stub, so a green Windows CI
+  would today be asserting that a loud error is returned correctly.
+- **Every widget has a runnable example and a documented public API. NOT MET,
+  and not close.** There are three example programs — `hello`, `markets`,
+  `dashboard` — and **zero `func Example` functions in the codebase**. Each of
+  the 24 widgets has a documented public API in godoc terms, but none has the
+  runnable, godoc-rendered example this criterion asks for, and `Menu` and
+  `Dialog` have no example program either. This is the largest unmet item in
+  this list and it is stated here rather than dropped.
 - Known limitations are enumerated in the docs, not discovered by users.
+  **MET** — [CHANGELOG.md](../CHANGELOG.md)'s Known Limitations section, plus
+  the "Known Limitations" in [docs/adr/](adr/README.md) and the gaps named in
+  this document.

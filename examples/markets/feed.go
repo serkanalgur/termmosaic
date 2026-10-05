@@ -42,6 +42,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // The endpoints, and the two knobs that decide how patient this example is.
@@ -586,7 +587,10 @@ func (l *liveSource) getJSON(ctx context.Context, url string, out any) error {
 		}
 		return fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	// A read-side close error on an HTTP response body means the connection was
+	// not cleanly drained, which net/http already surfaces through the read below.
+	// Reporting it again here would turn a successful fetch into a spurious error.
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
@@ -620,7 +624,28 @@ func oneLine(err error) string {
 	s := strings.Join(strings.Fields(err.Error()), " ")
 	const maxErrCells = 72
 	if len(s) > maxErrCells {
-		s = s[:maxErrCells]
+		s = truncateAtRuneStart(s, maxErrCells)
 	}
 	return s
+}
+
+// truncateAtRuneStart clips s to at most maxBytes, never splitting a multi-byte
+// rune.
+//
+// A byte index is not a rune index: the error strings reaching oneLine are built
+// from API responses, so a single accented or non-Latin character would otherwise
+// be cut in half and leave invalid UTF-8 for whatever consumes the string. Backing
+// up to the last rune start at or before maxBytes drops at most three bytes and
+// costs no allocation, which is all a display string needs — this is a boundary
+// guarantee, not a cell-accurate measurement, and the status line truncates again
+// on the way to the cell buffer if that distinction matters.
+func truncateAtRuneStart(s string, maxBytes int) string {
+	if maxBytes >= len(s) {
+		return s
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }

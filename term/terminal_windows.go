@@ -4,7 +4,6 @@ package term
 
 import (
 	"errors"
-	"io"
 	"os"
 	"sync"
 
@@ -103,5 +102,3 @@ func (t *WindowsTerminal) Close() error {
 	close(t.resizes)
 	return nil
 }
-
-var _ io.Writer = (*os.File)(nil)

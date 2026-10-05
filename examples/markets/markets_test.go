@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/serkanalgur/termmosaic"
 	"github.com/serkanalgur/termmosaic/buffer"
@@ -861,10 +862,14 @@ func TestKPIFrameIsAllocationFree(t *testing.T) {
 	d.Draw(buf)
 
 	tile := d.stat[tileChange]
-	tileBuf := buffer.NewBuffer(tile.bounds.W, tile.bounds.H)
+	// A degenerate rectangle is the code's own output at the golden size, so it
+	// is a failure rather than a skip — and a vacuous one at that: drawing into a
+	// zero-cell buffer does not allocate, so a skip here would report the KPI
+	// frame allocation-free on the strength of nothing being drawn at all.
 	if tile.bounds.W <= 0 || tile.bounds.H <= 0 {
-		t.Skipf("the tile has no rectangle at this size: %v", tile.bounds)
+		t.Fatalf("the KPI tile has no rectangle at the golden size: %v", tile.bounds)
 	}
+	tileBuf := buffer.NewBuffer(tile.bounds.W, tile.bounds.H)
 	tile.Draw(tileBuf)
 	tile.Draw(tileBuf)
 	if got := testing.AllocsPerRun(50, func() { tile.Draw(tileBuf) }); got != 0 {
@@ -913,11 +918,14 @@ func TestSetFrameReplacesEveryWidget(t *testing.T) {
 	if !ok {
 		t.Fatal("the sample has no window extremes")
 	}
-	spot, _ := m.spot()
-	if spot != hi {
-		t.Skipf("the fixture's spot is not the window high (%v vs %v), so it cannot test the needle",
-			spot, hi)
-	}
+	// The fixture's own spot is not consulted here at all: `partway` below sets the
+	// primary rate explicitly, so the needle's position is decided by the
+	// assignment rather than by whatever the sample happened to carry. An earlier
+	// version skipped when the fixture's spot was not the window high, which was
+	// checking a fact about the data that the assertions below never relied on —
+	// so any edit to the sample could switch this off without changing what is
+	// actually verified. Removed rather than converted: there is no precondition
+	// left to assert.
 	mid := (lo + hi) / 2
 	partway := sampleMarket()
 	partway.rates[partway.primary] = mid
@@ -2054,6 +2062,38 @@ func TestOneLineIsBoundedAndSingleLine(t *testing.T) {
 	}
 }
 
+// TestOneLineTruncatesOnARuneBoundary is the UTF-8 half of the bound above.
+//
+// The limit is a count of CELLS but a string is indexed in BYTES, so clipping at
+// byte 72 cuts a three-byte rune in half and leaves invalid UTF-8 for the cell
+// buffer — and the failure strings that reach oneLine are assembled from API
+// responses, so a single accented or non-Latin character is entirely plausible.
+//
+// The padding is chosen so the 72-byte cut lands inside the run of wide runes
+// rather than between them, which is the only arrangement that exercises the
+// boundary at all.
+func TestOneLineTruncatesOnARuneBoundary(t *testing.T) {
+	// 58 ASCII bytes, then 3-byte runes. Byte 72 falls two bytes into the fifth
+	// rune, so a naive s[:72] splits it; backing up to 70 keeps four whole runes.
+	src := strings.Repeat("a", 58) + strings.Repeat("日", 20)
+	got := oneLine(errors.New(src))
+
+	if len(got) > 72 {
+		t.Errorf("oneLine returned %d bytes, over the 72-byte bound", len(got))
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("oneLine split a rune: %q", got)
+	}
+	if !strings.HasSuffix(got, strings.Repeat("日", 4)) {
+		t.Errorf("oneLine cut at %q, want the whole runes through the bound", got)
+	}
+	// The ASCII prefix must survive intact, so the fix is a clip and not a
+	// wholesale replacement of anything non-ASCII.
+	if !strings.HasPrefix(got, strings.Repeat("a", 58)) {
+		t.Errorf("oneLine mangled the ASCII prefix: %q", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
@@ -2118,28 +2158,6 @@ func rowWith(screenText string, subs ...string) string {
 		}
 	}
 	return ""
-}
-
-// withPrimaryChange returns a market whose primary pair moved by chg percent,
-// whatever its previous rate was.
-//
-// Setting the previous rate rather than the spot keeps the spot rate the fixture's
-// own, so the only thing the test varies is the change — which is the subject.
-func withPrimaryChange(m *market, chg float64) *market {
-	out := *m
-	out.rates = make(map[string]float64, len(m.rates))
-	for k, v := range m.rates {
-		out.rates[k] = v
-	}
-	out.prev = make(map[string]float64, len(m.prev))
-	for k, v := range m.prev {
-		out.prev[k] = v
-	}
-	spot := out.rates[out.primary]
-	if spot > 0 {
-		out.prev[out.primary] = spot / (1 + chg/100)
-	}
-	return &out
 }
 
 // directionOfZone is the meter's band NAME read back as a direction, which is the

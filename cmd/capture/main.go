@@ -57,7 +57,7 @@ const defaultOut = "~/termmosaic.github.io/static/captures"
 
 // version is the tool's own version string, recorded in manifest.json so a
 // capture file can be traced to the program that wrote it.
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	out := flag.String("out", defaultOut,
@@ -117,7 +117,7 @@ func expandHome(path string) (string, error) {
 
 // generate renders the catalog into out and prints a summary.
 func generate(out string) error {
-	res, err := docsgen.Generate(out)
+	res, err := docsgen.Generate(out, version)
 	if err != nil {
 		return err
 	}
@@ -151,18 +151,21 @@ func checkDeterministic(out string) error {
 	if err != nil {
 		return fmt.Errorf("temp dir: %w", err)
 	}
-	defer os.RemoveAll(first)
+	// Cleanup in a defer: a failure to remove a temp dir the OS will reap on exit
+	// is not worth failing a determinism check over, and there is nowhere left to
+	// report it to by the time a defer runs.
+	defer func() { _ = os.RemoveAll(first) }()
 	second, err := os.MkdirTemp("", "capture-b-")
 	if err != nil {
 		return fmt.Errorf("temp dir: %w", err)
 	}
-	defer os.RemoveAll(second)
+	defer func() { _ = os.RemoveAll(second) }()
 
-	a, err := docsgen.Generate(first)
+	a, err := docsgen.Generate(first, version)
 	if err != nil {
 		return err
 	}
-	b, err := docsgen.Generate(second)
+	b, err := docsgen.Generate(second, version)
 	if err != nil {
 		return err
 	}

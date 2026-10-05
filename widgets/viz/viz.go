@@ -108,9 +108,6 @@ const (
 	dialGapRatio = 0.22
 	// minBarW is the narrowest interior a bar-shaped widget draws something in.
 	minBarW = 4
-	// minBarH is the smallest height at which a bar-shaped widget still shows a
-	// bar rather than collapsing to nothing.
-	minBarH = 1
 )
 
 // paintRow fills row in bg and then writes spans into it, offset by lead cells.
