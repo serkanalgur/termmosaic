@@ -224,7 +224,7 @@ func joinRow(head, tail []buffer.Span) []buffer.Span {
 }
 
 // wheelDelta maps a wheel event to a scroll distance, and reports whether the
-// event was a wheel notch at all.
+// event was a scrollable wheel notch — that is, one inside r.
 //
 // Three rows per notch is the number that makes a long list feel right at 60
 // frames a second: one row per notch is so slow that a user scrolls a 200-row
@@ -232,7 +232,14 @@ func joinRow(head, tail []buffer.Span) []buffer.Span {
 // short list entirely. It is a widget-local threshold (ADR 0007 §1 rule 5),
 // chosen once here because three widgets sharing it would otherwise each pick
 // their own.
-func wheelDelta(ev termmosaic.Event) (int, bool) {
+//
+// The bounds check is the load-bearing part, and it lives HERE rather than in
+// each caller because every caller got it wrong the same way: a wheel notch was
+// tested BEFORE the widget's own Contains check, so a notch anywhere on the
+// screen scrolled a list the pointer was nowhere near — which is ADR 0010's
+// defect. A widget handles a pointer event only if the pointer is inside its
+// Bounds, and the wheel is a pointer event like any other.
+func wheelDelta(ev termmosaic.Event, r buffer.Rect) (int, bool) {
 	if ev.Kind != termmosaic.EventMouse {
 		return 0, false
 	}
@@ -240,6 +247,9 @@ func wheelDelta(ev termmosaic.Event) (int, bool) {
 		return 0, false
 	}
 	if ev.Mouse.Action != termmosaic.MousePress {
+		return 0, false
+	}
+	if !r.Contains(ev.Mouse.X, ev.Mouse.Y) {
 		return 0, false
 	}
 	if ev.Mouse.Button == termmosaic.MouseWheelUp {

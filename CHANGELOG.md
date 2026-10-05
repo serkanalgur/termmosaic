@@ -30,6 +30,67 @@ reversed before v1.0.0.
 
 ---
 
+## [0.5.2] — 2026-10-05
+
+A minor bump, and the reason is a decision with a number attached:
+[ADR 0010](docs/adr/0010-mouse-routing.md) settles who receives a mouse
+event, and the answer exposed three widgets that were getting it wrong.
+
+### Fixed
+
+- **`form.Tabs`, `form.Select` and `form.Radio` consumed a wheel notch
+  regardless of where the pointer was.** `Tabs.Handle` tested the wheel
+  before the `switch ev.Kind`, so a notch never reached the bounds check its
+  click path already used; `Select` and `Radio` reached the same place through
+  the shared `optionlist` helper. A tab row, a select or a radio group
+  therefore took the wheel from whatever sat beneath it.
+  `docs/STATUS.md` recorded this only for `Tabs` — it is three widgets, and
+  the shared helper is where the fix belongs, so a future fourth is correct by
+  construction.
+
+  **Per ADR 0010: a widget handles a pointer event only when the pointer is
+  inside its `Bounds()`.** Two exemptions are stated rather than left
+  implicit — a *release* ends a drag wherever the pointer is, and a *drag*
+  continues outside `Bounds` once a press has claimed it, because the press is
+  the claim and the drag is the continuation.
+
+- **`examples/markets` behaviour changes.** `d.pair` is a `form.Tabs` and is
+  first in the focus ring, so it swallowed **every** wheel notch in the
+  application. The example carried a workaround loop arguing the lenient rule
+  was "defensible for a form"; the loop stays, because what it actually buys
+  is the rule that the wheel never takes focus — which no widget can do alone.
+  A wheel notch over a KPI tile, which no widget in the ring owns, is now
+  consumed by nobody rather than scrolling the tab row by three.
+
+### Added
+
+- **ADR 0010, Mouse routing.** Records that hit-testing belongs to the widget
+  and not to the application or the framework, and why the alternative — a
+  routing helper, or an optional `Hittable` interface — was rejected: it is new
+  exported API against an interface ADR 0007 and ADR 0009 both freeze, it needs
+  a tree walk `Widget` cannot express because there is no `Children()`, and it
+  can only answer "which rect" where a widget answers "which cell means what".
+  This is the decision that gives ADR 0009 §6 — mouse hit-testing being "the
+  one thing widgets are genuinely better at than a global registry" — teeth in
+  the shipped catalog rather than only in the design.
+
+  It also states which widgets decline a wheel outright: `Button`, `Checkbox`,
+  `Toggle` and `Split` have nothing to scroll, and `TextInput`/`TextArea`
+  decline **by decision** — `TextArea` wheel-to-scroll is a plausible feature,
+  but adding one under a routing ADR would be answering a different question,
+  and it will be bounds-correct when it lands because the rule is now written
+  down.
+
+### Known Limitations
+
+- `split.Split` consumes a wheel notch over a pane and moves focus to the pane
+  under the pointer. That is in-bounds behaviour consistent with a click, and a
+  `Split` has no content of its own to scroll, so it is unchanged — but it is
+  stated here rather than left to be discovered.
+- `term/terminal_windows_test.go` is still **compile-only** verified
+  (`GOOS=windows go vet`) and has never been executed; the Windows backend still
+  runs zero tests at runtime.
+
 ## [0.5.1] — 2026-10-05
 
 A minor bump, and the reason is seven defects: **the style a widget computes for
@@ -868,6 +929,7 @@ Two performance claims that this release turns from assertion into measurement:
   **60 cursor moves and 19,443 bytes, 3.12× the narrow frame** rather than 11×.
   The ASCII path is unchanged. See ADR 0008's amendment, finding 4.
 
+[0.5.2]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.5.2
 [0.5.1]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.5.1
 [0.5.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.5.0
 [0.4.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.4.0

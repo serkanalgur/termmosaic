@@ -6,7 +6,7 @@ each decision's reasoning lives.
 It is deliberately not a second copy of that reasoning. Every architecture decision
 TermMosaic has made is recorded in full — with its evidence, its rejected
 alternatives, and the consequences including the unwelcome ones — in
-**[docs/adr/](adr/README.md)**, which is 5,537 lines across nine ADRs. An earlier
+**[docs/adr/](adr/README.md)**, which is 6,314 lines across ten ADRs. An earlier
 version of this file summarised those decisions here and went stale doing it: its
 decision numbering did not match the ADR set, and it still described the colour model
 as OPEN after STATUS.md had moved it to PROPOSED. A summary that drifts is worse than

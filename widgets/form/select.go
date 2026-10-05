@@ -38,7 +38,8 @@ const SelectDefaultMarker = ">"
 //	activate       KeyEnter or KeySpace accepts the highlighted option, which
 //	               fires OnSelect without changing the highlight
 //	wheel          MouseWheelUp / MouseWheelDown scroll without moving the
-//	               highlight
+//	               highlight, and only over the pointer being inside Bounds
+//	               (ADR 0010)
 //
 // A closed list never changes what it contains, so there is no type-ahead and no
 // Remove: a Select whose options change is a different widget.
@@ -266,7 +267,7 @@ func (s *Select) Invalidate() {}
 
 // Handle offers ev to the select and reports whether it consumed it.
 func (s *Select) Handle(ev termmosaic.Event) bool {
-	if d, ok := wheelDelta(ev); ok {
+	if d, ok := wheelDelta(ev, s.bounds); ok {
 		s.list.scrollBy(d)
 		return true
 	}
