@@ -667,22 +667,26 @@ func (d *dashboard) handleKey(ev termmosaic.Event) bool {
 // The focusable order is the reading order, so a click that two widgets could
 // claim — none currently overlap — goes to the one a reader would have aimed at.
 func (d *dashboard) handleMouse(ev termmosaic.Event) bool {
-	// The WHEEL is routed to the widget under the POINTER rather than to the ring in
-	// order, and this is a real correction rather than a nicety.
+	// The WHEEL is offered to the widget under the POINTER and to nobody else, and
+	// what it buys is the focus rule rather than the hit test.
 	//
-	// form.Tabs consumes a wheel notch whether or not the pointer is over it — which
-	// is a defensible rule for a form, where scrolling a list does not require focus
-	// — but it means a tab row first in the ring swallows EVERY notch in the
-	// application, and the table under the pointer never sees one. Since the tab row
-	// here is a one-row strip and the table is the thing a reader scrolls, the
-	// application asks the widget whose rectangle contains the pointer first, and
-	// falls back to the ring order when the pointer is over none of them (a wheel
-	// over a KPI tile, which nothing in the ring claims, must still be consumed by
-	// somebody rather than falling through to the application).
+	// Hit-testing is each widget's own business and always was — ADR 0010 settled
+	// that a widget handles a pointer event only if the pointer is inside its
+	// Bounds, so the loop's own Bounds().Contains is now redundant with what every
+	// widget below already does. The loop is kept for the one thing no widget can
+	// do: NOT taking focus. The second loop moves focus to whoever consumes, and a
+	// reader scrolling a table with the wheel is reading, not committing to a
+	// panel — yanking the focus under the pointer would rewrite the key hint while
+	// they are still looking at the numbers. A CLICK is the gesture that commits.
 	//
-	// Clicks are NOT routed this way. A click is a commitment to a panel, and
-	// hit-testing is each widget's own business — which is why this special case is
-	// about the wheel and nothing else.
+	// Before ADR 0010 this loop also had to work around form.Tabs, which consumed
+	// every notch in the application whether or not the pointer was over it and so
+	// starved the table. That workaround is gone because the widget no longer needs
+	// it, and a notch over a KPI tile — which no widget in the ring owns — is now
+	// declined by all of them and reaches the application, which is the right
+	// outcome: nothing on screen scrolls.
+	//
+	// Clicks are NOT routed this way, for the reason the loop above gives.
 	if ev.Mouse.Button == termmosaic.MouseWheelUp || ev.Mouse.Button == termmosaic.MouseWheelDown {
 		for _, w := range d.focusables {
 			if w.Bounds().Contains(ev.Mouse.X, ev.Mouse.Y) && w.Handle(ev) {

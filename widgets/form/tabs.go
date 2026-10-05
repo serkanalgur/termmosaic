@@ -58,7 +58,8 @@ const (
 //	home / end     KeyHome / KeyEnd select the first / last tab
 //	page up/down   KeyPageUp / KeyPageDown select as many tabs as fit
 //	activate       KeyEnter or KeySpace fires OnSelect for the selected tab
-//	wheel          MouseWheelUp / MouseWheelDown scroll without selecting
+//	wheel          MouseWheelUp / MouseWheelDown scroll without selecting, and
+//	               only over the pointer being inside Bounds (ADR 0010)
 type Tabs struct {
 	bounds buffer.Rect
 
@@ -328,7 +329,7 @@ func (t *Tabs) Invalidate() {}
 
 // Handle offers ev to the tab row and reports whether it consumed it.
 func (t *Tabs) Handle(ev termmosaic.Event) bool {
-	if d, ok := wheelDelta(ev); ok {
+	if d, ok := wheelDelta(ev, t.bounds); ok {
 		t.offset += d
 		t.clampOffset()
 		return true

@@ -19,6 +19,7 @@ original stays and a new one supersedes it, so the reasoning history survives.
 | [0007](0007-responsive-screens.md) | Responsive screen composition | Accepted | 2026-10-04 |
 | [0008](0008-style-and-text.md) | Style, theme, and text | Accepted | 2026-10-04 |
 | [0009](0009-command-and-keymap.md) | Commands and keymap | Accepted | 2026-10-05 |
+| [0010](0010-mouse-routing.md) | Mouse routing | Accepted | 2026-10-05 |
 
 ## Decisions at a glance
 
@@ -167,6 +168,33 @@ original stays and a new one supersedes it, so the reasoning history survives.
   `ansi.Style`, so the new vocabulary takes the unused name and the reconciliation
   is deferred to the next `KeyHint` change.
 
+- **0010 — Mouse routing: widgets hit-test themselves.** One sentence — **a
+  widget handles a pointer event only if the pointer is inside its `Bounds()`** —
+  and it covers every `Mouse` action, wheel included. The alternative considered
+  and rejected is a framework routing helper (`RouteMouse(root, ev) Widget`, or
+  an optional `Hittable` interface): it is new exported API against a `Widget`
+  that ADR 0007 and ADR 0009 both freeze, it needs a tree walk that `Widget`
+  cannot express because there is no `Children()`, and it can only answer "which
+  rect" where a widget can answer "which cell means what". So the fix is three
+  call sites and one shared helper — `optionList.wheelDelta` gained a
+  `buffer.Rect` and a `Contains`, because all three widgets that mishandled the
+  wheel got it the same way and a fix applied three times is a fix applied twice.
+  The defect was real and not cosmetic: `form.Tabs`, first in `examples/markets`'
+  focus ring, consumed **every wheel notch in the application** whether or not
+  the pointer was over it, so the table under the pointer never scrolled and the
+  example grew a thirty-line application-level workaround. This is the decision
+  that gives ADR 0009 §6's "hit-testing is the one thing widgets are genuinely
+  better at than a global registry" its teeth in the shipped catalog rather than
+  only in the design. **Two exemptions are stated rather than left implicit**: a
+  release ends a drag wherever the pointer is (a gesture that can only be
+  finished over the widget strands the user), and a drag continues outside
+  `Bounds` once a press has claimed it — *the press is the claim, the drag is the
+  continuation*, which is the sentence that stops a future reader applying the
+  bounds rule to a drag. `TextInput` and `TextArea` **decline** the wheel by
+  decision, not oversight: wheel-to-scroll in a `TextArea` is a plausible
+  *feature*, and adding one under a routing ADR is a feature nobody reviewed as a
+  feature. `split.Split` needed no change, and saying so is a result.
+
 ## How these were decided
 
 Decisions 1 and 2 were made **empirically**. A scratch Go module was built
@@ -215,6 +243,17 @@ a measurement of ours. Its two performance claims — 0 allocs on dispatch and a
 16-byte `Chord` — are **specified and pinned by named tests**, not measured
 today, and its `Chord` normalisation rules have never been run against a real
 terminal, which is ADR 0005's already-recorded risk extended one layer up.
+
+Decision 10 follows the same pattern for the same reason, and its evidence is the
+sharpest of the ten because it is a **defect that was reproduced rather than
+argued**: the wheel was sent to each of the twenty-four widgets at a pointer
+outside its `Bounds`, and three answered `true`. Its behavioural claim is
+non-vacuous by construction — the `Contains` check was removed from
+`optionList.wheelDelta` and the new tests were confirmed to fail for all three
+widgets before it was restored — and its risk section is explicit that the rule
+itself is prose plus tests rather than a type, which is the same position ADR
+0007 §"Risks" item 2 takes for the rect-keyed caching rule. It has not met a real
+terminal's mouse reporting, which is ADR 0005's risk inherited unchanged.
 
 **Caveat worth repeating:** OpenTUI is a Zig core with TypeScript FFI bindings.
 Its numbers do not transfer to Go, and ADR 0002 exists precisely because we

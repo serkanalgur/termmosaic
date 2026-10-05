@@ -42,7 +42,8 @@ const (
 //	page up/down   KeyPageUp / KeyPageDown choose one screenful away
 //	activate       KeyEnter or KeySpace re-fires OnSelect for the chosen option,
 //	               which is what a user pressing it to confirm expects
-//	wheel          MouseWheelUp / MouseWheelDown scroll without choosing
+//	wheel          MouseWheelUp / MouseWheelDown scroll without choosing, and
+//	               only over the pointer being inside Bounds (ADR 0010)
 type Radio struct {
 	list *optionList
 
@@ -261,7 +262,7 @@ func (g *Radio) Invalidate() {}
 
 // Handle offers ev to the group and reports whether it consumed it.
 func (g *Radio) Handle(ev termmosaic.Event) bool {
-	if d, ok := wheelDelta(ev); ok {
+	if d, ok := wheelDelta(ev, g.bounds); ok {
 		g.list.scrollBy(d)
 		return true
 	}
