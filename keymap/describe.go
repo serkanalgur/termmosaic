@@ -32,12 +32,36 @@ type Entry struct {
 	// to scan and is what every terminal help screen does. The name Rows is
 	// deliberately not used for the type because Entry is the thing and a row is
 	// a view of it.
+	//
+	// So from Registry.Describe a command with three chords arrives as three
+	// Entries each holding one chord. From Registry.DescribeGrouped it arrives as
+	// ONE Entry holding all three. Which one a consumer wants is a property of
+	// what it does with the row, and both functions document which they are for.
 	Chords []Chord
 }
 
-// Describe returns the discoverable entries for scope, sorted by Group then
-// ID. It is the ONLY data the help screen, the command palette and a KeyHint
-// bound to a registry consume.
+// describeRow is one row before it becomes an Entry: a command, the description
+// that row shows, and the chord that reaches it — or no chord, for a command
+// nothing is bound to.
+//
+// The internal row exists because there are two views of the same rows, one per
+// chord and one per command, and both must see the same ordering. See
+// describeRows.
+type describeRow struct {
+	id    CommandID
+	desc  string
+	group string
+	chord Chord
+	// unbound marks the row for a command with no reachable chord, which
+	// must still be describable: a palette-only or mouse-only command is
+	// invisible in a key-only help screen otherwise.
+	unbound bool
+}
+
+// Describe returns the discoverable entries for scope, ONE PER CHORD, sorted by
+// Group then ID. Use it for a help screen and a command palette, which each
+// consume a row's Chords[0] as that row's own key — see ADR 0009 §9. For a
+// one-line hint, use DescribeGrouped, which is one row per command.
 //
 // It allocates, it is not cheap, and it MUST NOT be called from Dispatch or
 // from a widget's Draw. A help screen that is open calls it when the registry
@@ -52,20 +76,97 @@ type Entry struct {
 // per scope, because a dialog's Enter and a browser's Enter are different
 // answers to "what does Enter do right now".
 func (r *Registry) Describe(scope Scope) []Entry {
+	rows := r.describeRows(scope)
+
+	out := make([]Entry, 0, len(rows))
+	for _, rw := range rows {
+		e := Entry{ID: rw.id, Desc: rw.desc, Group: rw.group}
+		if !rw.unbound {
+			e.Chords = []Chord{rw.chord}
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// DescribeGrouped returns the discoverable entries for scope, ONE PER COMMAND,
+// in the same order Describe uses: sorted by Group then ID, with a command's
+// chords in canonical order inside its single entry. Use it for a one-line hint,
+// where one row per command is what a hint line wants; for a help screen and a
+// palette, use Describe, which is one row per chord.
+//
+// The difference is not cosmetic. form.KeyHint.SetEntries joins an entry's
+// chords into ONE label, so handing it Describe's output renders a command with
+// three chords as the same description three times — which is not a hint, it is
+// three rows of noise in a line that has room for one. DescribeGrouped gives the
+// hint one entry carrying all three chords, which chordsLabel renders as the one
+// label it was written for. ADR 0009 §9 specifies Describe's per-chord shape for
+// the palette, so Describe is unchanged; a two-function API is the price of two
+// genuinely different consumers.
+//
+// Two rows of it are specified rather than incidental:
+//
+//   - Chords is never empty. A command with no binding in scope is ABSENT, not
+//     present with no chords. Describe includes such a command — a palette-only
+//     or mouse-only command — as a chordless row, because a help screen that
+//     listed only keys would hide a command the user can still reach. A hint
+//     line cannot use that row: its key column would be empty, so the row
+//     renders as a bare description with nothing to press, and a hint line whose
+//     entries are mostly bare descriptions has stopped being a hint. The command
+//     is still describable — that is Describe's job, and the palette that can
+//     reach it is built from Describe.
+//   - Entry order matches Describe's command order exactly, so a hint's rows are
+//     stable across runs and diffable across versions. Describe's doc promises
+//     that ordering and it is load-bearing; two queries that disagreed about it
+//     would make help and hint order differ for the same registry.
+//
+// When several of a command's bindings override its Desc and the overrides
+// disagree, the entry takes the override of the FIRST chord in canonical order.
+// Describe is where each override is visible: it gives the command one row per
+// chord, so a screen with room to show "open the item" and "confirm the dialog"
+// separately should be reading Describe.
+//
+// Like Describe it allocates, it is not cheap, and it MUST NOT be called from
+// Dispatch or from a widget's Draw. It shares Describe's meaning of scope: the
+// query WIDENS, so a focus-level query includes the screen's and the
+// application's keys.
+func (r *Registry) DescribeGrouped(scope Scope) []Entry {
+	// Merge Describe's own rows rather than re-deriving them. The rows are
+	// already sorted, and a command's rows are already adjacent, so appending
+	// consecutive chords to the entry already open produces exactly the order
+	// Describe used — and produces it by construction rather than by a second
+	// sort that would have to be kept in step with the first.
+	rows := r.describeRows(scope)
+
+	var out []Entry
+	for _, rw := range rows {
+		if rw.unbound {
+			// Dropped on purpose: an entry with no chords is not a hint row.
+			continue
+		}
+		if n := len(out); n > 0 && out[n-1].ID == rw.id {
+			out[n-1].Chords = append(out[n-1].Chords, rw.chord)
+			continue
+		}
+		out = append(out, Entry{
+			ID:     rw.id,
+			Desc:   rw.desc,
+			Group:  rw.group,
+			Chords: []Chord{rw.chord},
+		})
+	}
+	return out
+}
+
+// describeRows collects the rows both queries are views of: one per binding in
+// scope, plus one per command nothing is bound to anywhere. It is shared so that
+// the per-chord and per-command answers cannot disagree about WHICH bindings are
+// in scope, or about the order, or about which description a binding overrides.
+func (r *Registry) describeRows(scope Scope) []describeRow {
 	// Collect into a per-(command, scope) bucket first, so one command with
 	// three chords is three Rows with the right description on each and not
 	// three copies of the command's own Desc.
-	type row struct {
-		id    CommandID
-		desc  string
-		group string
-		chord Chord
-		// unbound marks the row for a command with no reachable chord, which
-		// must still be describable: a palette-only or mouse-only command is
-		// invisible in a key-only help screen otherwise.
-		unbound bool
-	}
-	var rows []row
+	var rows []describeRow
 	seen := make(map[string]bool)
 	for _, b := range r.bindings {
 		if !r.inScope(b, scope) {
@@ -84,7 +185,7 @@ func (r *Registry) Describe(scope Scope) []Entry {
 			continue
 		}
 		seen[key] = true
-		rows = append(rows, row{id: b.ID, desc: desc, group: cmd.Group, chord: b.Chord})
+		rows = append(rows, describeRow{id: b.ID, desc: desc, group: cmd.Group, chord: b.Chord})
 	}
 	for id, cmd := range r.commands {
 		// A chordless row is for a command NO key reaches anywhere: a
@@ -95,7 +196,7 @@ func (r *Registry) Describe(scope Scope) []Entry {
 		if r.boundAnywhere(id) {
 			continue
 		}
-		rows = append(rows, row{id: id, desc: cmd.Desc, group: cmd.Group, unbound: true})
+		rows = append(rows, describeRow{id: id, desc: cmd.Desc, group: cmd.Group, unbound: true})
 	}
 
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -119,16 +220,7 @@ func (r *Registry) Describe(scope Scope) []Entry {
 		}
 		return lessChord(rows[i].chord, rows[j].chord)
 	})
-
-	out := make([]Entry, 0, len(rows))
-	for _, rw := range rows {
-		e := Entry{ID: rw.id, Desc: rw.desc, Group: rw.group}
-		if !rw.unbound {
-			e.Chords = []Chord{rw.chord}
-		}
-		out = append(out, e)
-	}
-	return out
+	return rows
 }
 
 // Chords returns the chords currently bound to id in scope, in canonical

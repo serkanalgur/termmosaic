@@ -119,12 +119,17 @@ func (k *KeyHint) SetBindings(b []Binding) {
 // so a form's hints cannot disagree with the program's bindings. It is the
 // ADR 0009 discoverability path for the existing widget.
 //
-// SetEntries accepts what keymap.Registry.Describe returns and nothing else: a
-// hand-written []Binding remains supported for the case where the application
-// has no registry, and both produce identical rows. That is why this is a
-// method and not a change to the Bindings field's type — form.Binding and
+// SetEntries accepts what keymap.Registry.DescribeGrouped returns and nothing
+// else: a hand-written []Binding remains supported for the case where the
+// application has no registry, and both produce identical rows. That is why this
+// is a method and not a change to the Bindings field's type — form.Binding and
 // keymap.Entry are reconciled in a later change, and until then this is the
 // bridge that touches neither type.
+//
+// DescribeGrouped and not Describe, because chordsLabel below joins an entry's
+// chords into ONE key label: fed Describe's per-chord rows, a command with three
+// chords would print the same description three times on a line that has room
+// for one. Describe's per-chord shape is the palette's, per ADR 0009 §9.
 //
 // An Entry with no chords becomes a hint with an empty key, which KeyHint
 // already renders as a bare description.

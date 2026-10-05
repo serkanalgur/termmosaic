@@ -1291,6 +1291,10 @@ job, which is why the palette and help consume `Entry` and never `Binding`.
    example uses it yet. Trigger: the first `examples/` change that wants a hint
    line to agree with a binding; that example is the honest test of `Describe`'s
    sorting and of whether `Entry.Chords` as one-row-per-chord is the right shape.
+   **Triggered, and the answer to its own question is NO — one-row-per-chord is
+   the wrong shape for a hint line.** See the second 2026-10-05 amendment at the
+   end of this document. The trigger's other half, no catalog widget
+   implementing `Commandable`, is **still open** and still deferred by §8.
 6. **The palette's requirements on `Menu` and `Dialog` are stated here and
    implemented there.** If either ships without them, the mismatch is discovered
    at integration rather than here. Trigger: the palette's own PR, which is where
@@ -1362,3 +1366,84 @@ mis-read, at the cost of a command with three bindings producing three rows
 rather than one row with three chords. Both are defensible; the shipped one is
 pinned by `keymap/describe_test.go`. The field's type stays `[]Chord` because
 that is what a `KeyHint` row and a palette row both consume.
+
+## Amendment 2026-10-05 — risk 5 is triggered, and it is a NO
+
+The first amendment above ended with erratum 5, which recorded that `Describe`
+emits one `Entry` per **chord** and defended that shape as the right one for a
+palette. This one closes risk 5, the last of the six, and the trigger it named
+has now fired: `examples/hello` is the first change that wanted a hint line to
+agree with a binding. It dispatches through a real `keymap.Registry` — six
+commands, twelve chords — and renders both its pinned hint line and its `?`
+overlay from the registry through `KeyHint.SetEntries`.
+
+**The honest answer to risk 5's own question is no: `Entry.Chords` as
+one-row-per-chord is the wrong shape for a hint line.** Not wrong in principle
+and wrong only for palettes — wrong for *hints*, specifically and for a reason
+that is visible in one line of a terminal. `SetEntries` joins an entry's chords
+into **one** label, so handing it `Describe`'s output renders a command with
+three chords as the same description **three times**. That is not a hint, it is
+three rows of noise in a line with room for one. `examples/hello` worked around
+it with a thirteen-line merge of its own before this amendment existed; the
+workaround is now a framework function and is deleted.
+
+**The consequence is a second query rather than a change to the first.**
+`Registry.DescribeGrouped(scope)` returns one `Entry` per **command**, carrying
+every chord in scope for it in canonical order. `Describe` is unchanged and
+remains one row per chord, which is what §9 specifies for a palette — "a palette
+row is `Entry.Desc` plus `Chords[0]`" — and what a help screen wants, because one
+row per chord is easier to scan. A two-function API is the price of two genuinely
+different consumers, and a hint and a palette are genuinely different consumers.
+The two are kept honest by construction rather than by convention: both are
+views of one internal `describeRows`, so they cannot disagree about which
+bindings are in scope, about the order, or about which description a binding
+overrides. `DescribeGrouped` merges `Describe`'s already-sorted rows rather than
+re-sorting, so its entry order and chord order cannot drift from `Describe`'s
+either.
+
+Two rows of `DescribeGrouped` are specified rather than incidental, and both
+are the hint half of the difference. **`Chords` is never empty**: a command
+bound in no scope is *absent* rather than present with no chords, because a row
+with an empty key column renders as a bare description with nothing to press,
+and a hint whose entries are mostly bare descriptions has stopped being a hint.
+`Describe` keeps those rows — a palette-only or mouse-only command must stay
+describable, and a key-only help screen that hid it would be wrong. And **entry
+order matches `Describe`'s command order exactly**, so a hint's rows are stable
+across runs and diffable across versions.
+
+`examples/hello` is what the discoverability story is now tested against, and
+the visible consequences are recorded here because they are what a reader of the
+golden files will notice. The pinned hint reads
+`[Q q Esc Ctrl+c] quit  ·  [?] toggle the keys`, where it read
+`press q to quit  ·  ? keys  ·  arrows move focus`; the navigation is gone from
+the one-line hint because a merged row per navigation command is wider than the
+line, and a hint that truncates a binding label tells the reader less than a
+hint naming the two keys they need first. The help overlay went from **two rows
+to three**, because a derived help spells every chord in full where the prose
+help it replaced said "arrows". Seventeen golden files moved, one row each. The
+hand-written hint string and the test that checked it against `Handle` are both
+deleted: a binding and its description are now written **once**.
+
+**What risk 5 does not close.** Two items survive it, and both are named here
+rather than left to be rediscovered.
+
+**No catalog widget implements `Commandable`, and still none implements
+`Clickable`.** Verified: `grep -rn 'Commandable' widgets/` returns nothing. The
+example that triggered this trigger is an *application* opting in, which is not
+the same thing as a widget contributing its own bindings, so §8's deferral is
+untouched and `examples/hello` deliberately does not implement either — its
+facts are cells it draws, not widgets with bindings of their own.
+
+**`Registry` has no `SetFocus`, so `Describe(ScopeFocus)` is incomplete before
+the first dispatch.** The registry learns what is focused only from the `focus`
+argument `Dispatch` is handed, so a focus-level query asked before anything has
+been dispatched answers as though nothing holds focus. That is not a
+correctness bug for a palette — a palette asks `ScopeGlobal`, and the ADR's §2.1
+specificity order is what makes a focused widget's own keys win over a global
+one anyway. It is a gap for the question §4 actually asks, "what can I do right
+now": an application with real focusable widgets cannot yet ask it. Adding
+`SetFocus` is new API on a shipped type, so it is **deferred to v1.1**.
+`examples/hello` sidesteps it rather than depending on it — its navigation is at
+`ScopeScreen`, which is also the scope that degrades correctly: a focused child
+added later binds its own arrows at `ScopeFocus` and outranks them by
+specificity, with no change to the example.

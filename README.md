@@ -98,12 +98,20 @@ methods and has never changed.
 - **0 allocations** on the dispatch path. `Chord` is a comparable 16-byte
   struct, so resolution is a map lookup — pinned by
   `TestDispatchIsZeroAllocation`, not merely intended.
-- Help is `Describe()`, computed from the same tables `Dispatch` walks, so a
-  help row cannot drift from what the key actually does.
+- Help is derived from the bindings, so a help row cannot drift from what the
+  key actually does. `Describe()` gives one row per **chord**, which is what a
+  help screen and a command palette want; `DescribeGrouped()` gives one row per
+  **command**, which is what a one-line `KeyHint` wants.
 - Widgets participate **optionally**, via `keymap.Commandable` and
   `keymap.Clickable`. No catalog widget implements either yet, and there is no
   command palette — both are deliberate, with triggers recorded in
   [ADR 0009](docs/adr/0009-command-and-keymap.md).
+
+One example uses it: [`examples/hello`](examples/hello) dispatches through a
+real `keymap.Registry` — six commands, twelve chords — and renders both its
+pinned hint line and its `?` help overlay from that registry rather than from
+hand-written strings. It is one example of three; `markets` and `dashboard` still
+dispatch by their own `switch`.
 
 Per-frame cost is flat in item count — this is the claim the catalog exists to
 back up:

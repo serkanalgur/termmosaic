@@ -10,6 +10,6 @@
  │                                                              │
  │                                                              │
  │                                                              │
- │ press q to quit  ·  ? keys  ·  arrows move focus             │
+ │ [Q q Esc Ctrl+c] quit  ·  [?] toggle the keys                │
  │                                                              │
  └──────────────────────────────────────────────────────────────┘

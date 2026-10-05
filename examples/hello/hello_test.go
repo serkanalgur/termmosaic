@@ -36,7 +36,7 @@ const (
 func renderGolden(t *testing.T, frames int) *headless.MemorySink {
 	t.Helper()
 	return widgettest.Render(t, goldenW, goldenH, frames,
-		newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor))
+		newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor, noQuit))
 }
 
 // renderAt renders the example's block at an arbitrary screen size, which is how
@@ -44,7 +44,7 @@ func renderGolden(t *testing.T, frames int) *headless.MemorySink {
 func renderAt(t *testing.T, w, h, frames int) *headless.MemorySink {
 	t.Helper()
 	return widgettest.Render(t, w, h, frames,
-		newHello(rootBounds(w, h), buffer.DepthTrueColor))
+		newHello(rootBounds(w, h), buffer.DepthTrueColor, noQuit))
 }
 
 func checkGolden(t *testing.T, name, got string) {
@@ -296,7 +296,7 @@ func TestBelowMinSizeDrawsTheDiagnosticAndNotALayout(t *testing.T) {
 	// showing one has a border, and the assertion cannot name a border rune
 	// because TestBoxDrawingRunesLiveInOneFile requires every border glyph to
 	// come from the table — including from a test that means well.
-	for _, absent := range []string{"termmosaic", "frame", "press q"} {
+	for _, absent := range []string{"termmosaic", "frame", "quit"} {
 		if strings.Contains(screen, absent) {
 			t.Errorf("a 30x8 screen drew %q; below MinSize the block must draw the diagnostic and nothing else.\n%s",
 				absent, screen)
@@ -308,7 +308,7 @@ func TestBelowMinSizeDrawsTheDiagnosticAndNotALayout(t *testing.T) {
 // application level: the block reports a minimum, and Draw's behaviour changes at
 // exactly that size rather than somewhere near it.
 func TestMinSizeIsReportedAndHonoured(t *testing.T) {
-	h := newHello(buffer.Rect{W: 200, H: 60}, buffer.DepthTrueColor)
+	h := newHello(buffer.Rect{W: 200, H: 60}, buffer.DepthTrueColor, noQuit)
 	m := h.MinSize()
 	if m.W != minW || m.H != minH {
 		t.Errorf("MinSize = %dx%d, want %dx%d", m.W, m.H, minW, minH)
@@ -316,7 +316,7 @@ func TestMinSizeIsReportedAndHonoured(t *testing.T) {
 
 	saysDiagnostic := func(w, h int) bool {
 		buf := buffer.NewBuffer(atLeast1(w), atLeast1(h))
-		newHello(buffer.Rect{W: w, H: h}, buffer.DepthTrueColor).Draw(buf)
+		newHello(buffer.Rect{W: w, H: h}, buffer.DepthTrueColor, noQuit).Draw(buf)
 		return strings.Contains(rowText(buf, w), "n")
 	}
 	if saysDiagnostic(minW-1, minH) != true {
@@ -335,18 +335,24 @@ func TestMinSizeIsReportedAndHonoured(t *testing.T) {
 // paragraph appears only when there is height for it, and the pinned hint is
 // never the thing that goes.
 //
-// It uses the note's opening words and the hint's, so a change to either string
-// fails here rather than silently making the test vacuous.
+// It uses the note's opening words and the hint's, the latter read out of the
+// registry rather than written out, so a change to either fails here rather than
+// silently making the test vacuous — and so the assertion cannot itself become a
+// second copy of the hint text.
 func TestBudgetDropsTheNoteFirstAndNeverTheHint(t *testing.T) {
 	has := func(sink *headless.MemorySink, needle string) bool {
 		return strings.Contains(widgettest.Screen(sink), needle)
 	}
+	hint := hintLabels(newHello(buffer.Rect{W: goldenW, H: goldenH}, buffer.DepthTrueColor, noQuit).km)
 	tall := renderAt(t, 60, 14, 1)
 	if !has(tall, "the layout above is recomputed") {
 		t.Errorf("at 60x14 there is height for the note paragraph.\n%s", widgettest.Screen(tall))
 	}
-	if !has(tall, "press q to quit") {
-		t.Errorf("the hint is PrioAlways and must survive every budget.\n%s", widgettest.Screen(tall))
+	for _, label := range hint {
+		if !has(tall, label) {
+			t.Errorf("the hint is PrioAlways and must survive every budget; %q is missing.\n%s",
+				label, widgettest.Screen(tall))
+		}
 	}
 
 	// 40x10 is MinSize exactly: enough for the facts and the hint, not enough
@@ -355,7 +361,7 @@ func TestBudgetDropsTheNoteFirstAndNeverTheHint(t *testing.T) {
 	if has(short, "the layout above is recomputed") {
 		t.Errorf("at 40x10 there is no height for the note paragraph.\n%s", widgettest.Screen(short))
 	}
-	if !has(short, "press q to quit") {
+	if !has(short, hint[0]) {
 		t.Errorf("the hint must still be present at MinSize.\n%s", widgettest.Screen(short))
 	}
 	if !has(short, "depth truecolor") {
@@ -396,7 +402,7 @@ func TestSecondFrameChangesOnlyTheCounter(t *testing.T) {
 	r := render.New(sink, render.Config{
 		Width: goldenW, Height: goldenH, Caps: termmosaic.DefaultCaps(),
 	})
-	r.SetRoot(newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor))
+	r.SetRoot(newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor, noQuit))
 
 	if _, err := r.Render(); err != nil {
 		t.Fatal(err)
@@ -429,7 +435,7 @@ func TestIdleFrameWritesNothing(t *testing.T) {
 	r := render.New(sink, render.Config{
 		Width: goldenW, Height: goldenH, Caps: termmosaic.DefaultCaps(),
 	})
-	r.SetRoot(newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor))
+	r.SetRoot(newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor, noQuit))
 	if _, err := r.Render(); err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +472,7 @@ func TestDegradedColourGolden(t *testing.T) {
 			r := render.New(sink, render.Config{
 				Width: goldenW, Height: goldenH, Caps: tc.caps,
 			})
-			root := newHello(rootBounds(goldenW, goldenH), tc.caps.ColourDepth())
+			root := newHello(rootBounds(goldenW, goldenH), tc.caps.ColourDepth(), noQuit)
 			r.SetRoot(root)
 			if _, err := r.Render(); err != nil {
 				t.Fatal(err)
@@ -486,7 +492,7 @@ func TestNoColorGolden(t *testing.T) {
 	r1 := render.New(withColor, render.Config{
 		Width: goldenW, Height: goldenH, Caps: termmosaic.DefaultCaps(),
 	})
-	r1.SetRoot(newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor))
+	r1.SetRoot(newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor, noQuit))
 	if _, err := r1.Render(); err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +501,7 @@ func TestNoColorGolden(t *testing.T) {
 	r2 := render.New(noColor, render.Config{
 		Width: goldenW, Height: goldenH, Caps: termmosaic.DefaultCaps(), NoColor: true,
 	})
-	r2.SetRoot(newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor))
+	r2.SetRoot(newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor, noQuit))
 	if _, err := r2.Render(); err != nil {
 		t.Fatal(err)
 	}
@@ -529,7 +535,7 @@ func TestResizeGolden(t *testing.T) {
 	r := render.New(sink, render.Config{
 		Width: goldenW, Height: goldenH, Caps: termmosaic.DefaultCaps(),
 	})
-	root := newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor)
+	root := newHello(rootBounds(goldenW, goldenH), buffer.DepthTrueColor, noQuit)
 	r.SetRoot(root)
 	if _, err := r.Render(); err != nil {
 		t.Fatal(err)
@@ -609,7 +615,7 @@ func assertScreenMatchesAFreshStart(t *testing.T, got *headless.MemorySink, w, h
 	t.Helper()
 	fresh := headless.NewMemorySink(w, h)
 	r := render.New(fresh, render.Config{Width: w, Height: h, Caps: termmosaic.DefaultCaps()})
-	r.SetRoot(newHello(rootBounds(w, h), buffer.DepthTrueColor))
+	r.SetRoot(newHello(rootBounds(w, h), buffer.DepthTrueColor, noQuit))
 	if _, err := r.Render(); err != nil {
 		t.Fatalf("fresh start at %dx%d: %v", w, h, err)
 	}
@@ -859,7 +865,7 @@ func TestExampleTitleAppearsAtExactlyTheTitleThreshold(t *testing.T) {
 func TestDrawIsTotalAtEverySize(t *testing.T) {
 	for w := 0; w <= 14; w++ {
 		for h := 0; h <= 14; h++ {
-			widget := newHello(buffer.Rect{W: w, H: h}, buffer.DepthTrueColor)
+			widget := newHello(buffer.Rect{W: w, H: h}, buffer.DepthTrueColor, noQuit)
 			b := buffer.NewBuffer(atLeast1(w), atLeast1(h))
 			widget.Draw(b) // must not panic for any size, including 0x0
 		}
@@ -876,7 +882,7 @@ func TestDrawIsTotalAtEverySize(t *testing.T) {
 // guards do not panic on the way there.
 func TestDegenerateSizesRenderWithoutPanic(t *testing.T) {
 	for _, tc := range [][2]int{{0, 0}, {1, 1}, {0, 24}, {24, 0}, {0, 1}, {1, 0}} {
-		widget := newHello(rootBounds(tc[0], tc[1]), buffer.DepthTrueColor)
+		widget := newHello(rootBounds(tc[0], tc[1]), buffer.DepthTrueColor, noQuit)
 		r := render.New(headless.NewMemorySink(tc[0], tc[1]), render.Config{
 			Width: tc[0], Height: tc[1], Caps: termmosaic.DefaultCaps(),
 		})
@@ -916,7 +922,7 @@ func TestDrawIsAllocationFree(t *testing.T) {
 		{200, 60}, // three columns
 	} {
 		b := buffer.NewBuffer(tc.w, tc.h)
-		h := newHello(rootBounds(tc.w, tc.h), buffer.DepthTrueColor)
+		h := newHello(rootBounds(tc.w, tc.h), buffer.DepthTrueColor, noQuit)
 		h.Draw(b) // warm any lazily-initialised state
 
 		if got := testing.AllocsPerRun(100, func() { h.Draw(b) }); got != 0 {
@@ -933,7 +939,7 @@ func TestDrawIsAllocationFree(t *testing.T) {
 // allocation test at zero allocations only by luck, so the keying is asserted
 // directly.
 func TestAdaptIsSkippedForAnUnchangedRect(t *testing.T) {
-	h := newHello(rootBounds(60, 14), buffer.DepthTrueColor)
+	h := newHello(rootBounds(60, 14), buffer.DepthTrueColor, noQuit)
 	b := buffer.NewBuffer(60, 14)
 
 	h.Draw(b)
@@ -958,7 +964,7 @@ func TestAdaptIsSkippedForAnUnchangedRect(t *testing.T) {
 	// cache that recomputes but is not drawn would satisfy the assertion above.
 	if !strings.Contains(widgettest.Screen(
 		widgettest.Render(t, 120, 40, 1,
-			newHello(rootBounds(120, 40), buffer.DepthTrueColor))), "3 columns") {
+			newHello(rootBounds(120, 40), buffer.DepthTrueColor, noQuit))), "3 columns") {
 		t.Error("the three-column layout is not on screen at 120x40")
 	}
 }
@@ -974,7 +980,7 @@ func TestResizeRepaintsTheWholeRect(t *testing.T) {
 	r := render.New(sink, render.Config{
 		Width: sizes[0][0], Height: sizes[0][1], Caps: termmosaic.DefaultCaps(),
 	})
-	root := newHello(rootBounds(sizes[0][0], sizes[0][1]), buffer.DepthTrueColor)
+	root := newHello(rootBounds(sizes[0][0], sizes[0][1]), buffer.DepthTrueColor, noQuit)
 	r.SetRoot(root)
 	if _, err := r.Render(); err != nil {
 		t.Fatal(err)
