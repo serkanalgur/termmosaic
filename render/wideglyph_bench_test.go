@@ -26,8 +26,13 @@ package render
 // one writes ~3 KB, and it is not the glyphs: it is that a wide glyph advances the
 // terminal cursor by two cells while the diff's cursor-run suppression assumes one,
 // so every wide glyph is preceded by a CUP escape. internal/diff/wideglyph_test.go
-// isolates and pins that; see BenchmarkDiffDenseWide. It is recorded as a finding
-// in ADR 0008's risk-5 amendment and is not fixed in v0.1.0.
+// isolates and pins that; see BenchmarkDiffDenseWide.
+//
+// FIXED 2026-10-04: the run tracker now advances by the glyph's cell width, so
+// the wide scene writes 19,443 bytes against the narrow scene's 6,233 - 3.12x
+// rather than 11x, with 60 cursor moves instead of 6,000. The residual 3.12x is
+// inherent: a wide rune is three UTF-8 bytes where a narrow one is one. The
+// ASCII path, which matters far more, is unchanged.
 
 import (
 	"testing"

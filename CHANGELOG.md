@@ -30,6 +30,115 @@ reversed before v1.0.0.
 
 ---
 
+## [0.2.0] — 2026-10-05
+
+A minor bump, and the reason is the framework fix below: `Renderer.Post` now
+wakes the frame pacer, which **is** a behavioural change.
+
+### Fixed
+
+- **`Renderer.Post` never woke the pacer, so async apps froze.** `needsFrameLocked`
+  did not consider queued callbacks while `Pacer.Run` gates every frame on
+  `NeedsFrame()` — and posted callbacks only run *inside* `Render`. The chain
+  deadlocked: `Post` queued work, `Render` would run it, `Render` was gated on
+  `NeedsFrame`, which cannot be true until the callback runs. An app that updates
+  the screen from `Post` — which ADR 0003 documents as the safe way to mutate
+  widget state, precisely so it is safe against a concurrent `Draw` — painted its
+  first frame and idled forever. The new `examples/markets` hit it: live runs
+  painted one empty frame and stopped.
+
+  The `--offline` mode masked it completely, which is why every test passed: the
+  offline fetch returns instantly, so the callback is already queued by the time
+  the first frame runs and gets drained inside it. The pre-existing `Post` test
+  called `Render` directly and so could never catch this.
+
+- **The diff emitted a cursor move before every wide glyph.** Run suppression
+  checked whether the next cell was `lastX+1`, but a wide glyph advances the
+  terminal's cursor by two while `lastX` recorded only the glyph's own column. On
+  6,000 wide glyphs that is 6,000 CUP escapes against the narrow scene's 30, and
+  68,832 bytes against 6,233 — 11× — for identical output. The tracker now
+  advances by the glyph's **cell width**: 60 moves and 19,443 bytes, 3.12×. The
+  ASCII path is unchanged at ~7,200 ns/op with 0 allocations. The benchmark that
+  had pinned the defective behaviour now asserts the corrected one.
+
+- **`BarChart` drew every category label at absolute column 0** in horizontal
+  mode, because `adapt` never set `axisRow`. Inside `Bounds` only for a chart at
+  the origin, and a widget writing outside its own rectangle everywhere else.
+
+### Added
+
+- **`Menu`** — a navigable tree with submenus to arbitrary depth. Keyboard
+  traversal that skips disabled items, Right to open a branch and Left to leave
+  one, Escape closing a level and then the menu. Level headers are bracketed when
+  active and not when inactive; the selected row carries a marker and a rule
+  rather than colour alone.
+
+- **`Dialog`** — a modal with `VariantInfo`, `VariantConfirm` and `VariantChoice`.
+  Keys do not reach the tree beneath, focus is saved and restored, and Escape
+  means Cancel rather than doing nothing. The focused action is ringed *and*
+  reinforced with reverse video, which survives `NO_COLOR` because colour is
+  suppressed only at encode time. `VariantConfirm` opens focused on the
+  affirmative action on purpose: a dialog that opens on Cancel makes "walk away"
+  the result of a stray Enter.
+
+- **`examples/markets`** — a live finance dashboard on real data with no API key:
+  ECB rates from Frankfurter, crypto from CoinGecko. Three bands that reflow as
+  the terminal narrows, a fetch goroutine that owns every network call and
+  publishes an immutable snapshot, and `--offline` for bundled sample data so
+  tests and CI never touch the network.
+
+- **Keyboard and mouse in the examples.** `hello` gains a focus ring and a `?`
+  help overlay; `markets` gains a two-entry focus ring, per-panel key routing,
+  wheel and click, pause/resume, and a help overlay that is modal for keys but
+  deliberately not for the mouse. Mouse capture is opted into by exactly one line
+  and never globally — ADR 0005's default stays off, because capturing it takes
+  the user's shell selection.
+
+- **[ADR 0009](docs/adr/0009-command-and-keymap.md)** — the command and keymap
+  layer. Specified, not yet implemented; `keymap` lands in v0.3.0.
+
+### Changed
+
+- **`examples/hello` is genuinely responsive.** It was laid out with `Max(46)`
+  inside two `Fill(1)`s, so it shrank on a small terminal and never grew on a
+  large one — a 200×60 screen still drew a 46×9 block floating in the middle.
+  That is clamping, not responsiveness. It now spans the terminal and re-arranges
+  itself across four bands, and below 38×8 says so in one line rather than
+  clipping into nonsense.
+
+- **The widget catalog is 24** (was 22), with `docsgen` entries so the
+  documentation site can show both new widgets.
+
+### Known Limitations
+
+- **`keymap` is specified but not implemented** ([ADR 0009](docs/adr/0009-command-and-keymap.md)).
+  Widgets still dispatch their own keys. No command palette exists yet.
+
+- **Windows is a stub.** `term.Open` validates its arguments and then returns a
+  loud error for every console operation. Nothing on Windows works.
+
+- **No IME or preedit support.** `EventCompose` exists and the parser reserves
+  the entry point, but nothing emits it. Composition-heavy input is unsupported.
+
+- **tmux DCS passthrough is missing.** ANSI passthrough may not work inside tmux.
+  A known gap rather than an oversight.
+
+- **`TextArea` has no rendered selection.** Half a selection is worse than none.
+
+- **The colour quantiser is unvalidated.** The redmean mapping to 256 and 16
+  rungs has never been checked for perceptual acceptability. `buffer.Quantiser`
+  is the drop-in hook for a Lab-space replacement.
+
+- **The width table is hand-written** from East Asian Width ranges, and grapheme
+  clusters remain uncomposed. A benchmark cannot make a table correct.
+
+- **`form.Tabs` consumes every wheel notch** regardless of where the pointer is,
+  so it steals the wheel from whatever is beneath it. Worked around with
+  application-level routing in the examples; the widget itself is unchanged. This
+  wants an ADR decision.
+
+---
+
 ## [0.1.0] — 2026-10-04
 
 The first release. Everything below is new; there is no previous version to
