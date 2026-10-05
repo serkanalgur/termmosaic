@@ -77,9 +77,13 @@ type Split struct {
 	// Direction is the axis to split.
 	Direction layout.Direction
 
-	// Spacing is the number of cells between adjacent panes. Negative values are
+	// spacing is the number of cells between adjacent panes. Negative values are
 	// treated as zero, as they are in layout.
-	Spacing int
+	//
+	// Unexported because the pane solve is cached against the bounds AND this
+	// value, so a public field here is a field a caller can assign with no way to
+	// mark the solve stale. Use SetSpacing and Spacing.
+	spacing int
 
 	// Background is painted across Bounds before the panes, for the same reason
 	// every widget paints its own rect: the renderer diffs and never clears.
@@ -160,12 +164,22 @@ func (s *Split) SetBounds(r buffer.Rect) { s.bounds = r }
 // Bounds returns the Split's rectangle, safe to call before the first Draw.
 func (s *Split) Bounds() buffer.Rect { return s.bounds }
 
-// SetSpacing sets the gap between panes.
+// Spacing returns the gap between panes in cells.
+func (s *Split) Spacing() int { return s.spacing }
+
+// SetSpacing sets the gap between panes, clamping a negative value to zero, and
+// marks the cached solve stale.
+//
+// This setter was always correct; what was missing was that Spacing was also a
+// public field, so `split.Spacing = 3` reached the same state with no way to mark
+// anything dirty and the panes kept their old sizes until the next resize. The
+// field is unexported now for the reason ADR 0007 §3 gives: the solve is a
+// derivation, and every route to changing an input of a derivation must invalidate.
 func (s *Split) SetSpacing(n int) {
 	if n < 0 {
 		n = 0
 	}
-	s.Spacing = n
+	s.spacing = n
 	s.dirty = true
 }
 
@@ -195,7 +209,7 @@ func (s *Split) PaneBounds(i int) buffer.Rect {
 	if i < 0 || i >= len(sizes) {
 		return buffer.Rect{}
 	}
-	return layout.Rect(s.bounds, s.Direction, sizes, s.Spacing, i)
+	return layout.Rect(s.bounds, s.Direction, sizes, s.spacing, i)
 }
 
 // PaneAt returns the index of the pane containing (x, y), or -1. The divider cells
@@ -206,7 +220,7 @@ func (s *Split) PaneAt(x, y int) int {
 	}
 	sizes := s.currentSizes()
 	for i := range sizes {
-		if layout.Rect(s.bounds, s.Direction, sizes, s.Spacing, i).Contains(x, y) {
+		if layout.Rect(s.bounds, s.Direction, sizes, s.spacing, i).Contains(x, y) {
 			return i
 		}
 	}
@@ -228,7 +242,7 @@ func (s *Split) dividerAt(x, y int) (i int, ok bool) {
 		return 0, false
 	}
 	sizes := s.currentSizes()
-	grab := s.Spacing
+	grab := s.spacing
 	if grab < 1 {
 		grab = 1
 	}
@@ -247,7 +261,7 @@ func (s *Split) dividerAt(x, y int) (i int, ok bool) {
 		if at >= gap && at < gap+grab {
 			return j - 1, true
 		}
-		off = gap + s.Spacing
+		off = gap + s.spacing
 	}
 	return 0, false
 }
@@ -373,7 +387,7 @@ func (s *Split) currentSizes() []int {
 // and there is no way to ask it for a view, so the result is copied into a slice
 // the Split owns and reused from then on.
 func (s *Split) solve() {
-	solved := layout.Solve(s.Direction, s.constraints, s.Spacing, s.axisLength())
+	solved := layout.Solve(s.Direction, s.constraints, s.spacing, s.axisLength())
 	if cap(s.sizes) < len(solved) {
 		s.sizes = make([]int, len(solved))
 	} else {
@@ -409,7 +423,7 @@ func (s *Split) paneBounds(i int) buffer.Rect {
 	if i < 0 || i >= len(s.sizes) {
 		return buffer.Rect{}
 	}
-	return layout.Rect(s.bounds, s.Direction, s.sizes, s.Spacing, i)
+	return layout.Rect(s.bounds, s.Direction, s.sizes, s.spacing, i)
 }
 
 // axisLength is the space available along the Split's axis, or zero when the rect
@@ -440,7 +454,7 @@ func (s *Split) MinSize() buffer.Size {
 	n := len(s.panes)
 	along := 1
 	if n > 0 {
-		along = n*minPane + s.Spacing*(n-1)
+		along = n*minPane + s.spacing*(n-1)
 		if along < 1 {
 			along = 1
 		}
@@ -556,7 +570,7 @@ func (s *Split) dragBy(m termmosaic.Mouse) bool {
 	// The divider sits after pane i, so its wanted position is the start of pane
 	// i+1. The offset from the pane's start to the pointer is the new size.
 	sizes := s.currentSizes()
-	prev := layout.Offset(sizes, s.Spacing, i)
+	prev := layout.Offset(sizes, s.spacing, i)
 	want := at - start - prev
 	return s.Resize(i, want-sizes[i])
 }

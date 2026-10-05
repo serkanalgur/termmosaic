@@ -30,6 +30,74 @@ reversed before v1.0.0.
 
 ---
 
+## [0.5.0] — 2026-10-05
+
+A minor bump, and the reason is the first section: **five exported fields are
+now private.** Programs that assign them directly will not compile.
+
+### Breaking
+
+- **`Pager.Status`, `Split.Spacing`, `Meter.ShowValue`, `ProgressBar.Label` and
+  `ProgressBar.Percentage` are no longer exported fields.** Each had a working
+  setter already, so migration is mechanical:
+
+  | Before | After |
+  |---|---|
+  | `p.Status = on` | `p.SetStatus(on)` |
+  | `s.Spacing = n` | `s.SetSpacing(n)` |
+  | `m.ShowValue = on` | `m.SetShowValue(on)` |
+  | `p.Label = s` | `p.SetLabel(s, st)` |
+  | `p.Percentage = on` | `p.SetPercentage(on)` |
+
+  Read-only accessors exist too: `Status()`, `Spacing()`, `ShowValue()`,
+  `Percentage()`, `Label()`.
+
+  The reason is in [ADR 0007](docs/adr/0007-responsive-screens.md) §3: a widget
+  caches its derived layout keyed on `Bounds()`, so a field that changes without
+  an `Invalidate()` produces a stale layout that **nothing ever repairs** — the
+  rect does not change, so the cache keeps hitting. A doc comment saying "call
+  `Invalidate` after assigning" is a rule with no enforcement, no compile error
+  and no reminder. `ProgressBar` is the proof: `SetLabel` already reset the cache
+  correctly, and the field was still assignable, so the API taught the wrong
+  lesson by having both.
+
+  The new setters are behaviour-preserving on a widget that has not yet drawn,
+  and strictly better on one that has.
+
+### Fixed
+
+- **Eight widgets kept a stale layout cache after a documented setter.** Found by
+  the new cache-audit mode, not by review: `Pager.SetStatus`, `Select.SetMarker`,
+  `BarChart.SetData`, `Meter.SetShowValue`, `ProgressBar.SetLabel`/`SetLabelSpans`/
+  `SetPercentage`, `Sparkline.SetValues`, and `Split.Spacing` via direct
+  assignment. Each now drops the cached derivation, and each has a regression
+  test that fails without the fix.
+
+### Added
+
+- **A cache-audit mode**, specified as ADR 0007 §3's deferred "expensive half":
+  it corrupts a widget's cached derivation after a `Draw` and asserts the next
+  frame is byte-identical, so this defect class is caught mechanically instead of
+  by review. Two mechanisms, because one provably does not catch the class — the
+  poison check in `render`, and a cold-twin comparison in `widgettest`. Opt-in via
+  `render.Config.CacheAudit`, and **zero-allocation when disabled**, pinned by
+  `TestRenderIsAllocationFreeWithCacheAuditDisabled`.
+- **`widgets/cacheaudit`** now **fails the build** when a widget in the catalog
+  is flagged. It runs on every push and pull request on all three platforms via
+  the existing `go test ./... -race` job.
+
+### Known Limitations
+
+- The cache-audit gate covers the transitions it names. Other exported raw fields
+  remain — `Select.Marker`, `Gauge.ShowValue`, `BarChart.ShowValue`/`Vertical`/
+  `Data`, `Sparkline.Values`/`Braille`, `TextInput.Placeholder`,
+  `Checkbox.TriState`, and the `Scrollbar`/`Header` fields on `List`/`Table`/
+  `Tree`. None produced a finding, so none is a confirmed defect, and they are the
+  same shape. The gate does not cover them because no transition names them.
+- `term/terminal_windows_test.go` is still **compile-only** verified
+  (`GOOS=windows go vet`) and has never been executed; the Windows backend still
+  runs zero tests at runtime.
+
 ## [0.4.1] — 2026-10-05
 
 A patch release, and the reason is the only change in it: **the `golang.org/x/term`
@@ -739,6 +807,7 @@ Two performance claims that this release turns from assertion into measurement:
   **60 cursor moves and 19,443 bytes, 3.12× the narrow frame** rather than 11×.
   The ASCII path is unchanged. See ADR 0008's amendment, finding 4.
 
+[0.5.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.5.0
 [0.4.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.4.0
 [0.3.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.3.0
 [0.2.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.2.0

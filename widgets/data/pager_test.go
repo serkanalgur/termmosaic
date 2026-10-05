@@ -130,14 +130,12 @@ func TestPagerBlankLinesAreRows(t *testing.T) {
 
 func TestPagerStatusReportsPositionWithoutPrinting(t *testing.T) {
 	p := shortPager(t, 20, 8, "one\ntwo\nthree\nfour")
-	p.Status = false
-	p.Invalidate()
+	p.SetStatus(false)
 	off := rows(t, 20, 8, p)
 	if strings.Contains(strings.Join(off, ""), "Ln") {
 		t.Errorf("the status line was drawn although Status is false: %q", off)
 	}
-	p.Status = true
-	p.Invalidate()
+	p.SetStatus(true)
 	on := rows(t, 20, 8, p)
 	if !strings.Contains(on[1], "Ln 1/4") {
 		t.Errorf("the status line does not report the position: %q", on[1])

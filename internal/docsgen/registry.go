@@ -619,7 +619,7 @@ func progressBarEntry() Entry {
 			p := viz.NewProgressBar(r)
 			p.Set(0.62)
 			p.SetLabel("generating captures", styHeading)
-			p.Percentage = true
+			p.SetPercentage(true)
 			p.FillStyle = styOnOK
 			p.TrackStyle = styTrack
 			p.PercentStyle = styTitle

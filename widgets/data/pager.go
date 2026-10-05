@@ -108,9 +108,15 @@ type Pager struct {
 	StatusStyle buffer.Style
 	MatchStyle  buffer.Style
 
-	// Status draws the position readout, and is the first thing dropped when there
+	// status draws the position readout, and is the first thing dropped when there
 	// is no room for it.
-	Status bool
+	//
+	// It is unexported because adapt DERIVES the body rectangle from it, so a
+	// public field here is a field an application can assign with no way to
+	// invalidate the derivation — and no future resize repairs it, because the
+	// cache key does not change. Use SetStatus and Status; see the note on
+	// Invalidate below.
+	status bool
 
 	focused bool
 
@@ -134,7 +140,7 @@ func NewPager(r buffer.Rect) *Pager {
 	p := &Pager{
 		blk:        block.New(r),
 		bounds:     r,
-		Status:     true,
+		status:     true,
 		regions:    []geometry.Region{{Size: 1, Prio: statusPrio}, {Size: 0, Prio: geometry.PrioAlways}},
 		MatchStyle: buffer.ReverseStyle,
 	}
@@ -259,6 +265,21 @@ func (p *Pager) SetBounds(r buffer.Rect) {
 // configure the border, title, padding, background and ASCII rung.
 func (p *Pager) Block() *block.Block { return p.blk }
 
+// Status reports whether the position readout is drawn.
+func (p *Pager) Status() bool { return p.status }
+
+// SetStatus shows or hides the position readout, and drops the layout cache so
+// the height budget is solved again.
+//
+// The status line costs one row, and adapt gives that row to the status and takes
+// it from the body. Toggling it at an unchanged rect therefore leaves the body a
+// row too short or a row too tall — and since the cache key is the rect, nothing
+// repairs it until the user happens to resize the window.
+func (p *Pager) SetStatus(on bool) {
+	p.status = on
+	p.cachedRect = buffer.Rect{}
+}
+
 // Focused reports whether the pager has focus.
 func (p *Pager) Focused() bool { return p.focused }
 
@@ -307,11 +328,14 @@ func (p *Pager) ScrollToEnd() {
 //
 // The widget repaints its whole rectangle every frame, so there is no dirty region
 // to mark — but there IS state derived from the rect, and this is the documented
-// way to say it is stale. A caller that changes a field the layout depends on
-// (Scrollbar, Header, Status, Marker) calls Invalidate; without it the change lands
-// whenever the rect next changes, which is the "broken for exactly one frame and
-// repaired by the next" shape ADR 0007 §3 describes for a cache keyed on the wrong
-// thing.
+// way to say it is stale.
+//
+// Every field this widget's layout depends on is now reached through a setter that
+// calls Invalidate, so a caller never has to remember this. SetStatus is the
+// example, and it is the whole argument for unexporting the field: a Pager whose
+// Status was a public bool had two routes to the same change, and only one of them
+// invalidated. The other produced a Pager that dropped its status line's height
+// from the budget — permanently, since nothing else changes the cache key.
 func (p *Pager) Invalidate() {
 	p.cachedRect = buffer.Rect{}
 }
@@ -640,7 +664,7 @@ func (p *Pager) adapt(in buffer.Rect) {
 	}
 	p.keep = geometry.Budget(p.regions, in.H)
 	p.statusH = 0
-	if len(p.keep) == len(p.regions) && p.Status && p.keep[0] {
+	if len(p.keep) == len(p.regions) && p.status && p.keep[0] {
 		p.statusH = 1
 	}
 	p.contentW = in.W

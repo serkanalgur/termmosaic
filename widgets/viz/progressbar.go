@@ -45,11 +45,20 @@ type ProgressBar struct {
 	// value is the progress ratio, always in [0, 1] after Set.
 	value float64
 
-	// Label is the text beside the bar and Percentage toggles the number. Both are
+	// label is the text beside the bar and percentage toggles the number. Both are
 	// rendered from spans, so a label can carry several styles.
-	Label        []buffer.Span
+	//
+	// Both are unexported because adapt budgets them: it reserves the label's
+	// measured width and percentWidth() cells, and hands what is left to the bar.
+	// Changing either therefore moves the bar, and a public field gave a caller a
+	// route to move it with no way to re-run the budget. That is worse than
+	// useless as an API: SetLabel and SetLabelSpans invalidate, Percentage does
+	// not, and two ways of changing the same region behaving differently teaches
+	// the reader that the invalidation is optional. Use SetLabel, SetLabelSpans,
+	// SetPercentage and their getters.
+	label        []buffer.Span
 	LabelStyle   buffer.Style
-	Percentage   bool
+	percentage   bool
 	PercentStyle buffer.Style
 
 	// FillStyle is the rendition of the filled part and TrackStyle of the rest.
@@ -119,9 +128,37 @@ func (p *ProgressBar) Value() float64 { return p.value }
 // this value comes from a division somewhere, and a division can produce NaN.
 func (p *ProgressBar) Set(ratio float64) { p.value = ratioOf(ratio, 1) }
 
-// SetLabel sets the label from a single styled run, which is the common case.
+// Label returns the label spans, which is what Draw paints. The returned slice is
+// the widget's own and must not be modified.
+func (p *ProgressBar) Label() []buffer.Span { return p.label }
+
+// SetLabel sets the label from a single styled run, which is the common case, and
+// drops the layout cache so the budget is solved again.
 func (p *ProgressBar) SetLabel(s string, st buffer.Style) {
-	p.Label = []buffer.Span{buffer.NewSpan(s, st)}
+	p.SetLabelSpans([]buffer.Span{buffer.NewSpan(s, st)})
+}
+
+// SetLabelSpans sets the label from several styled runs, and drops the layout
+// cache so the budget is solved again.
+//
+// A label is a measured region, so this is a layout change and not a content
+// change: a longer label shortens the bar, at the same rect. That is why it
+// invalidates rather than merely repainting.
+func (p *ProgressBar) SetLabelSpans(spans []buffer.Span) {
+	p.label = append(p.label[:0], spans...)
+	p.cachedRect = buffer.Rect{}
+}
+
+// Percentage reports whether the number is printed beside the bar.
+func (p *ProgressBar) Percentage() bool { return p.percentage }
+
+// SetPercentage shows or hides the number, and drops the layout cache so the
+// budget is solved again.
+//
+// Four cells out of the interior, moved between the number and the bar — the same
+// reason SetLabel invalidates.
+func (p *ProgressBar) SetPercentage(on bool) {
+	p.percentage = on
 	p.cachedRect = buffer.Rect{}
 }
 
@@ -162,8 +199,8 @@ func (p *ProgressBar) adapt(in buffer.Rect) {
 	p.cachedRect = in
 	p.mark = truncMark(p.blk.Ascii)
 	if len(p.regions) == 3 {
-		p.regions[0].Size = buffer.SpansWidth(p.Label)
-		if p.Percentage {
+		p.regions[0].Size = buffer.SpansWidth(p.label)
+		if p.percentage {
 			p.regions[2].Size = percentWidth()
 		} else {
 			p.regions[2].Size = 0
@@ -176,7 +213,7 @@ func (p *ProgressBar) adapt(in buffer.Rect) {
 		if p.keep[0] && p.labelW < p.regions[0].Size {
 			p.labelW = p.regions[0].Size
 		}
-		if p.keep[2] && p.Percentage {
+		if p.keep[2] && p.percentage {
 			p.percentW = p.regions[2].Size
 		}
 	}
@@ -207,7 +244,7 @@ func (p *ProgressBar) drawLabel(buf *buffer.Buffer, in buffer.Rect) {
 		return
 	}
 	row := buffer.Rect{X: in.X, Y: in.Y, W: p.labelW, H: in.H}
-	paintRow(buf, row, p.Label, 0, p.mark, p.TrackStyle)
+	paintRow(buf, row, p.label, 0, p.mark, p.TrackStyle)
 }
 
 // drawPercent paints the percentage right-aligned in the interior.

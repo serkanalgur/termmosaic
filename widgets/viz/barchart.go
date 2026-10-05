@@ -149,8 +149,18 @@ func (c *BarChart) MinSize() buffer.Size {
 	return minWhole(c.blk, minChartW+maxLabelW, 2)
 }
 
-// SetData replaces the series.
-func (c *BarChart) SetData(d []Datum) { c.Data = d }
+// SetData replaces the series, and drops the layout cache so the next Draw
+// re-derives the column widths and the scale.
+//
+// The invalidate is not optional bookkeeping. adapt solves the column widths and
+// the scale from c.Data and caches them against the rect, so new data at an
+// unchanged rect otherwise kept the old solve: bars drawn to the old maximum, in
+// the old column widths, with the old label truncation — and nothing would ever
+// change the rect to repair it, because the screen did not move.
+func (c *BarChart) SetData(d []Datum) {
+	c.Data = d
+	c.cachedRect = buffer.Rect{}
+}
 
 // MaxValue returns the top of the scale the chart is drawing against, which is the
 // data's own maximum unless Max was pinned.

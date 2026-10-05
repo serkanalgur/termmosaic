@@ -151,7 +151,15 @@ func (s *Select) SelectedLabel() string {
 func (s *Select) Offset() int { return s.list.offset() }
 
 // SetMarker sets the non-colour marker for the highlighted option.
-func (s *Select) SetMarker(m string) { s.Marker = m }
+//
+// It rebuilds the row cache like every other mutator. The marker is a column of
+// its own, so a change to it moves every label in the list; without the rebuild
+// the cached rows kept the old widths and the select drew its labels under a
+// marker they had never been laid out against.
+func (s *Select) SetMarker(m string) {
+	s.Marker = m
+	s.rebuildCache()
+}
 
 // styles returns the resolved style set, resolving the documented unset
 // sentinel on SelectedStyle.

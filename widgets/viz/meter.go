@@ -92,9 +92,13 @@ type Meter struct {
 	ValueStyle buffer.Style
 	TrackStyle buffer.Style
 
-	// ShowName and ShowValue toggle the two text regions.
+	// ShowName toggles the zone-name region. ShowValue toggles the number, and is
+	// unexported because adapt sizes that region and caches the budget: a public
+	// bool could be assigned with no way to re-run adapt, leaving the meter
+	// drawing its value text against a layout that had no room for it. Use
+	// SetShowValue and ShowValue.
 	ShowName  bool
-	ShowValue bool
+	showValue bool
 
 	// ThresholdVisible draws the threshold marker; without it the meter is a
 	// three-band bar with no indication of where the line is.
@@ -119,7 +123,7 @@ func NewMeter(r buffer.Rect) *Meter {
 		Threshold:        90,
 		ThresholdVisible: true,
 		ShowName:         true,
-		ShowValue:        true,
+		showValue:        true,
 		regions: []geometry.Region{
 			{Size: 0, Prio: namePrio},
 			{Size: 0, Prio: geometry.PrioAlways},
@@ -150,6 +154,22 @@ func DefaultZones() []Zone {
 // proportional to the ranges they stand for.
 func (m *Meter) SetZones(zones []Zone) {
 	m.Zones = zones
+	m.cachedRect = buffer.Rect{}
+}
+
+// ShowValue reports whether the reading is printed beside the bar.
+func (m *Meter) ShowValue() bool { return m.showValue }
+
+// SetShowValue shows or hides the reading, and drops the layout cache so the
+// budget is solved again.
+//
+// The cache reset is the whole reason this is a setter rather than a field. adapt
+// reserves valueWidth() cells for the number when it is shown and nothing when it
+// is not, then hands those cells to the bar, so hiding the value changes where the
+// bar starts. Sizing that change against the rect alone left the bar in its old
+// place and the number painted over the zone name.
+func (m *Meter) SetShowValue(on bool) {
+	m.showValue = on
 	m.cachedRect = buffer.Rect{}
 }
 
@@ -266,7 +286,7 @@ func (m *Meter) adapt(in buffer.Rect) {
 	}
 	if len(m.regions) == 3 {
 		m.regions[0].Size = nameW
-		if m.ShowValue {
+		if m.showValue {
 			m.regions[2].Size = valueWidth()
 		} else {
 			m.regions[2].Size = 0

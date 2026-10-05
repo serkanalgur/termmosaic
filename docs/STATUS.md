@@ -176,9 +176,23 @@ framework's defaults are the terminal's own colours plus named attribute styles.
 `NO_COLOR` and the 16-colour rung stay encode-time only, so no widget path
 consults them.
 
-## Release gate for v0.4.0 — what closed, and what did not
+## Release gate for v0.5.0 — what closed, and what did not
 
-The current release is **v0.4.0, 2026-10-05** — a minor over v0.3.0, and the
+The current release is **v0.5.0, 2026-10-05** — a minor, and the reason is a
+**breaking API change**: five exported widget fields became private, because each
+had a working setter already and the field let a program invalidate nothing. The
+reasoning is [ADR 0007](adr/0007-responsive-screens.md) §3's: a widget caches its
+derived layout keyed on `Bounds()`, so a field changed without `Invalidate()`
+yields a stale layout nothing ever repairs.
+
+Eight widgets kept a stale cache after a documented setter. They were found by
+the cache-audit mode ADR 0007 §3 specified as its deferred "expensive half",
+which is now built and **gates the build** — this defect class is now caught
+mechanically rather than by review. See [CHANGELOG.md](../CHANGELOG.md).
+
+## The v0.4.0 gate, retained as history
+
+**v0.4.0** was released 2026-10-05 — a minor over v0.3.0, and the
 reason is one `widgets/data` fix: `Tree.drawRow` computed a per-node content
 style and applied it only to the expander glyph, writing the label through a
 direct `SetSpansCappedIn`, so a node's `Style` and the selected row's
