@@ -74,6 +74,10 @@ type Renderer struct {
 	lastPaintN int
 	// posted holds callbacks queued by Post.
 	posted []func()
+	// cacheAudit is Config.CacheAudit, hoisted onto the renderer so the frame
+	// path reads one field it already has rather than re-reading the config.
+	// Nil in every build that does not opt in, which is the zero-cost case.
+	cacheAudit *CacheAudit
 }
 
 // Config configures a Renderer.
@@ -91,6 +95,19 @@ type Config struct {
 	// TargetFPS is the frame-pacing budget. Zero means DefaultTargetFPS; values
 	// below 1 are clamped.
 	TargetFPS int
+	// CacheAudit enables ADR 0007 §3's cache-poison debug mode.
+	//
+	// It is a pointer so that "off" is nil rather than a zero-valued struct the
+	// mode would have to keep checking fields of: nil is the cheap test, and
+	// cheap is the entire requirement, because this sits in the frame path that
+	// ADR 0002 documents a zero-allocation guarantee for. With this nil,
+	// Render's added cost is one pointer comparison and nothing else — see
+	// TestRenderIsAllocationFreeWithCacheAuditDisabled.
+	//
+	// Enabling it is a debugging decision, not a production one. It repaints the
+	// whole screen on every call to Poison, which is precisely what makes it
+	// useless as a steady-state cost and useful as an audit.
+	CacheAudit *CacheAudit
 }
 
 // New returns a Renderer that draws into sink.
@@ -107,16 +124,17 @@ func New(sink termmosaic.Sink, cfg Config) *Renderer {
 		fps = DefaultTargetFPS
 	}
 	r := &Renderer{
-		sink:      sink,
-		encoder:   ansi.Encoder{Depth: cfg.Caps.ColourDepth(), NoColor: cfg.NoColor, Quantiser: cfg.Quantiser},
-		noColor:   cfg.NoColor,
-		front:     buffer.NewBuffer(w, h),
-		back:      buffer.NewBuffer(w, h),
-		differ:    diff.NewDiffer(DefaultScratchBytes),
-		w:         w,
-		h:         h,
-		targetFPS: fps,
-		dirty:     make([]buffer.Rect, 0, 8),
+		sink:       sink,
+		encoder:    ansi.Encoder{Depth: cfg.Caps.ColourDepth(), NoColor: cfg.NoColor, Quantiser: cfg.Quantiser},
+		noColor:    cfg.NoColor,
+		front:      buffer.NewBuffer(w, h),
+		back:       buffer.NewBuffer(w, h),
+		differ:     diff.NewDiffer(DefaultScratchBytes),
+		w:          w,
+		h:          h,
+		targetFPS:  fps,
+		dirty:      make([]buffer.Rect, 0, 8),
+		cacheAudit: cfg.CacheAudit,
 	}
 	// The first frame has no previous state, so everything must be written.
 	r.forceAll = true
@@ -394,6 +412,20 @@ func (r *Renderer) Render() (int, error) {
 	// invalidation bugs are the worst failure mode a TUI has.
 	if r.root != nil {
 		r.root.Draw(r.back)
+		// ADR 0007 §3's deferred mode. When enabled, every frame is followed by
+		// a poisoned repaint and a byte-identity assertion, so a transition that
+		// left a stale derivation is caught on the frame it happened rather than
+		// by whoever eventually noticed the wrong pixels.
+		//
+		// The nil check is the entire cost when the mode is off, and it is
+		// written as `r.cacheAudit != nil` rather than a call into the audit so
+		// that the disabled path is a load and a branch — no call, no
+		// allocation, no interface dispatch. See
+		// TestRenderIsAllocationFreeWithCacheAuditDisabled, which is what keeps
+		// that claim honest rather than aspirational.
+		if r.cacheAudit != nil {
+			r.poisonLocked()
+		}
 	}
 
 	r.dirty = r.back.TakeDirtyInto(r.dirty, r.w, r.h)

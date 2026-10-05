@@ -176,7 +176,7 @@ func (d *dashboard) buildWidgets() {
 	d.bar.TrackStyle = stTrack
 	d.bar.PercentStyle = stMuted
 	d.bar.SetLabel("deploy", stMuted)
-	d.bar.Percentage = true
+	d.bar.SetPercentage(true)
 
 	d.gauge = viz.NewGauge(buffer.Rect{})
 	d.gauge.ArcStyle = stAccent

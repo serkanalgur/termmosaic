@@ -13,7 +13,7 @@ func labelledBar(w, h int) *ProgressBar {
 	p := NewProgressBar(buffer.Rect{X: 0, Y: 0, W: w, H: h})
 	p.Block().SetBorder(buffer.BorderPlain)
 	p.SetLabel("build", buffer.DefaultStyle)
-	p.Percentage = true
+	p.SetPercentage(true)
 	return p
 }
 
@@ -103,7 +103,7 @@ func TestProgressBarDegenerateSizesDoNotPanic(t *testing.T) {
 		p := NewProgressBar(buffer.Rect{X: 0, Y: 0, W: size.W, H: size.H})
 		p.Block().SetBorder(buffer.BorderPlain)
 		p.SetLabel("a long label that cannot fit", buffer.DefaultStyle)
-		p.Percentage = true
+		p.SetPercentage(true)
 		p.Set(0.5)
 		p.Draw(cellBuf(size.W, size.H))
 		p.Set(math.NaN())

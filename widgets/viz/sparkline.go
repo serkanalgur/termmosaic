@@ -130,8 +130,17 @@ func (s *Sparkline) Block() *block.Block { return s.blk }
 // size including chrome.
 func (s *Sparkline) MinSize() buffer.Size { return minWhole(s.blk, minSparkW, minSparkH) }
 
-// SetValues replaces the series.
-func (s *Sparkline) SetValues(v []float64) { s.Values = v }
+// SetValues replaces the series, and drops the normalisation cache so the next
+// Draw re-derives the minimum and maximum it scales the plot against.
+//
+// Without it a new series is drawn through the OLD series' range, which is the
+// worst shape this widget can fail in: the sparkline looks like a plausible
+// sparkline, showing the wrong trend, with nothing on screen to say so. The cache
+// is keyed on the rect alone, so no resize is coming to repair it.
+func (s *Sparkline) SetValues(v []float64) {
+	s.Values = v
+	s.cachedRect = buffer.Rect{}
+}
 
 // Invalidate satisfies termmosaic.Widget: it drops the cache so the next Draw
 // re-derives the normalisation.
