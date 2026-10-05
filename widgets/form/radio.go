@@ -195,8 +195,18 @@ func (g *Radio) rebuild(r buffer.Rect) {
 		if g.list.focused && i == g.list.Selected() {
 			focus = RadioFocusMark
 		}
+		// FocusStyle is the style of the ">" focus MARK. On the rows where that cell
+		// is a blank pad rather than the mark, the cell belongs to the ROW it sits
+		// in, not to focus: the resolved FocusStyle inherits SelectedStyle's
+		// AttrReverse, so dressing every row's gutter with it painted a two-cell
+		// reverse-video band down an unfocused group — on exactly the rows that say
+		// this option is NOT the one you are on.
+		focusStyle := st
+		if focus != " " {
+			focusStyle = styles.focus
+		}
 		lead := []buffer.Span{
-			buffer.NewSpan(focus+" ", styles.focus),
+			buffer.NewSpan(focus+" ", focusStyle),
 			buffer.NewSpan(mark+" ", st),
 		}
 		g.rows.rows[i] = joinRow(lead, capRow(g.Ascii, label, st, r.W-head))

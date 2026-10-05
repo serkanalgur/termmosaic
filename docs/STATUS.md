@@ -178,7 +178,7 @@ consults them.
 
 ## Release gate for v0.5.0 — what closed, and what did not
 
-The current release is **v0.5.0, 2026-10-05** — a minor, and the reason is a
+The current release is **v0.5.1, 2026-10-05**. **v0.5.0**, a minor, had the reason a
 **breaking API change**: five exported widget fields became private, because each
 had a working setter already and the field let a program invalidate nothing. The
 reasoning is [ADR 0007](adr/0007-responsive-screens.md) §3's: a widget caches its
@@ -189,6 +189,11 @@ Eight widgets kept a stale cache after a documented setter. They were found by
 the cache-audit mode ADR 0007 §3 specified as its deferred "expensive half",
 which is now built and **gates the build** — this defect class is now caught
 mechanically rather than by review. See [CHANGELOG.md](../CHANGELOG.md).
+
+**v0.5.1** was released 2026-10-05 — the seven style-application defects this
+gate's audit found, including two (`Dialog`'s choice label and `Button`'s
+focus/disabled label) that made a focused row unreadable under default styles.
+The audit found **no remaining instance** of the class across all 24 widgets.
 
 ## The v0.4.0 gate, retained as history
 

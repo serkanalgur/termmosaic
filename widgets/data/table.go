@@ -603,6 +603,12 @@ func (t *Table) Draw(buf *buffer.Buffer) {
 // drawHeader paints the header row across the whole interior, gutter included, so
 // that the rows below form a block of one background with the selection's row
 // highlighted inside it.
+//
+// The header text is written over that fill, so the style handed to drawCell must
+// carry the fill's own background — which is what HeaderStyle's documented
+// "patched with ItemStyle" is for. Passing HeadingStyle alone left the header text
+// on the terminal background inside a row just filled with ItemStyle, because
+// HeadingStyle is attribute-only and therefore resolves to the terminal default.
 func (t *Table) drawHeader(buf *buffer.Buffer, in buffer.Rect) {
 	if t.headerH == 0 || !t.showHeader {
 		return
@@ -616,7 +622,11 @@ func (t *Table) drawHeader(buf *buffer.Buffer, in buffer.Rect) {
 		}
 		st := col.HeaderStyle
 		if st.IsUnset() {
-			st = buffer.HeadingStyle
+			// The Patch is the whole point of this line: HeadingStyle carries
+			// attributes only, so without ItemStyle's background the header text
+			// resolves to the terminal's own background and lands on it inside a row
+			// that was just filled with ItemStyle.
+			st = buffer.HeadingStyle.Patch(t.ItemStyle)
 		}
 		t.drawCell(buf, row, c, col.Title, t.titleW[c], st)
 	}
@@ -647,14 +657,25 @@ func (t *Table) drawRow(dst *buffer.Buffer, row buffer.Rect, i int) {
 		}
 	}
 
+	// The row's rendition is passed to every cell, so it reaches the TEXT and not
+	// only the fill — the same contract paintRow states for List and Tree, and for
+	// the same reason: a selection that recoloured the background alone would leave
+	// the text unreadable on the one row the reader is looking at, which is worse
+	// than no selection at all. The zero Style, NOT DefaultStyle: the override is
+	// applied when st is not unset, and DefaultStyle is a real style rather than the
+	// unset sentinel, so passing it would overwrite every cell's own style with the
+	// terminal default.
+	//
+	// The consequence, stated here because it is a trade rather than a free win: on
+	// the selected row a cell's own Style and its column's CellStyle do NOT show,
+	// because the row style overrides a single-span cell. A cell carrying SEVERAL
+	// spans keeps its own styles regardless — drawCell's documented exception, which
+	// it states at the write rather than here.
+	rowStyle := bg
 	cells := t.rows[i].cells
 	for _, c := range t.visCols {
 		if c < len(cells) {
-			// The zero Style, NOT DefaultStyle: the override is applied when st is
-			// not unset, and DefaultStyle is a real style rather than the unset
-			// sentinel, so passing it would overwrite every cell's own style with
-			// the terminal default.
-			t.drawCell(dst, row, c, cells[c].spans, cells[c].width, buffer.Style{})
+			t.drawCell(dst, row, c, cells[c].spans, cells[c].width, rowStyle)
 		}
 	}
 }

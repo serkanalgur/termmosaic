@@ -686,6 +686,10 @@ func (t *Tree) drawRow(dst *buffer.Buffer, row buffer.Rect, i int) {
 	// the expander glyph above it. The rect is the label region alone, so the
 	// fill inside paintRow is a second pass over cells already filled with the
 	// same bg and cannot reach the marker or the indent painted above.
+	// st reaches the text of a SINGLE-span label; a label carrying several spans
+	// keeps its own styles, which is paintRow's documented exception. Stated here
+	// because this is where the Tree defect of v0.4.0 lived, and a reader who
+	// takes the next line as unconditional is wrong in exactly that way.
 	label := buffer.Rect{X: x + expanderW, Y: row.Y, W: row.Right() - x - expanderW, H: 1}
 	paintRow(dst, label, t.labels[node], 0, t.mark, bg, st)
 }

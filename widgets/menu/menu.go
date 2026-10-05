@@ -943,7 +943,7 @@ func (m *Menu) drawRow(buf *buffer.Buffer, c *layoutCol, row buffer.Rect, i int,
 		if m.Checked(c.depth, i) {
 			glyph = m.checkRune
 		}
-		buf.Set(c.checkX, row.Y, glyph, m.checkStyle().Resolved())
+		buf.Set(c.checkX, row.Y, glyph, m.checkStyle(selected, disabled).Resolved())
 	}
 	// The label text was cut to the region in the rebuild, marker included, so this
 	// writes it whole without re-capping. The style is applied HERE rather than
@@ -954,7 +954,7 @@ func (m *Menu) drawRow(buf *buffer.Buffer, c *layoutCol, row buffer.Rect, i int,
 		buf.SetString(c.hintX, row.Y, m.hintAt(c, i), m.hintStyle().Resolved())
 	}
 	if c.hasSubmenu && c.submenuX > 0 && m.itemHasSubmenu(c.depth, i) {
-		buf.Set(c.submenuX, row.Y, m.submenuRune, m.checkStyle().Resolved())
+		buf.Set(c.submenuX, row.Y, m.submenuRune, m.checkStyle(selected, disabled).Resolved())
 	}
 
 	// The marker is drawn LAST and only for a row that is selected AND enabled, so a
@@ -1044,9 +1044,16 @@ func (m *Menu) hintStyle() buffer.Style {
 	return m.HintStyle
 }
 
-func (m *Menu) checkStyle() buffer.Style {
+// checkStyle returns the rendition of the check glyph and the submenu arrow.
+//
+// An unset CheckStyle follows the ROW, exactly as the marker three lines above it
+// does: a check glyph in ItemStyle on a row selected with SelectedStyle's
+// background is unreadable on the selected row, which is the one unreadable place
+// for it to be. A set CheckStyle is the author's explicit choice and applies to
+// every row unchanged.
+func (m *Menu) checkStyle(selected, disabled bool) buffer.Style {
 	if m.CheckStyle.IsUnset() {
-		return m.ItemStyle
+		return m.labelStyle(selected, disabled)
 	}
 	return m.CheckStyle
 }

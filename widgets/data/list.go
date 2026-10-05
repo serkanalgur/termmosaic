@@ -475,6 +475,9 @@ func (l *List) drawRow(dst *buffer.Buffer, row buffer.Rect, i int) {
 		bg = l.SelectedStyle
 		st = l.SelectedStyle
 	}
+	// st reaches the text of a SINGLE-span item; an item carrying several spans keeps
+	// its own styles on this row, which is paintRow's documented exception and the
+	// reason a deliberately multi-styled row is the author's to keep.
 	paintRow(dst, row, item.spans, l.markerW, l.mark, bg, st)
 	if l.markerW > 0 && selected && l.markerRune != 0 {
 		mst := l.MarkerStyle
