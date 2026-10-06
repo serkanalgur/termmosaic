@@ -1,0 +1,30 @@
+┌ search - wikipedia ──────────────────────────────────────────────────┐
+│                                                                      │
+│ > query terminal user interface                                      │
+│                                                                      │
+│                                                                      │
+│ ┌ results ─────────────────────────────────────────────────────────┐ │
+│ │  article                                      words updated      │ │
+│ │> Text-based user interface                     1929 2026-09-18   │ │
+│ │  User interface                                5038 2026-09-17   │ │
+│ │  Terminal emulator                             1926 2026-10-05   │ │
+│ │  Pi (AI agent)                                  626 2026-09-18   │ │
+│ │  Alsamixer                                       87 2026-05-11   │ │
+│ │  Bloomberg Terminal                            2811 2026-10-04   │ │
+│ │  GNOME Terminal                                1431 2026-08-31   │ │
+│ │  Aqua (user interface)                         4473 2026-10-04   │ │
+│ │  Terminal (macOS)                               406 2026-05-05   │ │
+│ │                                                                  │ │
+│ └──────────────────────────────────────────────────────────────────┘ │
+│                                                                      │
+│ ┌ Text-based user interface ───────────────────────────────────────┐ │
+│ │matching passage - press enter on the table for the article       │ │
+│ │text-based user interfaces (TUI) (alternately terminal user       │ │
+│ │interfaces, to reflect a dependence upon the properties of        │ │
+│ │computer terminals and not just                                   │ │
+│ │                                                                  │ │
+│ └──────────────────────────────────────────────────────────────────┘ │
+│ [Enter] run the search  [Tab] next pane  [Down] the results  [Q q E… │
+│ search  offline: capture of 2026-10-05  9 of 3027 results  09:12:41Z │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘

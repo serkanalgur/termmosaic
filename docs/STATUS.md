@@ -178,6 +178,76 @@ framework's defaults are the terminal's own colours plus named attribute styles.
 `NO_COLOR` and the 16-colour rung stay encode-time only, so no widget path
 consults them.
 
+## Release gate for v0.7.0 — what closed, and what did not
+
+**v0.7.0**, a minor, and the reason is one example: **`examples/search`**, a
+search-and-results TUI on real Wikipedia data with **no API key**, plus a
+`--offline` flag that runs the whole screen on a transcribed 2026-10-05 capture
+so tests and CI never touch the network. A minor rather than a patch because the
+example is additive but the golden corpus and the public screenshots are
+observable behaviour, and because it is the first shipped consumer of a shape
+`ADR 0009` reasoned about but had never exercised. Nine golden files, 74 tests.
+
+It is **not** "another demo", and the reason is worth stating before anything
+else: **it is the first example with a focusable widget in a focus ring.**
+`form.TextInput` and `data.Table`, moved with `Tab`/`Backtab`, drawn as a visible
+ring. Two of four examples now dispatch through a registry rather than their own
+`switch`.
+
+**Closed at this gate.**
+
+- **The context-dependence question has an answer, and it is
+  `keymap.Command.Enabled`, not `ScopeFocus`.** No binding in `examples/search`
+  is focus-scoped, and the reason is specific rather than stylistic: no catalog
+  widget implements `keymap.Commandable`, so a focus-scoped binding would mean
+  the **application** declaring keys on a widget's behalf with an owner it chose —
+  exactly what `Commandable` exists to stop being necessary for. `Enabled` false
+  makes `dispatchChord` skip the command and keep looking, so the event is
+  reported unconsumed and falls through to the tree, where the focused widget's
+  own key contract gets it. `TestNoScreenBindingStealsAFocusedWidgetsKey` pins
+  the consequence: this screen's bindings never take a key away from a widget
+  that has focus.
+- **A fully registry-derived key contract does not require `Commandable`.**
+  This is a materially better answer to ADR 0009 risk 5 than "the interfaces are
+  unused", because it moves the discoverability story off widget participation
+  and onto the command's own `Enabled` predicate. Two of the four risk-5 claims
+  are now answered: `KeyHint.SetEntries` has **two** consumers
+  (`examples/hello`, `examples/search`), and both build their hints from
+  `DescribeGrouped` and got the same answer about `Entry.Chords`. Verified:
+  `grep -rn 'SetEntries' --include='*.go' .` outside `keymap/` returns those two
+  plus the definition in `widgets/form/keyhint.go`.
+- **`Describe(ScopeFocus)` is over-inclusive rather than incomplete, and is now
+  documented as such.** `inScope` returns true on an exact-scope match without
+  consulting liveness, so a focus-scoped query advertises bindings whose command
+  is currently disabled — which, applied to a hint, means advertising the
+  **field's** arrow bindings on a screen where the **table** has focus and those
+  arrows move a selection. This was reasoned about before; an application has now
+  run into it.
+
+**Not done at this gate.**
+
+- **No catalog widget implements `Commandable`,** and none implements
+  `Clickable`. Still verified: `grep -rn 'Commandable' widgets/` returns nothing.
+  Both `examples/hello` and `examples/search` are *applications* opting in, which
+  is not a widget contributing its own bindings, so ADR 0009 §8's deferral is
+  untouched. It is not blocking: neither example needed it.
+- **`Registry.SetFocus` is still deferred to v1.1**, and `examples/search` is
+  **evidence for** it rather than a consumer of it. The example has to track
+  focus itself and filter its hint on `km.Has`, which is the one query an
+  application makes when focus changes and the one it cannot make of the registry.
+  Verified: `grep -rn 'func (r \*Registry) SetFocus' keymap/` returns nothing.
+  The workaround is the shape of the gap, not a substitute for the fix.
+- **There is still no command palette.** Unchanged from v0.6.0.
+- **The two-mechanism overlap is avoidable by application discipline and still
+  not handled by the framework.** See risk 2 in the register below;
+  `examples/search` declines to bind `Home`/`End` precisely because a
+  `ScopeScreen` binding outranks a focused child, and `Warnings()` is still the
+  fix if that discipline is not followed.
+- **`Chord` normalisation has still met no real terminal.** Unchanged from
+  v0.6.0, and untouched by an example that only ever receives decoded events.
+
+The gate below is the v0.6.1 gate, retained as history.
+
 ## Release gate for v0.6.1 — what closed, and what did not
 
 **v0.6.1**, a minor, and the reason is one new method and one rewired example:
@@ -212,6 +282,7 @@ behaviour change under the release policy above.
   than re-sorting, so neither ordering can drift from the other.
   Verified: `grep -rn 'termmosaic/keymap' --include='*.go' .` outside `keymap/`
   returns `widgets/form/keyhint.go` and `examples/hello/` only.
+  **Updated at the v0.7.0 gate** — it now also returns `examples/search/`.
 - **`Widget.Handle` claims nothing in `examples/hello`,** and the hand-written
   hint string and the test that checked it against `Handle` are both gone. A
   binding and its description are written **once**, which is the property the
@@ -242,7 +313,9 @@ behaviour change under the release policy above.
   explicitly outside that ADR. Unchanged from v0.6.0.
 - **`examples/markets` and `examples/dashboard` still dispatch by their own
   `switch`** (`examples/markets/dashboard.go:577`,
-  `examples/dashboard/main.go:329`). See risk 2 below.
+  `examples/dashboard/main.go:329`). See risk 2 below. **Superseded at the v0.7.0
+  gate:** `examples/search` now dispatches through a registry, so it is two of
+  four.
 
 The gate below is the v0.6.0 gate, retained as history.
 
@@ -278,11 +351,20 @@ and the release policy puts new API in a minor.
 **Not done at this gate.**
 
 - **No catalog widget implements `Commandable`.** Verified: `grep -rn
-  'Commandable' widgets/` returns nothing. The two interfaces are built and
-  unused, and `KeyHint.SetEntries` — the one bridge between `Describe` and the
-  widget path — is called by no example. The discoverability story is therefore
-  still untested at scale, which is ADR 0009 risk 5 and is unchanged by shipping
-  the package.
+  'Commandable' widgets/` returns nothing. **That half is unchanged and is
+  re-verified at the v0.7.0 gate.** The other half of this bullet — that
+  `KeyHint.SetEntries`, the one bridge between `Describe` and the widget path, is
+  called by no example — was true here and **is no longer true**: it now has two
+  consumers, `examples/hello` and `examples/search`, both rendering their hint
+  from `DescribeGrouped` and getting the same answer about `Entry.Chords`. The
+  discoverability story is therefore tested at two applications rather than none,
+  and the stronger form of the evidence is what `examples/search` shows: an
+  application can have a **fully registry-derived key contract** — every chord,
+  every command, every hint row written once — with `Commandable`
+  unimplemented, because `Command.Enabled` is a property of the command and not
+  of a widget. That is a materially better answer to ADR 0009 risk 5 than "the
+  interfaces are unused": widget participation is no longer carrying the story on
+  its own, so §8's deferral is not blocking. `Clickable` still has no consumer.
 - **There is no command palette.** ADR 0009 §9 puts it in scope and explicitly
   outside that ADR. It is new behaviour in `Menu`/`Dialog`, so a v1.1.0 minor.
   This is the half of the keymap work that genuinely has not happened, and it is
@@ -710,8 +792,8 @@ The bar this project is measured against:
   partial on Windows — it is unevidenced on all three platforms until the first
   push lands.
 - **Every widget has a runnable example and a documented public API. NOT MET,
-  and not close.** There are three example programs — `hello`, `markets`,
-  `dashboard` — and **zero `func Example` functions in the codebase**. Each of
+  and not close.** There are four example programs — `hello`, `markets`,
+  `dashboard`, `search` — and **zero `func Example` functions in the codebase**. Each of
   the 24 widgets has a documented public API in godoc terms, but none has the
   runnable, godoc-rendered example this criterion asks for, and `Menu` and
   `Dialog` have no example program either. This is the largest unmet item in
@@ -744,17 +826,20 @@ risk register:
    which it was not when this was first written — it slipped its stated version
    twice before it landed. `keymap` shipped in v0.6.0, and both named tests
    exist and pass. **What remains open in this item is not the architecture but
-   its exercise**: no catalog widget implements `Commandable`, **one example of
-   three** binds chords, and `Chord`'s folding rules have met no real terminal.
+   its exercise**: no catalog widget implements `Commandable`, **two examples of
+   four** bind chords, and `Chord`'s folding rules have met no real terminal.
    Freezing the
    surface is now the right call; freezing it *unused* is the remaining risk,
    and it is ADR 0009's risks 2, 3 and 5 rather than a gap in this gate list.
    **Updated for v0.6.1:** risk 5 is retired — `examples/hello` binds twelve
    chords across six commands and both of its hints render from the registry —
-   and no catalog widget implements `Commandable` still. What remains is that
-   the mechanism is exercised in **one example of three**, `Chord`'s folding
-   rules have met no real terminal, and the two-mechanism overlap is still
-   unobserved.
+   and no catalog widget implements `Commandable` still.
+   **Updated for v0.7.0:** the mechanism is exercised in **two examples of four**
+   — `examples/search` is the second, and the first with a focusable widget in a
+   focus ring — and no catalog widget implements `Commandable` still. What
+   remains is that `Chord`'s folding rules have met no real terminal, and that
+   the two-mechanism overlap is avoidable by application discipline but still not
+   handled by the framework.
 3. **CI green is unevidenced on all three platforms** — the last green badge
    attests to the previous workflow configuration.
 
@@ -908,8 +993,17 @@ oversight:
   first dispatch, and an application with real focusable widgets cannot ask the
   question §4 exists to answer. New API on a shipped type, so a minor.
   `examples/hello` avoids it by binding its navigation at `ScopeScreen`.
+  **Strengthened at v0.7.0 — this is now the best-evidenced item in the list.**
+  `examples/search` cannot avoid it by that route: its arrows mean different
+  things on different panes, and it is a registry *and* a real focus ring. It
+  tracks focus itself and filters its hint on `km.Has`. It also established that
+  `Describe(ScopeFocus)` is **over-inclusive rather than incomplete** —
+  `inScope` short-circuits an exact-scope match without consulting liveness — so
+  the fix is not only a missing method but a method whose answer must be
+  filtered by availability.
 - **`examples/markets` and `examples/dashboard` moving off their own `switch`**
-  onto `keymap` — one example of three did this in v0.6.1 and the other two did
+  onto `keymap` — two examples of four did this (`examples/hello` in v0.6.1,
+  `examples/search` in v0.7.0) and the other two did
   not. What is missing is not the migration but the **overlap**: nothing in the
   tree now has a `keymap` binding and a widget `switch` answering the same key,
   which is the failure risk 2 above is about.
@@ -943,14 +1037,31 @@ late.
    shape rather than the overlap. The stated mitigation was building such an
    example **before** the tag, and what it has actually established is narrower
    than "no application mixes both" — it has established that one application of
-   three has moved off its `switch` entirely.
-   **One example of three is not the mitigation.** `examples/markets`
-   (`dashboard.go:577`) and `examples/dashboard` (`main.go:329`) both still
-   dispatch by their own `switch`, and neither binds a chord or implements
-   `Commandable`. So the *overlap* — a `keymap` global binding shadowing a
-   widget's `switch`, the failure this risk is actually about — is still
-   unobserved in the tree, and `examples/hello` does not observe it: a registry
-   that answers everything leaves `Handle` nothing to shadow. The fix if it
+   four has moved off its `switch` entirely.
+   **One example of four was not the mitigation; a second one also is not, but
+   the reason has changed.** `examples/search` (v0.7.0) is the second of four to
+   dispatch through a registry, and the **first with a focusable widget in a
+   focus ring** — a `form.TextInput` and a `data.Table`, moved with
+   `Tab`/`Backtab`. The stated mitigation, "build a mixed-mechanism example
+   before the tag", has now been met by an application that genuinely has both
+   mechanisms live: registry bindings at `ScopeScreen`/`ScopeGlobal` alongside a
+   focused widget's own key contract.
+   **What it established is that the overlap is avoidable by discipline, not
+   that the framework handles it.** `search` gates every context-dependent
+   binding with `Command.Enabled` — which `dispatchChord` skips, so the event
+   falls through to the tree — and declines to bind any chord a focusable widget
+   wants: `Home`/`End` are left to the widgets, because a `ScopeScreen` binding
+   outranks both, and the ring's ends are bound to `Ctrl+Home`/`Ctrl+End` instead.
+   `TestNoScreenBindingStealsAFocusedWidgetsKey` pins that. So `Handle` and the
+   registry still never compete for one key, and the *failure this risk is
+   actually about* — a `keymap` global binding shadowing a widget's `switch` — is
+   still unobserved. What has changed is that the shape is now demonstrated
+   rather than assumed, and the discipline it requires (screen bindings must not
+   claim a focused widget's key) is an obligation on **applications**, which is
+   the argument for `Warnings()` rather than against it. `examples/markets`
+   (`dashboard.go:577`) and `examples/dashboard` (`main.go:329`) still dispatch
+   by their own `switch`, and neither binds a chord or implements
+   `Commandable`. The fix if it
    bites remains `Warnings()` reporting a chord that is both bound and handled
    by an attached widget, **not** a `Widget` change.
 3. **`Chord` normalisation disagreeing with a real terminal.** Nothing in its
