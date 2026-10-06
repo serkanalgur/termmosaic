@@ -296,6 +296,8 @@ compiles and fails loudly at runtime.**
   tmux DCS passthrough, and Windows console mode flags are our bug list, not
   tcell's. This is the real cost and it is the main reason this project is
   pre-alpha for a long time.
+  *(Historical rationale, written before v1.0.0. The project left pre-alpha
+  with the v1.0.0 release on 2026-10-06; the cost itself stands.)*
 - **Windows is late.** `x/sys` raw-mode handling on the Windows console is a
   distinct and fiddly problem. We should plan on Linux and macOS first and treat
   Windows as a v1.0 stretch, even though CI-green-on-Windows is in our

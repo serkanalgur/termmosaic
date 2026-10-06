@@ -1,13 +1,16 @@
 # Contributing
 
-TermMosaic is pre-alpha and in active design. Contributions are welcome, but
-the design is not settled — see [STATUS.md](STATUS.md).
+TermMosaic v1.0.0 was released on 2026-10-06 with a stability promise: the
+public API is frozen at that tag and Semantic Versioning applies. Contributions
+are welcome — [STATUS.md](STATUS.md) records what is decided, open and deferred.
 
 ## Before you start
 
-If you want to change architecture, open an issue first. Right now the backend
-strategy, buffer representation, renderer mode, and layout engine are all open
-questions. A PR that quietly commits to one of them will not be reviewed.
+If you want to change architecture, open an issue first. The backend strategy,
+buffer representation, renderer mode and layout engine are decided and recorded
+in [docs/adr/](adr/README.md); reversing one is a release-defining act, not a
+pull request. A PR that quietly commits to a new architectural direction will
+not be reviewed.
 
 ## Getting set up
 
@@ -28,8 +31,9 @@ go run ./examples/...
 
 ## Working agreement
 
-- **Pre-1.0, the API will break.** We will use conventional commits and keep a
-  changelog, but do not assume stability.
+- **From v1.0.0, the API is frozen and SemVer applies.** We use conventional
+  commits and keep a changelog. Changing the frozen surface is a breaking
+  change and needs an issue first; behaviour fixes go in patch releases.
 - Run `go vet ./...` and `gofmt -l .` before opening a PR.
 - Every widget needs: a test, a runnable example, and a documented public API.
   A widget without an example is not done.

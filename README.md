@@ -11,9 +11,13 @@ A terminal UI framework for Go: a cell-buffer renderer, a catalog of
 ready-to-use widgets, and a command/keymap layer that binds keys to named
 actions without changing a single widget signature.
 
-> **Status: pre-alpha.** The renderer, input layer and the full widget catalog
-> are built and tested — 28 packages, 1,186 tests, zero-allocation frame path —
-> but the API is **not stable** and may break before v1.0.
+> **Status: v1.0.0, released 2026-10-06.** The renderer, input layer and the
+> full widget catalog are built and tested — 28 packages, 1,186 tests,
+> zero-allocation frame path. v1.0.0 is the first release that makes a
+> stability promise: the public API is frozen at that tag, and Semantic
+> Versioning applies from it. Known limitations are enumerated in
+> [docs/STATUS.md](docs/STATUS.md) and in the Known Limitations sections of
+> [CHANGELOG.md](CHANGELOG.md) — written down, not left for users to discover.
 >
 > **Supported platforms: Linux and macOS.** Windows is a deliberate loud-error
 > stub — every console operation fails loudly instead of half-working — and a
@@ -69,10 +73,10 @@ elegant its renderer is.
 
 ## Installation
 
-Tagged and released through **v0.7.0**. Pin the version:
+Tagged and released through **v1.0.0**. Pin the version:
 
 ```
-go get github.com/serkanalgur/termmosaic@v0.7.0
+go get github.com/serkanalgur/termmosaic@v1.0.0
 ```
 
 ## What's in the box
@@ -184,7 +188,7 @@ MIT
 
 ## Sponsoring
 
-This is a solo pre-alpha project and it costs real time. If it saves you any,
+This is a solo project and it costs real time. If it saves you any,
 [GitHub Sponsors](https://github.com/sponsors/serkanalgur) is the way.
 
 Sponsoring does not buy priority, a roadmap seat, or a promised feature — the
