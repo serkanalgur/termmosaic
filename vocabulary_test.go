@@ -146,6 +146,38 @@ var boxDrawingOwner = map[string]bool{
 	"buffer/border_test.go": true,
 }
 
+// exampleFiles are the per-widget godoc examples. Each one's // Output comment is
+// the ASSERTION the example is verified against — the cell grid the renderer
+// produced — so a widget whose chrome is a border necessarily writes box-drawing
+// runes into its source. That is the same reason buffer/border_test.go is listed
+// above: a test that asserts on what was painted has to be able to name the runes
+// it painted.
+//
+// They are listed here rather than matched by suffix so that adding a widget
+// package's example is a deliberate act at the same place the rule is written
+// down, rather than something a new file does silently by being named well.
+var exampleFiles = []string{
+	"widgets/basic/example_test.go",
+	"widgets/block/example_test.go",
+	"widgets/data/example_test.go",
+	"widgets/dialog/example_test.go",
+	"widgets/form/example_test.go",
+	"widgets/menu/example_test.go",
+	"widgets/split/example_test.go",
+	"widgets/viz/example_test.go",
+}
+
+// isExampleFile reports whether rel is one of the per-widget examples named
+// above, which are excepted from the literal scan for the reason given there.
+func isExampleFile(rel string) bool {
+	for _, f := range exampleFiles {
+		if rel == f {
+			return true
+		}
+	}
+	return false
+}
+
 // TestBoxDrawingRunesLiveInOneFile is the rule the whole border vocabulary
 // exists to enforce: exactly one glyph table in the repository.
 //
@@ -158,7 +190,7 @@ var boxDrawingOwner = map[string]bool{
 func TestBoxDrawingRunesLiveInOneFile(t *testing.T) {
 	for _, file := range goFiles(t) {
 		rel := relToRoot(t, file)
-		if boxDrawingOwner[rel] {
+		if boxDrawingOwner[rel] || isExampleFile(rel) {
 			continue
 		}
 		src := readFile(t, file)
@@ -185,7 +217,7 @@ func TestBorderGlyphTableIsTheOnlyTable(t *testing.T) {
 	suspect := regexp.MustCompile(`(?i)(border|corner|divider|box)[A-Za-z]*(runes?|glyphs?|chars?)`)
 	for _, file := range goFiles(t) {
 		rel := relToRoot(t, file)
-		if boxDrawingOwner[rel] || strings.HasSuffix(rel, "_test.go") {
+		if boxDrawingOwner[rel] || isExampleFile(rel) || strings.HasSuffix(rel, "_test.go") {
 			continue
 		}
 		for _, name := range sortedKeys(declaredNames(readFile(t, file))) {
