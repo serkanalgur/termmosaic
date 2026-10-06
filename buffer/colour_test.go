@@ -77,28 +77,28 @@ func TestQuantiserHookIsUsed(t *testing.T) {
 
 // TestDegradationIsNotNaiveTruncation asserts the ladder does not simply drop
 // the low bits of each channel. Truncating #ff8800 to 5 bits per channel gives
-// (31, 17, 0) which is a cube cell that is measurably off; a perceptual mapping
-// should return a palette entry within a small distance of the original instead.
+// (31, 17, 0) which is a cube cell that is measurably off; the Lab quantiser
+// must return a palette entry closer in Lab (CIE76) than that naive cell.
 func TestDegradationIsNotNaiveTruncation(t *testing.T) {
 	c := NewColour(0xff, 0x88, 0x00)
 	idx := c.Index256()
 	r, g, b := Index256PaletteRGB(int(idx))
-	// Squared-distance sanity: the chosen entry must be close in the redmean
-	// metric. A crude truncation of the cube coordinate can land several
-	// levels away on a bright channel.
-	d := redmean(0xff, 0x88, 0x00, r, g, b)
-	if d > 30_000 {
-		t.Errorf("#ff8800 mapped to index %d = (%02x,%02x,%02x), distance %d is too large",
-			idx, r, g, b, d)
-	}
-	// And it must not be the naive 5-bit truncation's cube cell, which for this
-	// colour is index 16 + (5<<12 | 2<<6 | 0) >> ... computed independently.
+	src := rgbToLab(0xff, 0x88, 0x00)
+	pick := rgbToLab(r, g, b)
 	naiveR, naiveG, naiveB := uint8(0xff>>3), uint8(0x88>>3), uint8(0x00>>3)
 	naive := 16 + int(naiveR)*36 + int(naiveG)*6 + int(naiveB)
-	if int(idx) == naive {
-		naiveR2, naiveG2, naiveB2 := Index256PaletteRGB(naive)
+	nr, ng, nb := Index256PaletteRGB(naive)
+	near := rgbToLab(nr, ng, nb)
+	distSq := func(x, y lab) float64 {
+		dl, da, db := x.l-y.l, x.a-y.a, x.b-y.b
+		return dl*dl + da*da + db*db
+	}
+	if dSq := distSq(src, pick); dSq > distSq(src, near) {
+		t.Errorf("#ff8800 mapped to index %d = (%02x,%02x,%02x), farther in Lab than the naive cube cell %d = (%02x,%02x,%02x)",
+			idx, r, g, b, naive, nr, ng, nb)
+	} else if int(idx) == naive {
 		t.Logf("index %d happens to equal the naive cube cell (%02x,%02x,%02x); "+
 			"not a failure, the perceptual metric landed on the same cell",
-			idx, naiveR2, naiveG2, naiveB2)
+			idx, nr, ng, nb)
 	}
 }

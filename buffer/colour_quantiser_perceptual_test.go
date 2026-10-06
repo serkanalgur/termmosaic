@@ -2,22 +2,38 @@ package buffer
 
 // Perceptual audit of the colour degradation ladder.
 //
-// docs/STATUS.md carries "Color model and degradation ladder" as PROPOSED with
-// the note that the redmean mapping "is not yet validated". This file is the
-// validation: it measures the DefaultQuantiser against a perceptually uniform
-// metric, separates the error the palette forces from the error the quantiser
-// adds, and pins the result with regression thresholds so the decision cannot
-// silently rot. If a future change to redmean, the palettes, or a replacement
-// Quantiser makes the mapping worse, these tests fail.
+// docs/STATUS.md carries "Color model and degradation ladder" as PROPOSED
+// with the note that the redmean mapping "is not yet validated". This file is
+// the validation. Its history in one paragraph: PR #18 measured the original
+// redmean DefaultQuantiser against a perceptually uniform metric and found a
+// defect, not a pass — the "redmean" distance in colour.go divided by 256 in
+// integer arithmetic, so both rmean weights collapsed to 2 and the formula
+// degenerated to fixed-weight 2*dr^2 + 4*dg^2 + 2*db^2 in gamma-space RGB,
+// flipping the hue of plausible UI colours (brick red -> olive, dark green ->
+// grey, coral -> dark olive) and collapsing the markets "down" colour to grey
+// at the 16 rung. The maintainer decision was REPLACE before v1.0.0, through
+// the existing buffer.Quantiser hook. This file now measures the REPLACEMENT —
+// the Lab-space (CIE76) selection in colour_lab.go — separates the error the
+// palette forces from the error the quantiser adds, and pins the result with
+// regression thresholds so the decision cannot silently rot. If a future
+// change to the Lab metric, the palettes, or a replacement Quantiser makes
+// the mapping worse, these tests fail.
 //
-// Metric: CIEDE2000 (delta E 2000) on sRGB->CIE Lab (D65), implemented below
-// and pinned against Sharma, Wu & Dalal's 34 reference pairs. CIEDE2000 is the
-// current CIE standard for colour difference: it weights lightness, chroma and
-// hue by what the eye actually resolves, which plain Lab Euclidean distance
-// (CIE76) does not — CIE76 overstates differences among dark blues and near
-// neutrals, exactly the region a terminal palette is densest in. Measuring in
-// RGB, as redmean itself operates, would beg the question: the approximation
-// would be graded by the same geometry it was built from.
+// Metric: CIEDE2000 (delta E 2000) on sRGB->CIE Lab (D65), implemented in
+// colour_lab.go and pinned against Sharma, Wu & Dalal's 34 reference pairs.
+// CIEDE2000 is the current CIE standard for colour difference: it weights
+// lightness, chroma and hue by what the eye actually resolves, which plain
+// Lab Euclidean distance (CIE76) does not — CIE76 overstates differences
+// among dark blues and near neutrals, exactly the region a terminal palette
+// is densest in. Measuring in RGB, as redmean itself operated, would beg the
+// question: the approximation would be graded by the same geometry it was
+// built from. The quantiser selects with CIEDE2000 too — the same pinned
+// function the oracle scores with — which is why the selection thresholds
+// below pin zero: a non-zero measurement means the selection wiring and the
+// oracle disagree, i.e. someone changed the effective metric without
+// re-auditing. (CIE76 selection was measured before being rejected: it
+// regresses markets.down at the 16 rung relative even to redmean on this
+// metric. The reasoning lives in colour_lab.go.)
 //
 // Sampling of the truecolor cube: the full 16,777,216-colour cube cannot be
 // scanned against a 256-entry CIEDE2000 oracle inside a test budget (16.7M x
@@ -39,24 +55,13 @@ package buffer
 //
 // A colour outside the 256 cube has gamut error no quantiser can remove; only
 // selection error is a defect. Collapsing the two would either overstate the
-// ladder (blaming redmean for the palette's coarseness) or understate it
-// (letting a bad pick hide behind an unavoidable one). At the 256 rung the
+// ladder (blaming the quantiser for the palette's coarseness) or understate
+// it (letting a bad pick hide behind an unavoidable one). At the 256 rung the
 // palette is all 256 xterm entries, which includes the 16 named colours, so
 // "quantised to a named ANSI colour instead of a cube entry" is scored as a
 // legitimate pick; at the 16 rung only the 16 named colours exist.
 //
 // Percentiles use nearest-rank on the sorted sample: p_q = sorted[int(q*(n-1))].
-//
-// A finding this audit pins directly: the distance function in colour.go is
-// NAMED redmean but is not redmean in effect. Its rmean weighting divides by
-// 256 with integer arithmetic, and rmean <= 255 for every pair of uint8
-// channels, so both weight terms are identically 2 and the formula collapses
-// to fixed-weight 2*dr^2 + 4*dg^2 + 2*db^2 in gamma RGB. The hue errors
-// measured below (brick red -> olive, coral -> dark olive, dark green ->
-// grey) are exactly what that fixed weighting predicts. See
-// TestQuantiserEffectiveDistanceIsPinned, which fails if anyone "fixes" the
-// division — because that fix changes every 256/16-colour byte the renderer
-// emits and must be a deliberate, re-audited decision, not a drive-by.
 
 import (
 	"fmt"
@@ -67,188 +72,101 @@ import (
 
 // ---------------------------------------------------------------------------
 // Thresholds pinned by the measurements in the audit. Read this block as
-// "what the numbers were when the decision was made", not as "what is good":
-// several bounds below knowingly sit above a measured defect, because a
-// regression test pins behaviour and the judgement lives in the report, not
-// in a round number. The defects each bound is honestly carrying:
+// "what the numbers were when the decision was made", not as "what is good".
+// The history in one line: PR #18 pinned a DEFECTIVE redmean baseline here on
+// purpose (bounds sat knowingly above measured hue-flip errors) so the
+// replacement could not land without lowering them; this revision IS that
+// replacement, and every selection bound has collapsed to zero because the
+// Lab quantiser now selects with the same CIEDE2000 the oracle scores with.
+// The remaining bounds are palette geometry, not quantiser error.
 //
-//   - themeMaxSelection256 = 3.0 pins search.accent (#7ac2e8, the search
-//     example's stAccent), where the quantiser picks #87afd7 over the
-//     dE00-nearest #87d7ff at selection error 2.600 — just above the ~2.3 JND.
-//     The two candidates differ from each other by dE00 11.8, so this is a
-//     visible dulling of the accent, though still "a light blue", not a hue
-//     flip.
-//   - themeMaxSelection16 = 12.0 pins markets.down (#d86a62), where the
-//     quantiser picks grey #808080 over red #ff0000 at selection error
-//     10.240 — a semantic collapse (the "down" colour loses its redness and
-//     collides with markets.flat, which also renders #808080 at this rung).
-//     Also pins markets.up (#3cc88c -> cyan instead of bright green,
-//     selection 7.151). This bound is NOT a clean bill of health for the 16
-//     rung.
-//   - perceptualMaxSelection256 = 24.0 and perceptualMeanSelection256 = 1.5
-//     pin the full-cube sweep: refined max selection error 21.201 (worst
-//     case #747334 -> #875f5f where #808000 is dE00-optimal), mean 1.323,
-//     p95 7.121, p99 12.130, with 19.35% of the lattice above the JND. The
-//     worst cases are plausible UI colours (dark brick red #9b3228 -> olive
-//     #875f00; dark green #32732d -> grey #4e4e4e), not pathological corners.
-//     These bounds pin a DEFECTIVE baseline on purpose: replacing the
-//     quantiser with a Lab-space one should drive them towards zero, and
-//     lowering them is the point.
-//   - perceptualMaxSelection16 = 40.0 and perceptualMeanSelection16 = 4.2
-//     pin the 16-rung sweep: refined max 36.821 (bright coral #e6553c ->
-//     dark olive #808000 where red #ff0000 is dE00-optimal at 7.4), mean
-//     3.800, p95 16.512, with 37.50% above the JND and 15.98% above 10. This
-//     rung is broken for plausible UI colours; the bounds exist so the
-//     breakage cannot silently worsen before the replacement lands.
-//   - themeMaxTotal256/16 pin total error including unavoidable gamut error.
-//     The 16-rung totals are large because the 16-colour palette is coarse
-//     (markets.accent #54a8f0 -> #c0c0c0 at dE00 23.6 even with an optimal
-//     pick — verified: silver 23.57 beats blue #0000ff at 42.25 under
-//     dE00's lightness weighting): that is palette geometry, not the
-//     quantiser's doing.
+// What each bound carries now:
+//
+//   - perceptualMaxSelection256/16 = 0 and perceptualMeanSelection256/16 = 0
+//     pin optimality, not tolerance. The quantiser minimises the same pinned
+//     dE00 the oracle exhaustively searches, with the same lowest-index
+//     tie-breaking, so measured selection error is zero everywhere: lattice
+//     sweep (mean 0.000, refined max 0.000, 0.00% above the JND) and theme
+//     colours alike. Before the replacement these read 24.0/40.0/1.5/4.2,
+//     tolerating a refined max of 21.201 at 256 (brick red #9b3228 ->
+//     olive #875f00; dark green #32732d -> grey; refined worst #747334 ->
+//     #875f5f where #808000 is optimal) and 36.821 at 16 (coral #e6553c ->
+//     olive #808000), with 19.35% / 37.50% of the lattice above the JND. Any
+//     non-zero measurement now means the selection wiring, the metric, or
+//     the tie-breaking changed without a re-audit — which is exactly what
+//     these bounds exist to fail on. A future quantiser using a different
+//     metric (OKLab, say) will not be dE00-optimal and will trip these: that
+//     is deliberate, per docs/STATUS.md gate item 6 — a post-freeze
+//     quantiser replacement is a release-defining re-audit, not a tweak.
+//   - themeMaxSelection256/16 = 0 pin the same optimality on the colours
+//     examples/search and examples/markets actually paint. Before: 3.0 and
+//     12.0, carrying search.accent (#7ac2e8 -> #87afd7 instead of #87d7ff,
+//     selection 2.600) and markets.down (#d86a62 -> grey #808080 instead of
+//     red #ff0000, selection 10.240 — the "down" colour collapsed into
+//     markets.flat's grey). Now: markets.down lands on #ff0000 (selection
+//     0.000, total down from 24.903 to 14.663), markets.up on #00ff00, and
+//     the up/flat/down trichotomy is green/grey/red.
+//   - themeMaxTotal256 = 8.0 and themeMaxTotal16 = 25.0 bound what the user
+//     sees for a theme colour, including unavoidable gamut error. Before:
+//     9.0 and 30.0. The 16-rung totals are large because the 16-colour
+//     palette is coarse (markets.accent #54a8f0 -> #c0c0c0 at dE00 23.569
+//     even with an optimal pick — verified: silver 23.57 beats blue #0000ff
+//     at 42.25 under dE00's lightness weighting): that is palette geometry,
+//     not the quantiser's doing. Measured worst cases now: search.dim 7.561
+//     at 256, markets.accent 23.569 at 16.
 //
 // JND ("just noticeable difference") in CIEDE2000 is ~2.3; ~5 is clearly
 // visible; ~10+ reads as a different colour. Selection error is the part of
 // the mapping the quantiser controls — a perfect quantiser has selection
-// error 0 everywhere.
+// error 0 everywhere, which is now the pinned state rather than an aspiration.
 const (
 	// perceptualMaxSelection256 is the worst selection error allowed at the
 	// 256 rung over the lattice sweep plus the +-4 refinement neighbourhoods.
-	// Measured: 21.201. Headroom ~13%.
-	perceptualMaxSelection256 = 24.0
+	// Measured: 0.000 (refined 0.000). Was 24.0 under redmean (measured
+	// 21.201). Zero on purpose: see the block above.
+	perceptualMaxSelection256 = 0.0
 
 	// perceptualMaxSelection16 is the same bound at the 16 rung.
-	// Measured: 36.821. Headroom ~8.6%.
-	perceptualMaxSelection16 = 40.0
+	// Measured: 0.000 (refined 0.000). Was 40.0 under redmean (measured
+	// 36.821).
+	perceptualMaxSelection16 = 0.0
 
 	// perceptualMeanSelection256 guards against a systemic drift that a max
 	// bound alone could miss (many small errors instead of one big one).
-	// Measured: 1.323.
-	perceptualMeanSelection256 = 1.5
+	// Measured: 0.000. Was 1.5 under redmean (measured 1.323).
+	perceptualMeanSelection256 = 0.0
 
 	// perceptualMeanSelection16 is the 16-rung counterpart.
-	// Measured: 3.800.
-	perceptualMeanSelection16 = 4.2
+	// Measured: 0.000. Was 4.2 under redmean (measured 3.800).
+	perceptualMeanSelection16 = 0.0
 
 	// themeMaxSelection256 / themeMaxSelection16 bound the selection error on
-	// the colours examples/search and examples/markets actually paint. See
-	// the block above: 256 carries a 2.6 defect on stAccent, 16 carries a
-	// 10.2 defect on the markets "down" colour.
-	themeMaxSelection256 = 3.0
-	themeMaxSelection16  = 12.0
+	// the colours examples/search and examples/markets actually paint.
+	// Measured: 0.000 at both rungs. Were 3.0 and 12.0 under redmean.
+	themeMaxSelection256 = 0.0
+	themeMaxSelection16  = 0.0
 
 	// themeMaxTotal256 bounds what the user sees for a theme colour on a 256
 	// terminal. Includes unavoidable gamut error (tinted greys neutralise
 	// against the xterm grey ramp at dE00 ~7.5), so it is looser than the
-	// selection bound.
-	themeMaxTotal256 = 9.0
+	// selection bound. Measured worst: search.dim 7.561. Was 9.0.
+	themeMaxTotal256 = 8.0
 
 	// themeMaxTotal16 bounds what the user sees on a 16-colour terminal. The
 	// 16-colour palette is genuinely coarse; this pins the observed quality
 	// so it cannot silently worsen, it does not claim the rung is fine.
-	themeMaxTotal16 = 30.0
+	// Measured worst: markets.accent 23.569. Was 30.0.
+	themeMaxTotal16 = 25.0
 )
 
 // ---------------------------------------------------------------------------
-// sRGB -> CIE Lab (D65) and CIEDE2000.
-//
-// The CIEDE2000 implementation follows Sharma, Wu & Dalal (2005), "The
-// CIEDE2000 Color-Difference Formula: Implementation Notes, Supplementary
-// Test Data, and Mathematical Observations". TestQuantiserMetricIsPinned
-// checks it against their 34 reference pairs, so the measuring instrument
-// itself is under regression control: if a refactor breaks the metric, the
-// audit cannot quietly start reporting wrong numbers.
+// CIEDE2000 lives in colour_lab.go — production code, the same function the
+// quantiser selects with — and this file pins it below (Sharma's 34 reference
+// pairs, symmetry, exact zero, the standard sRGB primaries via rgbToLab,
+// achromatic greys) so the measuring instrument and the measured cannot drift
+// apart. What this test file adds is the audit around it: the gamut/selection
+// decomposition, the lattice sweep, and the regression thresholds.
 // ---------------------------------------------------------------------------
-
-// lab is a CIE L*a*b* coordinate triple.
-type lab struct{ l, a, b float64 }
-
-// srgbChannelToLinear converts one sRGB channel (0-255) to linear light.
-func srgbChannelToLinear(v uint8) float64 {
-	c := float64(v) / 255.0
-	if c <= 0.04045 {
-		return c / 12.92
-	}
-	return math.Pow((c+0.055)/1.055, 2.4)
-}
-
-// labWhiteD65 is the D65 white point in the sRGB RGB->XYZ matrix's scale.
-var labWhiteD65 = [3]float64{0.95047, 1.00000, 1.08883}
-
-// rgbToLab converts an sRGB triple to CIE Lab under D65.
-func rgbToLab(r, g, b uint8) lab {
-	rl, gl, bl := srgbChannelToLinear(r), srgbChannelToLinear(g), srgbChannelToLinear(b)
-	x := 0.4124564*rl + 0.3575761*gl + 0.1804375*bl
-	y := 0.2126729*rl + 0.7151522*gl + 0.0721750*bl
-	z := 0.0193339*rl + 0.1191920*gl + 0.9503041*bl
-	f := func(t float64) float64 {
-		if t > 216.0/24389.0 {
-			return math.Cbrt(t)
-		}
-		return (24389.0/27.0*t + 16.0) / 116.0
-	}
-	fx, fy, fz := f(x/labWhiteD65[0]), f(y/labWhiteD65[1]), f(z/labWhiteD65[2])
-	return lab{116*fy - 16, 500 * (fx - fy), 200 * (fy - fz)}
-}
-
-// deltaE00 is the CIEDE2000 colour difference between two Lab colours.
-func deltaE00(x, y lab) float64 {
-	const deg = math.Pi / 180
-	c1 := math.Hypot(x.a, x.b)
-	c2 := math.Hypot(y.a, y.b)
-	cbar := (c1 + c2) / 2
-	g := 0.5 * (1 - math.Sqrt(math.Pow(cbar, 7)/(math.Pow(cbar, 7)+math.Pow(25.0, 7))))
-	a1p := (1 + g) * x.a
-	a2p := (1 + g) * y.a
-	c1p := math.Hypot(a1p, x.b)
-	c2p := math.Hypot(a2p, y.b)
-	h1p := math.Atan2(x.b, a1p) / deg
-	if h1p < 0 {
-		h1p += 360
-	}
-	h2p := math.Atan2(y.b, a2p) / deg
-	if h2p < 0 {
-		h2p += 360
-	}
-	dLp := y.l - x.l
-	dCp := c2p - c1p
-	dhp := 0.0
-	if c1p*c2p != 0 {
-		dhp = h2p - h1p
-		if dhp > 180 {
-			dhp -= 360
-		} else if dhp < -180 {
-			dhp += 360
-		}
-	}
-	dHp := 2 * math.Sqrt(c1p*c2p) * math.Sin(dhp*deg/2)
-	lbarp := (x.l + y.l) / 2
-	cbarp := (c1p + c2p) / 2
-	// Sharma's reference form: when either chroma is zero the mean hue is the
-	// raw sum (it is multiplied by zero everywhere it appears, so the choice
-	// is immaterial to dE00 — but keeping the branch matches the reference
-	// and keeps the initialisation meaningful).
-	hbarp := h1p + h2p
-	if c1p*c2p != 0 {
-		if math.Abs(h1p-h2p) <= 180 {
-			hbarp = (h1p + h2p) / 2
-		} else if h1p+h2p < 360 {
-			hbarp = (h1p + h2p + 360) / 2
-		} else {
-			hbarp = (h1p + h2p - 360) / 2
-		}
-	}
-	t := 1 - 0.17*math.Cos((hbarp-30)*deg) + 0.24*math.Cos(2*hbarp*deg) +
-		0.32*math.Cos((3*hbarp+6)*deg) - 0.20*math.Cos((4*hbarp-63)*deg)
-	dtheta := 30 * math.Exp(-math.Pow((hbarp-275)/25, 2))
-	rc := 2 * math.Sqrt(math.Pow(cbarp, 7)/(math.Pow(cbarp, 7)+math.Pow(25.0, 7)))
-	sl := 1 + (0.015*math.Pow(lbarp-50, 2))/math.Sqrt(20+math.Pow(lbarp-50, 2))
-	sc := 1 + 0.045*cbarp
-	sh := 1 + 0.015*cbarp*t
-	rt := -math.Sin(2*dtheta*deg) * rc
-	return math.Sqrt(math.Pow(dLp/sl, 2) + math.Pow(dCp/sc, 2) + math.Pow(dHp/sh, 2) +
-		rt*(dCp/sc)*(dHp/sh))
-}
 
 // sharmaPairs is Table 1 of Sharma, Wu & Dalal (2005): 34 pairs of CIELAB
 // values with the expected dE00. This is the reference every conforming
@@ -524,39 +442,71 @@ func TestQuantiserPaletteMembersAreFixedPoints(t *testing.T) {
 	}
 }
 
-// TestQuantiserEffectiveDistanceIsPinned pins what redmean in colour.go
-// actually computes. The function's rmean weighting divides by 256 in integer
-// arithmetic; for every pair of uint8 channels rmean is in 0..255, so
-// rmean/256 == 0 and (255-rmean)/256 == 0 and the weights are identically 2.
-// The effective distance is therefore fixed-weight 2*dr^2 + 4*dg^2 + 2*db^2
-// in gamma-space RGB — a much cruder metric than redmean, and the direct
-// cause of the hue-flip selection errors the sweep measures.
+// TestQuantiserEffectiveDistanceIsPinned pins the effective selection metric
+// of the Lab quantiser, in the same role the old redmean-pinning test played:
+// a drive-by change to the selection maths must fail here, loudly, with the
+// reason spelled out — because changing selection changes every 256/16-colour
+// byte the renderer emits and is a deliberate, re-audited decision, not a
+// tweak to a division.
 //
-// This test deliberately FAILS if the formula is ever changed to true
-// floating-point redmean (or to anything else): such a change alters every
-// 256/16-colour byte the renderer emits, so it must be a deliberate decision
-// that re-runs the whole audit and re-pins the thresholds — not a drive-by
-// "fix" to a division.
+// What is pinned: DefaultQuantiser's picks must equal an INDEPENDENT brute
+// force — this test recomputes the CIEDE2000-nearest palette entry with its
+// own search loop (the metric function is shared deliberately; it is pinned
+// separately by TestQuantiserMetricIsPinned against Sharma's 34 reference
+// pairs, and the Lab transform against the standard sRGB primaries). So the
+// tie-breaking, the metric wiring, and the memoisation must all agree with
+// exhaustive dE00 search, or this fails.
+//
+// History: the predecessor of this test pinned redmean's effective distance —
+// the fixed-weight 2*dr^2 + 4*dg^2 + 2*db^2 that the integer rmean/256
+// division degenerated into — precisely so that "fixing" that division could
+// not happen by accident. The redmean function is now deleted; the Lab
+// (CIEDE2000) quantiser replaced it wholesale (the decision and its
+// measurements are in this file's header and thresholds). The guard's
+// purpose is unchanged: the effective metric of the default quantiser is
+// pinned, and changing it is a release-defining event.
 func TestQuantiserEffectiveDistanceIsPinned(t *testing.T) {
-	probes := [][6]uint8{
-		// (r1,g1,b1,r2,g2,b2) spanning the rmean range: red-dominated,
-		// green-dominated, near-equal, and the extremes.
-		{255, 0, 0, 0, 255, 0},
-		{255, 255, 255, 0, 0, 0},
-		{230, 85, 60, 128, 128, 0},
-		{155, 50, 40, 175, 0, 0},
-		{1, 2, 3, 254, 253, 252},
-		{200, 200, 200, 201, 199, 200},
-		{0, 0, 0, 0, 0, 1},
+	probes := []Colour{
+		// The audit's worst cases: plausible UI colours the redmean metric
+		// flipped to a wrong hue. If the selection metric ever regresses
+		// towards them again, these probes move.
+		NewColour(0x9b, 0x32, 0x28), // brick red -> must not become olive
+		NewColour(0x32, 0x73, 0x2d), // dark green -> must not become grey
+		NewColour(0xe6, 0x55, 0x3c), // bright coral -> must not become olive
+		NewColour(0x74, 0x73, 0x34), // dark olive -> #808000 is dE00-optimal
+		// Shipped theme colours (examples/search, examples/markets).
+		NewColour(0x7a, 0xc2, 0xe8), // search.accent
+		NewColour(0xd8, 0x6a, 0x62), // markets.down — the 16-rung collapse
+		NewColour(0x3c, 0xc8, 0x8c), // markets.up
+		NewColour(0x8a, 0x93, 0xa0), // markets.flat
+		NewColour(0x54, 0xa8, 0xf0), // markets.accent
+		NewColour(0x30, 0xc0, 0x80), // hello titleFg
+		// Exact palette members: zero distance, tie-breaking to lowest index
+		// on the #808080 duplicate must survive.
+		NewColour(0x80, 0x80, 0x80), NewColour(0xff, 0x00, 0x00),
+		NewColour(0x00, 0xff, 0xff), NewColour(0x00, 0x00, 0x00),
+		// Extremes and near-ties.
+		NewColour(0x01, 0x02, 0x03), NewColour(0xfe, 0xfd, 0xfc),
+		NewColour(0xff, 0x88, 0x00), NewColour(0x0a, 0x08, 0x90),
 	}
-	for _, p := range probes {
-		dr := int32(p[0]) - int32(p[3])
-		dg := int32(p[1]) - int32(p[4])
-		db := int32(p[2]) - int32(p[5])
-		fixed := uint32(2*dr*dr + 4*dg*dg + 2*db*db)
-		if got := redmean(p[0], p[1], p[2], p[3], p[4], p[5]); got != fixed {
-			t.Errorf("redmean(%d,%d,%d,%d,%d,%d) = %d, fixed (2,4,2) gives %d — the effective metric changed",
-				p[0], p[1], p[2], p[3], p[4], p[5], got, fixed)
+	brute := func(src Colour, pal [][3]uint8) int {
+		r, g, b := src.RGB()
+		s := rgbToLab(r, g, b)
+		best, bestD := 0, math.Inf(1)
+		for i, p := range pal {
+			if d := deltaE00(s, rgbToLab(p[0], p[1], p[2])); d < bestD {
+				best, bestD = i, d
+			}
+		}
+		return best
+	}
+	q := DefaultQuantiser{}
+	for _, c := range probes {
+		if got, want := q.Nearest16(c), brute(c, NamedPalette[:]); got != uint8(want) {
+			t.Errorf("%v: Nearest16 = %d, exhaustive dE00 search says %d — the effective metric changed", c, got, want)
+		}
+		if got, want := q.Nearest256(c), brute(c, index256Palette[:]); got != uint8(want) {
+			t.Errorf("%v: Nearest256 = %d, exhaustive dE00 search says %d — the effective metric changed", c, got, want)
 		}
 	}
 }
@@ -631,14 +581,15 @@ func TestQuantiserOnExampleThemes(t *testing.T) {
 
 // TestQuantiserPerceptualQuality is the sweep. It measures both rungs over the
 // step-5 lattice, decomposes total into gamut and selection, reports the
-// five-number summary of each, compares redmean against naive 5-bit
+// five-number summary of each, compares the Lab quantiser against naive 5-bit
 // truncation as a baseline, refines the worst lattice points in their
 // neighbourhoods, and asserts the thresholds pinned at the top of this file.
 //
-// Runtime: ~12 s plain, ~75-80 s under -race (measured; race instrumentation
-// inflates the CIEDE2000 loop heavily). Intentionally not gated behind
-// testing.Short(): this test IS the evidence for the colour-model decision,
-// and CI runs it in full.
+// Runtime: ~35 s plain, ~275 s under -race (measured; race instrumentation
+// inflates the CIEDE2000 loops heavily, and the quantiser now searches with
+// dE00 too, which is where the increase from the old ~12 s / ~75-80 s comes
+// from). Intentionally not gated behind testing.Short(): this test IS the
+// evidence for the colour-model decision, and CI runs it in full.
 func TestQuantiserPerceptualQuality(t *testing.T) {
 	q := DefaultQuantiser{}
 	const step = 5
@@ -788,8 +739,8 @@ func TestQuantiserPerceptualQuality(t *testing.T) {
 	logStat(t, "naive select", ns)
 	qTot := summarise(reports[0].total)
 	if qTot.mean >= nt.mean {
-		t.Errorf("redmean mean total dE00 %.3f no longer beats naive 5-bit truncation %.3f", qTot.mean, nt.mean)
+		t.Errorf("Lab quantiser mean total dE00 %.3f no longer beats naive 5-bit truncation %.3f", qTot.mean, nt.mean)
 	}
-	t.Logf("redmean vs naive truncation, 256 rung mean total dE00: %.3f vs %.3f (redmean is %.2fx closer to optimal on average)",
+	t.Logf("Lab quantiser vs naive truncation, 256 rung mean total dE00: %.3f vs %.3f (the Lab quantiser is %.2fx closer to optimal on average)",
 		qTot.mean, nt.mean, nt.mean/qTot.mean)
 }

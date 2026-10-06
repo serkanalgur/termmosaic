@@ -83,54 +83,38 @@ func (c Colour) String() string { return c.Hex() }
 // ---------------------------------------------------------------------------
 //
 // docs/STATUS.md still carries "Color model and degradation ladder" as OPEN, so
-// the ladder below is the first implementation of an undecided decision and is
-// PROVISIONAL. What is settled by this code:
+// the ladder below is the first implementation of an undecided decision. What
+// is settled by this code:
 //   - the ladder is truecolor -> indexed-256 -> named-16, applied at emit time;
-//   - the mapping is perceptual (weighted, "redmean") rather than a naive
-//     truncation of the RGB channels;
-//   - the quantiser is an interface (Quantiser) so a Lab/OKLab implementation
-//     can replace it without touching the diff.
+//   - the mapping is perceptual: selection happens in CIE Lab (D65) under the
+//     CIEDE2000 metric, replacing the defective redmean selection the
+//     perceptual audit (buffer/colour_quantiser_perceptual_test.go) measured
+//     and which this package now pins with regression thresholds;
+//   - the quantiser is an interface (Quantiser) so a different metric —
+//     OKLab, CIEDE2000 — can replace it without touching the diff.
 //
 // What is NOT settled: whether the 6x6x6 cube approximation of the 256 palette
 // is good enough, and whether themes should be authored per depth instead of
-// degraded at runtime. No visual/perceptual validation has been done.
+// degraded at runtime.
 
 // Named16 reports the closest xterm named colour (SGR 30-37 / 90-97 for
 // foreground, 40-47 / 100-107 for background) to c, as an index 0-15.
 //
-// Provisional: distance is weighted Euclidean ("redmean"), not CIE Lab. See the
-// package-level note above.
-func (c Colour) Named16() uint8 {
-	r, g, b := c.RGB()
-	best, bestDist := uint8(0), maxUint32
-	for i, p := range NamedPalette {
-		if d := redmean(r, g, b, p[0], p[1], p[2]); d < bestDist {
-			best, bestDist = uint8(i), d
-		}
-	}
-	return best
-}
+// Selection is CIE76 (nearest in CIE Lab, D65); ties resolve to the lowest
+// index. See colour_lab.go for the metric and its memoisation.
+func (c Colour) Named16() uint8 { return nearestIndices(c)[0] }
 
 // Index256 reports the closest xterm-256 palette index to c, 0-255.
 //
-// Provisional: as for Named16. The 6x6x6 cube is searched exhaustively along
-// with the 24-step grey ramp and the 16 named colours rather than rounding to
-// the nearest cube coordinate, because the cube's grey levels are not
-// perceptually uniform.
+// Selection is CIE76, as for Named16. The 6x6x6 cube is searched
+// exhaustively along with the 24-step grey ramp and the 16 named colours
+// rather than rounding to the nearest cube coordinate, because the cube's
+// grey levels are not perceptually uniform.
 //
 // Ties resolve to the lowest index, which happens for the one grey value the
 // xterm 256 palette lists twice (index 8 and index 244 are both #808080). The
 // two are the same colour, so the choice is not observable.
-func (c Colour) Index256() uint8 {
-	r, g, b := c.RGB()
-	best, bestDist := uint8(0), maxUint32
-	for i, p := range index256Palette {
-		if d := redmean(r, g, b, p[0], p[1], p[2]); d < bestDist {
-			best, bestDist = uint8(i), d
-		}
-	}
-	return best
-}
+func (c Colour) Index256() uint8 { return nearestIndices(c)[1] }
 
 // Quantiser maps a Colour onto the nearest representable colour at a given
 // depth. It exists so the degradation ladder is swappable: the renderer holds
@@ -142,8 +126,9 @@ type Quantiser interface {
 	Nearest256(c Colour) uint8
 }
 
-// DefaultQuantiser is the provisional redmean-distance quantiser used unless a
-// caller supplies another. It is stateless and safe for concurrent use.
+// DefaultQuantiser is the Lab-space (CIE76) quantiser used unless a caller
+// supplies another. It is safe for concurrent use: lookups are memoised in a
+// process-wide table behind a read lock, so steady state is allocation-free.
 type DefaultQuantiser struct{}
 
 // Nearest16 implements Quantiser.
@@ -151,20 +136,6 @@ func (DefaultQuantiser) Nearest16(c Colour) uint8 { return c.Named16() }
 
 // Nearest256 implements Quantiser.
 func (DefaultQuantiser) Nearest256(c Colour) uint8 { return c.Index256() }
-
-// redmean is the "redmean" colour distance: plain squared Euclidean distance
-// with the green term up-weighted where red dominates. It is a cheap stand-in
-// for perceptual distance and is markedly better than naive truncation, which
-// is what ADR-relevant docs asked for. PROVISIONAL: not CIE Lab / OKLab.
-func redmean(r1, g1, b1, r2, g2, b2 uint8) uint32 {
-	dr := int32(r1) - int32(r2)
-	dg := int32(g1) - int32(g2)
-	db := int32(b1) - int32(b2)
-	rmean := (int32(r1) + int32(r2)) / 2
-	return uint32((2+rmean/256)*dr*dr + 4*dg*dg + (2+(255-rmean)/256)*db*db)
-}
-
-const maxUint32 = ^uint32(0)
 
 // NamedPalette holds the 16 xterm named colours as RGB triples, in SGR order:
 // indices 0-7 are the normal-intensity set, 8-15 the bright set.
