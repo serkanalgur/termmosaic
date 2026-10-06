@@ -44,6 +44,11 @@ jobs:
           # Pinned deliberately: ADR 0001 records that raising this floor is what
           # would unpin golang.org/x/term. See docs/adr/0001-backend-strategy.md.
           go-version: "1.23"
+          # setup-go keys this cache on go.sum, so a dependency change
+          # invalidates it automatically. With -race the instrumented build
+          # cache is still reusable across runs per OS/arch, which is where the
+          # real time goes.
+          cache: true
 
       - name: Build
         run: go build ./...
@@ -65,7 +70,11 @@ jobs:
           fi
 
       - name: Test (race)
-        run: go test ./... -race
+        # -count=1 bypasses the test-result cache, which is live by default.
+        # Without it a manual re-run can serve a cached PASS instead of
+        # re-executing tests — a green that did not actually run, which is the
+        # worst possible outcome under a "12/12 green before merge" rule.
+        run: go test ./... -race -count=1
 
   # Dedicated gofmt gate, separate from the matrix job above so the README can
   # badge a status that means "gofmt" and nothing else. The matrix job still
@@ -80,6 +89,11 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.23"
+          # Explicit rather than relying on setup-go's default: this cache is
+          # keyed on go.sum, so a dependency change invalidates it
+          # automatically. Pinning it here documents that CI depends on it and
+          # survives any future change of the action's default.
+          cache: true
       - name: Check formatting
         run: |
           unformatted=$(gofmt -l .)
@@ -106,6 +120,11 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.23"
+          # Explicit rather than relying on setup-go's default: this cache is
+          # keyed on go.sum, so a dependency change invalidates it
+          # automatically. Pinning it here documents that CI depends on it and
+          # survives any future change of the action's default.
+          cache: true
       - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
@@ -121,6 +140,11 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.23"
+          # Explicit rather than relying on setup-go's default: this cache is
+          # keyed on go.sum, so a dependency change invalidates it
+          # automatically. Pinning it here documents that CI depends on it and
+          # survives any future change of the action's default.
+          cache: true
       - name: Assert diff remains zero-allocation
         run: go test ./internal/diff/ -run TestDiffIsZeroAllocation -v
 
@@ -156,6 +180,11 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: "1.23"
+          # Explicit rather than relying on setup-go's default: this cache is
+          # keyed on go.sum, so a dependency change invalidates it
+          # automatically. Pinning it here documents that CI depends on it and
+          # survives any future change of the action's default.
+          cache: true
       - name: Build with CGO disabled
         env:
           GOOS: ${{ matrix.goos }}
