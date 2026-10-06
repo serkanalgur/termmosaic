@@ -1,6 +1,8 @@
 # Documentation site plan
 
-Status: **PROPOSED** — awaiting approval. Nothing in this document is built.
+Status: **PROPOSED** — awaiting approval. Most of this document is not built:
+there is no `site/` and no deploy workflow yet. What does exist is `Capture`
+(§2.5), `internal/docsgen` and `cmd/capture`.
 Author: architecture pass, 2026-10-04.
 
 This is the plan for a public documentation site for TermMosaic, to be served
@@ -9,10 +11,12 @@ strategy, the per-widget page template, the example strategy, effort, and what
 deliberately will not be built.
 
 It is a plan, not a proposal in the ADR sense. If it is approved, it earns its
-own ADR (`0009-documentation-site.md`) once the capture tool exists, because the
-capture tool makes a real architectural claim — that documentation output is
-derived from tested code — and that claim belongs in the ADR record next to the
-other seven.
+own ADR — the capture tool this was waiting on exists now (`widgettest.Capture`,
+`internal/docsgen`, `cmd/capture`), and the record runs to
+`0010-mouse-routing.md`, so the number would be `0011-documentation-site.md` —
+because the capture tool makes a real architectural claim — that documentation
+output is derived from tested code — and that claim belongs in the ADR record
+next to the other ten.
 
 ---
 
@@ -21,13 +25,13 @@ other seven.
 Four facts in the repository decide most of this, and they are worth stating
 before the recommendations so the recommendations can be checked against them.
 
-**0.1 — The widget count in the README is wrong, and the site must not repeat it.**
-`README.md` says "24 widget constructors, built and tested" and its table lists
-`Buffer` among the widgets. `buffer.Buffer` has `Invalidate()` but no `Bounds`,
-`Draw` or `Handle`, so it does **not** satisfy `termmosaic.Widget` — it is the
-thing widgets draw *into*, not a widget. `layout.Layout` is a solver and
-`buffer.Span` is a value. Counting only types with an exported widget
-constructor and no other:
+**0.1 — The widget count is 24, and the site must state it the way the
+repository does.** `README.md` and `STATUS.md` both say **24** as of 2026-10-06,
+and both exclude `buffer.Buffer` on purpose: `buffer.Buffer` has `Invalidate()`
+but no `Bounds`, `Draw` or `Handle`, so it does **not** satisfy
+`termmosaic.Widget` — it is the thing widgets draw *into*, not a widget.
+`layout.Layout` is a solver and `buffer.Span` is a value. Counting only types
+with an exported widget constructor and no other:
 
 | Category | Count | Types |
 |---|---|---|
@@ -35,19 +39,21 @@ constructor and no other:
 | Forms | 9 | `TextInput` `TextArea` `Select` `Checkbox` `Radio` `Toggle` `Tabs` `Button` `KeyHint` |
 | Data | 4 | `List` `Table` `Tree` `Pager` |
 | Visualization | 5 | `ProgressBar` `Gauge` `Meter` `Sparkline` `BarChart` |
-| **Total** | **22** | |
+| Navigation & modality | 2 | `Menu` `Dialog` |
+| **Total** | **24** | |
 
 (`widgets/form/optionlist.go` is an unexported shared helper behind `Select`,
-`Tabs` and `KeyHint`; it is not a 23rd widget. The 27 `func New*` hits in
+`Tabs` and `KeyHint`; it is not a 25th widget. The 29 `func New*` hits in
 `widgets/` include four `New*String` convenience variants and `NewBinding`,
 which returns a value rather than a widget.)
 
 **This is not a nitpick.** The site's entire value proposition is a widget
-catalog, and the count is the headline number. A site that says 24 and a reader
-who counts 22 loses trust in every other number on it. The site states **22**,
-and correcting `README.md` and `STATUS.md` is a separate, small, prerequisite
-task — flagged in §8, not done here, because those files are out of scope for
-this pass.
+catalog, and the count is the headline number. A site whose count disagrees
+with the catalog loses trust in every other number on it. The site states
+**24**, the number `README.md`, `STATUS.md` and the code agree on as this plan
+is frozen. If one of the three later moves, reconciling it is a separate, small
+prerequisite task — flagged in §8, not done here, because those files are out
+of scope for this pass.
 
 **0.2 — The repository already contains a capture harness, and it is the good
 one.** `widgets/widgettest/widgettest.go` exists precisely so that "every widget
@@ -119,7 +125,7 @@ that promise:
   second. MkDocs Material takes several seconds per run, which is felt
   constantly.
 - **Versioning.** Hugo has no first-class versioning, and neither does MkDocs
-  without a plugin. For a pre-alpha project with one version in the wild this is
+  without a plugin. For a pre-alpha project released through `v0.7.0` this is
   a non-issue; the plan's answer is that per-widget docs are generated from the
   **current** source, so a version selector would have to render from a
   checkout, not from the site. Deferred. Recorded here so it is a decision
@@ -243,13 +249,15 @@ func Capture(w, h, frames int, root termmosaic.Widget) (*headless.MemorySink, er
 
 with `Render` refactored to call it. This is ~10 lines in a non-`_test.go` file,
 it adds no behaviour, and every existing test keeps using `Render`. It is the
-**only** non-test source change the whole plan requires.
+**only** non-test source change the whole plan requires. **Done:** that is
+exactly what `widgets/widgettest/widgettest.go` contains today.
 
 A second, smaller item: a **widget registry**, one entry per widget, because
 constructors are not uniform — `NewList(r, items ...ListItem)` takes a variadic
 of a concrete type and reflection cannot call it. The registry is a plain Go
 slice of `{Name, Package, Construct func(buffer.Rect) termmosaic.Widget, Sizes []int}`.
-It is also the thing that makes §7's drift test possible.
+It is also the thing that makes §7's drift test possible. **Done:**
+`internal/docsgen` carries the registry, one hand-written closure per widget.
 
 ---
 
@@ -257,11 +265,11 @@ It is also the thing that makes §7's drift test possible.
 
 ```
 site/content/
-├── _index.md                          landing: what it is, the 22-widget claim,
+├── _index.md                          landing: what it is, the 24-widget claim,
 │                                      one real screenshot, install, honest status
 ├── getting-started/
 │   ├── _index.md                      three-minute path, first program
-│   ├── install.md                     Go 1.23+, CGO off, no module release yet
+│   ├── install.md                     Go 1.23+, CGO off, pinned at v0.7.0
 │   ├── quickstart.md                  hello world, annotated, runnable
 │   └── your-first-app.md              terminal + renderer + input + loop, end to end
 ├── concepts/
@@ -282,12 +290,13 @@ site/content/
 │   ├── borders.md                     the one vocabulary, one Block
 │   └── accessibility.md               colour is never the only signal; what is
 │                                      and is not provided (no reduced-motion gate)
-├── widgets/                           22 pages, one per widget
-│   ├── _index.md                      the catalog table, all 22, linked
+├── widgets/                           24 pages, one per widget
+│   ├── _index.md                      the catalog table, all 24, linked
 │   ├── block.md  text.md  paragraph.md  split.md
 │   ├── textinput.md  textarea.md  select.md  checkbox.md  radio.md
 │   ├── toggle.md  tabs.md  button.md  keyhint.md
 │   ├── list.md  table.md  tree.md  pager.md
+│   ├── menu.md  dialog.md
 │   └── progressbar.md  gauge.md  meter.md  sparkline.md  barchart.md
 ├── guides/
 │   ├── _index.md
@@ -301,19 +310,19 @@ site/content/
 │   ├── api.md                         generated: every package, every export
 │   └── events.md                      generated from event.go
 ├── adr/
-│   ├── _index.md                      the 8 decisions at a glance
-│   └── 0001..0008.md                  the ADRs, verbatim, with anchors
+│   ├── _index.md                      the 10 decisions at a glance
+│   └── 0001..0010.md                  the ADRs, verbatim, with anchors
 ├── limitations.md                     THE page that must not be missing
 └── faq.md
 ```
 
-**Count:** 1 landing + 4 getting-started + 12 concepts + 22 widgets + 1 catalog
-index + 6 guides + 2 reference + 9 ADR + 1 limitations + 1 FAQ = **59 pages**.
+**Count:** 1 landing + 4 getting-started + 12 concepts + 24 widgets + 1 catalog
+index + 6 guides + 2 reference + 11 ADR + 1 limitations + 1 FAQ = **63 pages**.
 
 ### 3.1 On the ADRs
 
 The ADRs are **included verbatim**, not summarised. They are already written as
-prose with headings, and 0005/0007/0008 run to 35–62 KB each, which is fine for
+prose with headings, and 0005/0007/0008 run to 35–65 KB each, which is fine for
 a reference section. Summarising them would create a second source of truth that
 drifts — the exact failure mode §7 exists to prevent. `docs/adr/README.md`'s
 "Decisions at a glance" becomes the ADR index page.
@@ -325,7 +334,9 @@ FAQ. Contents, every item traceable to `STATUS.md`:
 
 - **Pre-alpha. The API will break without notice before v1.0.0.** This sentence
   appears on the landing page, above the fold, and in the site footer.
-- **Not a stable SemVer surface.** No release exists yet; `go get` on a checkout.
+- **Not a stable SemVer surface.** Releases exist through `v0.7.0`, but nothing
+  before v1.0.0 is frozen: pin
+  `go get github.com/serkanalgur/termmosaic@v0.7.0`.
 - **Windows is a stub.** `term/terminal_windows.go` returns a loud error from
   every console operation. CI compiles it; nothing runs on it.
 - **No IME / composition.** Scoped out by ADR 0005 §7. Users composing CJK in a
@@ -344,12 +355,25 @@ FAQ. Contents, every item traceable to `STATUS.md`:
   both rungs, every threshold pinned at 0. If `limitations.md` is written after
   that date, this item must be dropped or told as history; publishing it as
   current would be false.
-- **Wide characters and grapheme clusters are unbenchmarked.** The semantics are
-  implemented (`flagContinuation`); no benchmark exercises them.
-- **Four ADR 0007 §3 tests are still unwritten**, named in the ADR. A
-  documentation site that publishes a resize story should not imply the resize
-  has been observed against a real terminal being dragged. ADR 0007 says so
-  itself.
+- ~~**Wide characters and grapheme clusters are unbenchmarked.**~~ **Retired
+  2026-10-06 — false now: they are benchmarked.** Wide-glyph benchmarks live in
+  `internal/diff/wideglyph_test.go`, `buffer/wideglyph_test.go` and
+  `render/wideglyph_bench_test.go`, and they drive `flagContinuation` through
+  the real writer, diff and render paths. What is still open is the decision —
+  grapheme clusters are not composed — not the measurement.
+- **Zero ADR 0007 tests are still unwritten**; the earlier "four" was stale.
+  The ADR's *Tests to add* list (under "Forced changes to existing code") names
+  eight — `TestClampCountNeverNegativeOrExceeds`, `TestBudgetDropsLowestPriorityFirst`,
+  `TestBudgetKeepsDeclarationOrderWithinAPriority`, `TestBudgetNeverDropsPrioAlways`,
+  `TestRenderAtZeroSizeWritesNothing`, `TestResizeShrinksAndRepaintsWholeRect`,
+  `TestResizeCoalescedToOneRepaintPerTick`, `TestRootBoundsClippedToScreen` —
+  and all eight exist: four in `geometry/budget_test.go`, four in
+  `render/responsive_contract_test.go`. The `TestResizeGolden` extension the
+  ADR's table asks for (shrink plus degenerate sizes) is in
+  `examples/hello/hello_test.go`. What ADR 0007 says itself is still true, and
+  it is the part a limitations page must keep: none of these observes a real
+  terminal being dragged, so a site publishing a resize story must not imply
+  that it has.
 - **Headless backend is v1, assertion surface partly open** (ADR 0001).
 - **Kitty graphics: open, leaning no.**
 - **The captures on this site are cell grids, not terminal screenshots.** §2.3.
@@ -362,7 +386,7 @@ FAQ. Contents, every item traceable to `STATUS.md`:
 widgets/widgettest.Render ──┐
                             │  (refactored to expose Capture without testing.TB)
                             ▼
-                   internal/docsgen (new, Go)
+                   internal/docsgen (written; Go)
                             │
      ┌──────────────────────┼───────────────────────┐
      ▼                      ▼                       ▼
@@ -393,18 +417,18 @@ different things.
 
 ## 5. The per-widget page template
 
-Every one of the 22 pages has the same thirteen sections, in this order. The
+Every one of the 24 pages has the same thirteen sections, in this order. The
 **Source** column is the load-bearing part of this table.
 
 | # | Section | Source | Notes |
 |---|---|---|---|
-| 1 | Title + one-line purpose | **auto** | First sentence of the godoc. Already written for all 22. |
+| 1 | Title + one-line purpose | **auto** | First sentence of the godoc. Already written for all 24. |
 | 2 | Stability banner | **auto** | `PROPOSED`-style badge, pre-alpha, from `STATUS.md` policy. |
 | 3 | Rendered output | **auto** | Colour capture + plain-text capture, at 3 widths. |
 | 4 | Package context | **auto** | The package doc's relevant section — e.g. `widgets/data`'s "the rules every widget here obeys". Already written. |
 | 5 | Constructing it | **auto** | Constructor signature + every exported field, with its own doc comment as the description. |
 | 6 | `MinSize()` | **auto** | **Called, not parsed.** Construct at a rect, call `MinSize()`. Truthful even though the thresholds are private constants. |
-| 7 | Key contract | **auto** | The godoc already has a `# Key contract` section written as an indented tab-and-space table (`up / down        move the selection by one row`). It parses. Present in 9 of 22 widgets; absent → section omitted, not blank. |
+| 7 | Key contract | **auto** | The godoc already has a `# Key contract` section written as an indented tab-and-space table (`up / down        move the selection by one row`). It parses. Present in 13 of 24 widgets; absent → section omitted, not blank. |
 | 8 | Accessibility | **auto** | `# Accessibility` and/or `# Colour is never the only signal`. Present in ~12. |
 | 9 | Cost | **auto** | `# Cost` section where present; otherwise the benchmark figures from the package's own `_test.go`. |
 | 10 | Example | **hand** | 15–40 lines, and a link to a runnable `examples/` program. |
@@ -413,7 +437,7 @@ Every one of the 22 pages has the same thirteen sections, in this order. The
 | 13 | Limitations | **auto** | From the global list, filtered to what applies to this widget. |
 
 **Roughly 11 of 13 sections are generated. The per-widget human cost is two
-sections plus a sanity read.** That is the difference between a 22-page catalog
+sections plus a sanity read.** That is the difference between a 24-page catalog
 being a week and being a month.
 
 **What cannot be generated, and why it is still cheap:**
@@ -430,16 +454,21 @@ being a week and being a month.
 - **`MinSize` is genuinely callable.** `minTableW` and friends are private, but
   the constructor builds the `block.Block` that `MinSize` reads, so
   `NewTable(rect, cols).MinSize()` returns the real answer. This works today for
-  all 22; verify per widget in Phase 1.
+  all 24; verify per widget in Phase 1.
 
 ---
 
 ## 6. Examples: **both**, with one rule about which is which
 
-There are 2 runnable programs for 22 widgets. `CONTRIBUTING.md` says "Every
+There are 4 runnable example programs — `hello`, `markets`, `dashboard`,
+`search` — for a 24-widget catalog, and none of them is a per-widget program
+(`examples/widgets/` does not exist yet). `CONTRIBUTING.md` says "Every
 widget needs: a test, a runnable example, and a documented public API. A widget
-without an example is not done." So examples are not optional — they are an
-existing, unwritten debt that the site will expose.
+without an example is not done." `STATUS.md` counts that bar met — 74
+`func Example` functions across all 24 widgets — but an `Example` runs under
+`go test`, not in a reader's terminal, and §2.3 says every widget page must
+link a program that does. So examples are not optional, and the debt the site
+will expose is the 24 per-widget programs, not the documentation.
 
 **The rule:**
 
@@ -456,12 +485,11 @@ existing, unwritten debt that the site will expose.
 program is extracted from the file, not retyped. A docs-only snippet is marked as
 a fragment and is exempt.
 
-**The catalogue target:** 22 per-widget programs under `examples/widgets/<widget>/`
-— small, single-purpose, each exiting on `q` — plus the two existing ones
-(`hello`, `dashboard`) kept as the "real program" tier. **22 programs is roughly
-3–5 days**, and it simultaneously closes a `CONTRIBUTING.md` requirement that is
-currently unmet and gives every widget page an answer to "what does it feel
-like".
+**The catalogue target:** 24 per-widget programs under `examples/widgets/<widget>/`
+— small, single-purpose, each exiting on `q` — plus the four existing ones
+(`hello`, `markets`, `dashboard`, `search`) kept as the "real program" tier.
+**24 programs is roughly 3–5 days**, and it gives every widget page an answer
+to "what does it feel like".
 
 The per-widget programs double as the capture fixtures: the generator builds the
 same widget the program builds, so the picture on the page is the program's
@@ -497,20 +525,20 @@ check.
 ## 8. Implementation phases
 
 Effort is in person-days for one maintainer, and assumes familiarity with this
-codebase. Total **≈ 30 person-days (6 weeks)**. These are honest numbers for
-"full documentation for 22 widgets with examples"; the first useful artefact
+codebase. Total **≈ 32 person-days (6 weeks)**. These are honest numbers for
+"full documentation for 24 widgets with examples"; the first useful artefact
 lands at day 6.
 
 | Phase | Contents | Days | Cumulative |
 |---|---|---|---|
-| **0. Reconcile the claims** | Correct "24" → 22 in `README.md` and `STATUS.md`; decide what `Buffer`/`Span`/`Layout` are called on the site; add `limitations.md` content. **Do this first** — the site must not be built on a wrong headline. | 1 | 1 |
+| **0. Reconcile the claims** | Confirm `README.md` and `STATUS.md` still say 24 (they do, as of 2026-10-06); decide what `Buffer`/`Span`/`Layout` are called on the site; add `limitations.md` content. **Do this first** — the site must not be built on a wrong headline. | 1 | 1 |
 | **1. Capture tool** | `widgettest.Capture`; the widget registry; cells → HTML renderer + `capture.css`; text capture; 3-width capture. Verified on the 5 `viz` widgets first, because Braille is the risk. **This is the phase that can fail.** | 4 | 5 |
 | **2. Site skeleton** | `site/` + Hugo + Pagefind + the deploy workflow. Landing page, real screenshot, install, quickstart. | 2 | 7 |
 | **3. Core concepts** | The 12 `concepts/` pages. Mostly assembled from godoc that already exists; the honest work is `colour.md`, `responsiveness.md` and `accessibility.md`. | 4 | 11 |
-| **4. Widget pages** | 22 pages. Sections 1–9 and 12–13 are generated; 10 and 11 are written. **≈ 0.5 day per widget** = 11 days, less for `Block`/`Text` which are simpler. | 11 | 22 |
-| **5. Examples** | 22 `examples/widgets/*` programs; wire each into its page. | 4 | 26 |
-| **6. Guides, ADRs, FAQ** | 6 guides, 9 ADR pages, `faq.md`, `limitations.md` published. | 3 | 29 |
-| **7. Polish** | Keyboard navigation, contrast pass on the capture theme, the drift checks from §7, link checking, a README screenshot. | 2 | **31** |
+| **4. Widget pages** | 24 pages. Sections 1–9 and 12–13 are generated; 10 and 11 are written. **≈ 0.5 day per widget** = 12 days, less for `Block`/`Text` which are simpler. | 12 | 23 |
+| **5. Examples** | 24 `examples/widgets/*` programs; wire each into its page. | 4 | 27 |
+| **6. Guides, ADRs, FAQ** | 6 guides, 11 ADR pages, `faq.md`, `limitations.md` published. | 3 | 30 |
+| **7. Polish** | Keyboard navigation, contrast pass on the capture theme, the drift checks from §7, link checking, a README screenshot. | 2 | **32** |
 
 **Phase 1 is the gate.** If faithful colour capture of Braille and block
 elements cannot be made to look correct in a browser, the fallback is plain-text
@@ -536,7 +564,7 @@ versioning → the 3-width captures → the `NO_COLOR`/ladder demonstrations.
 - **No interactive code playground / WASM-editor.** Same reason as the first item.
 - **No analytics, no cookies, no third-party anything.** A pre-alpha Go library
   does not need a cookie banner, and adding one is a liability.
-- **No "coming soon" pages.** The catalog is 22 widgets and the docs say 22. A
+- **No "coming soon" pages.** The catalog is 24 widgets and the docs say 24. A
   page listing unbuilt widgets invites the question the project is trying to
   avoid.
 - **No `Form` container widget page.** `STATUS.md` is explicit that a `Form`
@@ -555,14 +583,14 @@ Honest accounting of the existing documentation:
 | Existing | Verdict |
 |---|---|
 | **All godoc in `widgets/**`, `buffer`, `layout`, `input`, `render`, `virtual`, `geometry`, `term`, `headless`** — 100% of exported identifiers documented, with `# Key contract`, `# Accessibility`, `# Cost`, `# Values` sections already written in a parseable shape | **Reused, heavily.** This is the single largest asset in the repo. Sections 1, 4, 5, 7, 8, 9 of the widget template are all godoc that already exists. |
-| **`docs/adr/*.md`** (8 files, ~250 KB) | **Reused verbatim.** Copy, do not rewrite. Add anchors only. |
+| **`docs/adr/*.md`** (10 files, ~350 KB) | **Reused verbatim.** Copy, do not rewrite. Add anchors only. |
 | **`docs/adr/README.md`** | **Reused** as the ADR index page, with the "Decisions at a glance" section promoted. |
-| **`examples/hello`, `examples/dashboard`** | **Reused** as the §6 "real program" tier and as capture fixtures. |
-| **`README.md`** | **Partially reusable.** The claims are the problem, not the prose: "24 widget constructors" is wrong, the `Buffer`-as-widget row is wrong, and "Thirty-plus widgets" in Design Pillar 1 is wrong. Also `docs/ARCHITECTURE.md` refers to "Not yet released as a module version" with a `go get` that cannot work yet. Rewriting the *claims* is Phase 0. |
-| **`docs/ARCHITECTURE.md`** | **Must be rewritten or retired.** Its decision numbering (1–7, with 5 = colour and 6 = theme) does not match the ADR set (0005 = input, 0008 = style/theme/text), it still says colour is `OPEN` when `STATUS.md` says `PROPOSED`, and it duplicates content the ADRs own. The site should link the ADR index and **not** publish `ARCHITECTURE.md` as a separate page. If the file is kept in the repo it should become a short pointer to `docs/adr/`. Not done here: out of scope. |
+| **`examples/hello`, `examples/markets`, `examples/dashboard`, `examples/search`** | **Reused** as the §6 "real program" tier; `hello` also supplies the committed capture corpus below. |
+| **`README.md`** | **Reused; the claims it used to carry are corrected.** As of 2026-10-06 the count reads **24** with `buffer.Buffer` explicitly excluded, Design Pillar 1 reads "Twenty-four widgets", and the install line pins `@v0.7.0` — the three wrong claims this row used to list ("24 widget constructors", the `Buffer`-as-widget row, "Thirty-plus widgets") are gone. What Phase 0 still owns is the *site's* copy of them. |
+| **`docs/ARCHITECTURE.md`** | **Reused as-is — rewritten 2026-10-06.** It is now an orientation page (117 lines) whose job is to link `docs/adr/`, `docs/STATUS.md` and `docs/CONTRIBUTING.md`; the drift this row used to describe (decision numbering 1–7 against the ADR set, colour still `OPEN`, reasoning duplicated from the ADRs) is gone, and it counts the ADRs as ten. The site may link it, but the ADRs remain the record and `ARCHITECTURE.md` must not become a second summary. |
 | **`docs/CONTRIBUTING.md`** | **Reused as-is**, plus one added section on adding a docs page. Its promise of a low-friction path is the constraint §1.1 optimizes for. |
-| **`docs/STATUS.md`** | **Reused as the source for `limitations.md` and the stability badges.** It is the best-written document in the repo. Needs one row added for the docs site, and the widget count corrected. |
-| **`examples/hello/testdata/*.sgr`** | **Reused.** Four committed `.sgr` files plus two `.txt` screens are an existing capture corpus, and the 256/16/`NO_COLOR` variants are ready-made illustrations for the colour-model page. |
+| **`docs/STATUS.md`** | **Reused as the source for `limitations.md` and the stability badges.** It is the best-written document in the repo. Needs one row added for the docs site; its widget count already reads 24 correctly. |
+| **`examples/hello/testdata/*.sgr`** | **Reused.** Five committed `.sgr` files plus sixteen `.txt` screens are an existing capture corpus, and the 256/16/`NO_COLOR` variants are ready-made illustrations for the colour-model page. |
 | **Nothing else exists.** | There is no tutorial, no widget documentation, no quickstart, no FAQ, no limitations page. `widgets/form/form.go`, `widgets/data/data.go` and `widgets/viz/viz.go` are the closest thing to per-category narrative and are excellent — they seed §4 of each widget page. |
 
 **Net:** the *reasoning* is documented to a standard most projects never reach;
@@ -573,9 +601,9 @@ existent prose into a browsable form and writing the half that does not exist.
 
 ## 11. Open questions for the maintainer
 
-1. **Is the site worth it before v0.1?** `STATUS.md`'s "usable library" bar
+1. **Is the site worth it before v1.0.0?** `STATUS.md`'s "usable library" bar
    requires every widget to have a runnable example and a documented public
-   API, but says nothing about a *site*. A pre-alpha project with 22 widgets and
+   API, but says nothing about a *site*. A pre-alpha project with 24 widgets and
    no users may get more from `examples/` plus good godoc on pkg.go.dev. This
    plan argues the site is worth it *because* the capture tool removes drift —
    but if the answer is "not yet", the fallback is Phase 0 + Phase 5 alone
@@ -586,8 +614,9 @@ existent prose into a browsable form and writing the half that does not exist.
    screenshot (§2.4) needs a regeneration step and a staleness check; if no, it
    is done.
 4. **Are the ADRs published verbatim, or curated?** §3.1 says verbatim. A
-   62 KB page is a lot for a first-time reader who wants to know why `Fill` is
-   order-insensitive. Verbatim with a good index is the recommendation.
-5. **Who writes sections 10 and 11 for 22 widgets?** 11 days in §4's estimate
-   assumes one person. This is the largest single block of prose in the plan and
-   the part most likely to be quietly skipped.
+   65 KB page (0009 runs to 92) is a lot for a first-time reader who wants to
+   know why `Fill` is order-insensitive. Verbatim with a good index is the
+   recommendation.
+5. **Who writes sections 10 and 11 for 24 widgets?** 12 days in §8's Phase 4
+   estimate assumes one person. This is the largest single block of prose in the
+   plan and the part most likely to be quietly skipped.
