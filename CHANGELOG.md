@@ -50,9 +50,31 @@ reversed before v1.0.0.
   PR #26 and stays as written there, because released sections are history.
   `docs/SITE-PLAN.md`'s limitations-page spec and stability-banner rows now
   describe the v1.0.0 surface rather than a pre-1.0 one. Still open and now
-  recorded in `docs/STATUS.md`'s stage note: the `widgets/widgettest` freeze
-  decision, `deleteBranchOnMerge`, the macOS test leg, and ADR 0003's
-  third-party reference review.
+  recorded in `docs/STATUS.md`'s stage note: `deleteBranchOnMerge`, the macOS
+  test leg, and ADR 0003's third-party reference review. (The
+  `widgets/widgettest` freeze decision listed here at the time has since been
+  decided — 2026-10-06, see the Changed entry below.)
+
+### Changed
+
+- **Decision (2026-10-06): `widgets/widgettest` is excluded from the v1.0.0
+  stability promise.** The package is public — all 74 `func Example`
+  functions in `widgets/*/example_test.go` import it — so v1.0.0's promise
+  would freeze it by default, and every future helper added to it would be a
+  breaking change requiring a major version. The decision excludes it
+  explicitly instead: it is a test harness whose value depends on evolving
+  alongside the framework, and freezing it would either prevent useful
+  helpers from being added or force a major bump every time one is — it
+  serves nobody. The window to relocate it under `internal/` silently has
+  closed, because v1.0.0 is tagged and published, so the honest resolution
+  is to document the exclusion rather than pretend the freeze is workable.
+  The package is not moved, not renamed, and no code changes;
+  `docs/STATUS.md`'s stage note and its "Two stability hazards" section
+  record the decision. The `## [1.0.0]` "Open at this release" entry naming
+  `widgets/widgettest` stays as written there, because released sections are
+  history — this entry is the dated clarification. The other items in that
+  section are unaffected: the macOS test leg and `deleteBranchOnMerge`
+  remain open.
 
 ---
 
