@@ -32,10 +32,32 @@ reversed before v1.0.0.
 
 ## [Unreleased]
 
-Not yet released, and no version constant has been moved — naming the version is
-a separate release task. Under the release policy above, the colour-quantiser
-fix in this section is a **behaviour change**, so this section can only land in
-a minor.
+Nothing yet.
+
+---
+
+## [1.0.0] — 2026-10-06
+
+**The first release that makes a stability promise.** The public API freezes
+here: from v1.0.0 the project follows Semantic Versioning in earnest, and a
+behaviour change means a minor, not a quiet patch. Every release before this was
+a pre-release under the policy printed above, and this one retires that
+paragraph.
+
+**Why v1.0.0 and not v0.8.0.** The colour-quantiser replacement below is a
+**behaviour change** — it changes the bytes a program emits at the 256 and 16
+colour rungs — so under the project's own policy it is a minor-level change, and
+it must not land in a patch. A `v0.8.0` would therefore be *correct* under that
+policy. It is v1.0.0 because this is the first release that promises stability,
+and the project's documented policy is that the first release to do so is
+1.0.0. The policy's "behaviour change belongs in a minor" rule is untouched and
+remains the rule for every release after this one; v1.0.0 does not relax it, it
+adopts it as a commitment rather than as a pre-release convenience.
+
+**The version constant moved.** `cmd/capture`'s `version` — the only hard-coded
+version string in the module, recorded in `manifest.json` so a capture file can
+be traced to the program that wrote it — now reads `1.0.0`. Module versioning
+itself remains git tags, as it always has.
 
 ### Added
 
@@ -50,6 +72,16 @@ a minor.
   list exempting those files from the box-drawing rune guard, because a widget
   whose chrome is a border necessarily names the runes it paints (the same reason
   `buffer/border_test.go` is excepted).
+
+### Changed
+
+- **PR #22 — the release-gate self-assessment's SemVer criterion is corrected to
+  PARTIALLY MET.** The gate had recorded the criterion as met; the corrected
+  assessment says what actually remains open. Documentation accuracy, no code
+  and no behaviour change.
+- **PR #24 — the SITE-PLAN prose is frozen.** `docs/SITE-PLAN.md`'s plan text is
+  now fixed as the record of what was proposed; future site work updates the
+  site, not this document. Documentation-only.
 
 ### Fixed
 
@@ -83,6 +115,24 @@ a minor.
   existing `buffer.Quantiser` hook, so the diff and the encoder are untouched,
   and steady state is a memo lookup at 0 allocations — only the first use of a
   colour pays for an exhaustive CIEDE2000 search.
+- **PR #23 — CI test runs bypass the test-result cache, which is live by
+  default.** A manual re-run without `-count=1` could serve a cached PASS
+  instead of re-executing tests — a green that did not actually run, which is
+  the worst possible outcome under a "12/12 green before merge" rule.
+  `cache: true` was added to the setup-go steps that did not declare it. CI
+  behaviour only; no shipped code changes.
+- **PR #21 — README corrections: the widget count and the install pin.** The
+  README's stated catalog count and its pinned install instruction were both
+  wrong; both now match the code. Documentation-only.
+- **Two stale statements corrected, no behaviour change.** (a) The
+  `setup-go` cache comments in `.github/workflows/ci.yml` said the cache is
+  "keyed on `go.sum`"; since `setup-go` v6 the default dependency hash is
+  `go.mod`, so the comments now say that. Comment-only — no step, input or
+  behaviour changed. (b) `docs/STATUS.md`'s decision table said "The
+  Hugo/Pagefind site itself is not built" while the site has been serving at
+  [serkanalgur.github.io/termmosaic.github.io](https://serkanalgur.github.io/termmosaic.github.io/);
+  the row now records that the plan and captures live in this repository and
+  the built site serves there. Documentation-only.
 
 ### Known Limitations
 
@@ -92,6 +142,33 @@ a minor.
   **no longer true**: the check was performed, it failed, and the quantiser was
   replaced (see Fixed above). Those entries stay where they were written, as
   history; this is the entry that says so.
+
+### Open at this release — decided by nobody, recorded here
+
+These three are **not settled**. v1.0.0 does not close them, and reading this
+section as closure would be reading the maintainer's mind, which this document
+does not do.
+
+- **`widgets/widgettest` is public and therefore frozen at v1.0 unless the
+  release notes exclude it — and these do not exclude it, so v1.0.0's promise
+  covers it by default.** It was written for the project's own tests, it happens
+  to live in a public package, and v1.0.0's stability promise lands on it like
+  any other exported identifier. `docs/STATUS.md`'s "Two stability hazards"
+  section names the hazard and names two options — promote it to a decided
+  surface with its own rules, or move it under `internal/` before v1.0.0 — and
+  picks **neither**. That is an open product decision, not a documentation gap:
+  whether this release *should* have frozen that surface is undecided, and this
+  release decides it for nobody. A later release can still move it, but only by
+  breaking something v1.0.0 promised.
+- **The Windows CI leg still runs as a full `test (windows-2025)` matrix leg.**
+  [ADR 0001](docs/adr/0001-backend-strategy.md) says it "goes or is relabelled
+  cross-compile-only"; that decision has **not been applied** — the workflow on
+  this branch still runs the Windows leg as a test, not as a cross-compile
+  check. Whether it goes or is relabelled is open.
+- **`deleteBranchOnMerge` is false at the repository level,** so merged branches
+  persist on the remote. No decision has been made about changing it. Branch
+  `feat/menu-dialogs-input` is unmerged on the remote and is not addressed by
+  this release.
 
 ---
 
@@ -1200,7 +1277,8 @@ Two performance claims that this release turns from assertion into measurement:
   **60 cursor moves and 19,443 bytes, 3.12× the narrow frame** rather than 11×.
   The ASCII path is unchanged. See ADR 0008's amendment, finding 4.
 
-[Unreleased]: https://github.com/serkanalgur/termmosaic/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/serkanalgur/termmosaic/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v1.0.0
 [0.7.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.7.0
 [0.6.1]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.6.1
 [0.6.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.6.0
