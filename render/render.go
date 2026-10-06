@@ -90,7 +90,8 @@ type Config struct {
 	// environment convention. Read from the environment by NoColorFromEnv.
 	NoColor bool
 	// Quantiser overrides colour degradation. A nil value uses the default
-	// redmean quantiser. This is the hook a Lab-space mapping would attach to.
+	// Lab-space (CIEDE2000) quantiser. This is the hook a different metric
+	// would attach to.
 	Quantiser buffer.Quantiser
 	// TargetFPS is the frame-pacing budget. Zero means DefaultTargetFPS; values
 	// below 1 are clamped.

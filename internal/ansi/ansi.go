@@ -162,8 +162,8 @@ type Encoder struct {
 	// than a depth.
 	NoColor bool
 	// Quantiser maps colours onto the 256 and 16 palettes. A nil value means
-	// the default redmean quantiser. This is the hook referred to by the
-	// still-OPEN colour decision in STATUS.md: a Lab-space quantiser needs no
+	// the default Lab-space quantiser. This is the hook the colour decision
+	// in STATUS.md refers to: a different metric (OKLab, CIEDE2000) needs no
 	// change to the diff.
 	Quantiser buffer.Quantiser
 }
