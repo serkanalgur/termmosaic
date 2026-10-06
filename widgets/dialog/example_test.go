@@ -147,7 +147,7 @@ func ExampleDialog_actions() {
 func ExampleDialog_dismissal() {
 	d := dialog.New(buffer.Rect{W: 38, H: 6}, dialog.VariantInfo)
 	d.SetTitle("Up to date", buffer.Style{})
-	d.SetBodyString("v0.7.0 is the current release.")
+	d.SetBodyString("v1.0.0 is the current release.")
 	d.SetFocused(true)
 
 	fmt.Printf("fresh: dismissed=%v, focus=%d\n", d.Dismissed(), d.Focus())
@@ -167,7 +167,7 @@ func ExampleDialog_dismissal() {
 	// after Reset: dismissed=false, focus=0 of 1
 	// ╭ Up to date ────────────────────────╮
 	// │                                    │
-	// │v0.7.0 is the current release.      │
+	// │v1.0.0 is the current release.      │
 	// │                                    │
 	// │[Dismiss]                           │
 	// ╰────────────────────────────────────╯

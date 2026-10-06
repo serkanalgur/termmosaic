@@ -44,7 +44,7 @@ jobs:
           # Pinned deliberately: ADR 0001 records that raising this floor is what
           # would unpin golang.org/x/term. See docs/adr/0001-backend-strategy.md.
           go-version: "1.23"
-          # setup-go keys this cache on go.sum, so a dependency change
+          # setup-go keys this cache on go.mod, so a dependency change
           # invalidates it automatically. With -race the instrumented build
           # cache is still reusable across runs per OS/arch, which is where the
           # real time goes.
@@ -90,7 +90,7 @@ jobs:
         with:
           go-version: "1.23"
           # Explicit rather than relying on setup-go's default: this cache is
-          # keyed on go.sum, so a dependency change invalidates it
+          # keyed on go.mod, so a dependency change invalidates it
           # automatically. Pinning it here documents that CI depends on it and
           # survives any future change of the action's default.
           cache: true
@@ -121,7 +121,7 @@ jobs:
         with:
           go-version: "1.23"
           # Explicit rather than relying on setup-go's default: this cache is
-          # keyed on go.sum, so a dependency change invalidates it
+          # keyed on go.mod, so a dependency change invalidates it
           # automatically. Pinning it here documents that CI depends on it and
           # survives any future change of the action's default.
           cache: true
@@ -141,7 +141,7 @@ jobs:
         with:
           go-version: "1.23"
           # Explicit rather than relying on setup-go's default: this cache is
-          # keyed on go.sum, so a dependency change invalidates it
+          # keyed on go.mod, so a dependency change invalidates it
           # automatically. Pinning it here documents that CI depends on it and
           # survives any future change of the action's default.
           cache: true
@@ -181,7 +181,7 @@ jobs:
         with:
           go-version: "1.23"
           # Explicit rather than relying on setup-go's default: this cache is
-          # keyed on go.sum, so a dependency change invalidates it
+          # keyed on go.mod, so a dependency change invalidates it
           # automatically. Pinning it here documents that CI depends on it and
           # survives any future change of the action's default.
           cache: true
