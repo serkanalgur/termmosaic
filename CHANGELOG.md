@@ -8,6 +8,11 @@ from v0.1.0.
 
 ## Release policy before v1.0.0
 
+**Superseded for releases from v1.0.0 (2026-10-06):** v1.0.0 is the first
+release with a stability promise — the public API is frozen at that tag and
+Semantic Versioning applies from it. The policy below governed every release
+*before* v1.0.0 and is kept as the record of what those releases promised.
+
 **The API is not stable and will break without notice.** Every release before
 v1.0.0 is a pre-release, and a minor version may contain behavioural changes.
 What *is* promised: **no behavioural change in a patch release.** If v0.1.1
@@ -32,7 +37,22 @@ reversed before v1.0.0.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **Documentation corrections for the v1.0.0 release** (docs only — no code, no
+  version constant, no workflow change). The README status block and install
+  pin now state the v1.0.0 stability promise and pin `@v1.0.0`; the sponsoring
+  line no longer calls the project pre-alpha; `docs/CONTRIBUTING.md` no longer
+  describes the project as pre-alpha with undecided architecture.
+  `docs/STATUS.md`'s stage note, CI criterion and gate annotations now record
+  the **11** required checks after PR #26 dropped the Windows test leg — the
+  v1.0.0 section's "Open at this release" item on that leg is superseded by
+  PR #26 and stays as written there, because released sections are history.
+  `docs/SITE-PLAN.md`'s limitations-page spec and stability-banner rows now
+  describe the v1.0.0 surface rather than a pre-1.0 one. Still open and now
+  recorded in `docs/STATUS.md`'s stage note: the `widgets/widgettest` freeze
+  decision, `deleteBranchOnMerge`, the macOS test leg, and ADR 0003's
+  third-party reference review.
 
 ---
 

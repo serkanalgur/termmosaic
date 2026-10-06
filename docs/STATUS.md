@@ -3,8 +3,22 @@
 This document is the honest state of TermMosaic. It is updated as decisions are
 made. If something here is stale, that is a bug — please open an issue.
 
-**Project stage: pre-alpha. Do not use this in production. The public API will
-break without notice until v1.0.0.**
+**Project stage: v1.0.0, released 2026-10-06 — the first release with a
+stability promise.** The public API is frozen at that tag and Semantic
+Versioning applies from it. The release did not settle everything; what is
+still open:
+
+- `widgets/widgettest` is public and therefore frozen at v1.0. Whether to
+  accept that freeze or exclude the package is undecided — see "Two stability
+  hazards" below.
+- The macOS test leg still runs; a further reduction was discussed and not
+  done. The Windows test leg was dropped by PR #26 (2026-10-06), so the
+  required checks are now 11 — see the CI criterion under "Definition of
+  'usable library'".
+- `deleteBranchOnMerge` is false at the repository level; no decision has been
+  made about changing it.
+- ADR 0003 contains a third-party technical reference in a rationale; whether
+  to cut it is the maintainer's open call. It is not edited here.
 
 ## Decision states
 
@@ -461,6 +475,9 @@ covered `term/terminal_windows_test.go`, and it still has never been executed.
   green — every `ci` run on `main` since `8211716` (2026-10-05, the commit that
   introduced it) has passed, and PRs #17, #18 and #19 each merged at **12/12**
   on the same `ci.yml`, which has not changed since. Gate item 1 is closed.
+  **Second supersession (2026-10-06):** `ci.yml` has since changed — PR #26
+  (`1564ad5`) dropped the Windows test leg, so branch protection now requires
+  11 checks, not 12. The 12/12 record above remains true for the PRs it names.
 - **`term/terminal_windows_test.go` is still compile-only.** Unchanged from
   v0.3.0 and restated because it is the item most easily mistaken for coverage:
   `GOOS=windows go vet` proves it compiles, the Windows backend still runs zero
@@ -839,20 +856,23 @@ The bar this project is measured against:
   from "Linux, macOS, and Windows"** by the v1.0.0 platform decision recorded
   below, so this criterion now states the target instead of contradicting it
   ([ADR 0001](adr/0001-backend-strategy.md)). **MET on the amended target.**
-  The `ci` workflow runs 12 checks — `test (ubuntu-24.04)`, `test (macos-15)`,
-  `test (windows-2025)`, `gofmt`, `golangci-lint`, `zero-allocation diff`, and
-  six `cross-compile` legs — and it is green **on the current configuration**:
-  every `ci` run on `main` since `8211716` (2026-10-05, the commit that
-  introduced this configuration and which has not changed since) has passed, and
-  PRs #17, #18 and #19 each merged at **12/12**. The v0.4.0 gate's "no green CI
-  run for the current workflow configuration at all" was true when written and
-  is **false now**; that gate records it as history, this line records the
-  truth. Two things stay true and are not claimed away: nothing has ever been
-  *run* on Windows — a green Windows job asserts only that the stub returns its
-  loud error correctly, which is a reason the platform decision narrows the
-  target rather than a gap in the evidence for Linux and macOS — and the
-  decision's consequence that the Windows CI job "either goes or is relabelled
-  **cross-compile-only**" is **not yet applied**; it still runs the full matrix.
+  The `ci` workflow runs **11** required checks — `test (ubuntu-24.04)`,
+  `test (macos-15)`, `gofmt`, `golangci-lint`, `zero-allocation diff`, and six
+  `cross-compile` legs (linux/amd64, linux/arm64, darwin/amd64, darwin/arm64,
+  windows/amd64, windows/arm64) — the list read off branch protection on
+  2026-10-06. Before PR #26 (`1564ad5`, 2026-10-06) the workflow ran 12
+  checks: the same set plus a `test (windows-2025)` leg. Every `ci` run on
+  `main` since `8211716` (2026-10-05) passed on that 12-check configuration,
+  and PRs #17, #18 and #19 each merged at **12/12** on it. The v0.4.0 gate's
+  "no green CI run for the current workflow configuration at all" was true when
+  written and is **false now**; that gate records it as history, this line
+  records the truth. One thing stays true and is not claimed away: nothing has
+  ever been *run* on Windows — the backend is a loud-error stub and CI only
+  cross-compiles it — which is a reason the platform decision narrows the
+  target rather than a gap in the evidence for Linux and macOS. The platform
+  decision's consequence for the Windows CI job — "either goes or is relabelled
+  **cross-compile-only**" — is **applied and done**: PR #26 dropped the Windows
+  test leg outright, and the leg is gone rather than relabelled.
 - **Every widget has a runnable example and a documented public API. MET.**
   There are four example programs — `hello`, `markets`, `dashboard`, `search` —
   **and 74 `func Example` functions covering all 24 catalog widgets**, in the
@@ -891,6 +911,11 @@ the two housekeeping items still open in the table (8 and 9). Each struck-out
 item keeps its original wording, so the reasoning that opened it is not
 rewritten out of the record:
 
+**Outcome (2026-10-06):** v1.0.0 was tagged with item 2 and gate items 8 and 9
+still open; the release notes' "Open at this release" section records them
+rather than closing them. The verdict above is retained as the record of the
+bar, not as a claim that it was met in full.
+
 1. ~~**The project's own bar is not met, by the project's own words.**~~
    **CLOSED.** The criterion read **NOT MET, and not close** and called itself
    the largest unmet item; shipping v1.0.0 against a bar this document declared
@@ -925,6 +950,9 @@ rewritten out of the record:
    passed, and PRs #17, #18 and #19 each merged at **12/12**. "All three
    platforms" was also the wrong target: the platform decision below narrows
    v1.0.0 to Linux and macOS.
+   **Annotated 2026-10-06:** this evidence describes the configuration that
+   closed the item; PR #26 has since dropped the Windows test leg, so the
+   required checks are now 11. The 12/12 record above is unchanged as history.
 
 What is genuinely ready: the *signatures*. This codebase has done the hard part
 of stability design already, and done it deliberately.
@@ -974,16 +1002,20 @@ promise requires a platform that has not been built.
 
 ## What must close before v1.0.0
 
+**Outcome (2026-10-06):** the bar was met — v1.0.0 was tagged on 2026-10-06.
+This table is retained as the record of what closed and what did not; items 8
+and 9 remain open and are tracked in the stage note at the top of this file.
+
 | # | Work | Why it gates |
 |---|---|---|
-| 1 | ~~**Green CI evidence** on the current configuration~~ **CLOSED (v0.5.x)** | Minutes, and every other claim rested on it. Evidence: `ci.yml` last changed in `8211716` (2026-10-05) and **every `ci` run on `main` since has passed**; PRs #17, #18 and #19 each merged at **12/12** — `test (ubuntu-24.04)`, `test (macos-15)`, `test (windows-2025)`, `gofmt`, `golangci-lint`, `zero-allocation diff` and six `cross-compile` legs — against that unchanged configuration. |
+| 1 | ~~**Green CI evidence** on the current configuration~~ **CLOSED (v0.5.x)** | Minutes, and every other claim rested on it. Evidence: `ci.yml` last changed in `8211716` (2026-10-05) and **every `ci` run on `main` since has passed**; PRs #17, #18 and #19 each merged at **12/12** — `test (ubuntu-24.04)`, `test (macos-15)`, `test (windows-2025)`, `gofmt`, `golangci-lint`, `zero-allocation diff` and six `cross-compile` legs — against that unchanged configuration. **Annotated 2026-10-06:** this evidence describes the configuration at closure; PR #26 (`1564ad5`) has since dropped the Windows test leg, so the required checks are now 11 and no longer include `test (windows-2025)`. The 12/12 record above is unchanged as history. |
 | 2 | ~~**Behaviour audit of all 24 widgets**~~ **CLOSED (v0.5.1)** | Three of five releases so far exist because of this defect class, and every find after v1.0.0 would be a v1.1.0. The audit found **seven** instances of the style-application class (two of them making a focused row unreadable) and **no remaining instance** of it across all 24 widgets; #3 is what keeps it that way. |
 | 3 | ~~**Cache-poisoning debug mode** (ADR 0007's expensive half)~~ **CLOSED (v0.5.0)** | What makes #2 mechanical rather than a matter of review, and the highest leverage per hour here. Built as `render/cache_audit.go` — `Config.CacheAudit` arms `poisonLocked`, which corrupts the rect-keyed cache after `Draw` and asserts the next frame is byte-identical — and it **gates the build**. |
 | 4 | ~~**`keymap`** (ADR 0009), with the two named tests~~ **CLOSED** | Shipped in v0.6.0 as `keymap/`, above `Widget.Handle` and with `Widget` unchanged. `TestDispatchIsZeroAllocation`, `TestChordIsSixteenBytes` and `TestParseChordRoundTrips` all pass. `KeyHint`'s help surface is no longer empty: `Describe` computes it from the same tables `Dispatch` walks. **Exercised in v0.6.1** — `examples/hello` dispatches through a registry and `DescribeGrouped` was added for its hint lines. The package still ships with no catalog widget implementing `Commandable` and no palette — both tracked as open, neither blocking. |
 | 5 | ~~**Mouse routing decision + the three wheel defects**~~ **CLOSED** | Decided by [ADR 0010](adr/0010-mouse-routing.md) — widgets hit-test themselves, `Widget` unchanged — and the three wheel defects are fixed and pinned. See below. |
 | 6 | ~~**Colour model: decide it**~~ **CLOSED (2026-10-06, PR #19)** | The reason it gated was exactly right: a PROPOSED row cannot survive the freeze, because replacing the quantiser later changes every program's 256/16-colour output — a v1.1.0 in the first release. It was decided the only way this row could be decided, by measurement. PR #18's CIEDE2000 audit found the redmean weights inert (`uint8` division made both weights 2) and measured selection error **256: max 21.201, 19.35% above the JND; 16: max 36.821, 37.50%**, with `markets.down` collapsing to grey and colliding with `markets.flat`. PR #19 replaced the quantiser through the existing `buffer.Quantiser` hook: **selection error 0.000 on both rungs, 0 of 281,216 colour-rungs regressed, frame path 224.8 → 6.6 ns/op at 0 allocs**, and every audit threshold pinned at 0 so a silent re-drift fails the test. The alternative — keeping redmean and calling it validated — is rejected on recorded numbers. See the table row above. |
 | 7 | ~~**`func Example` per widget**~~ **CLOSED (PR #17)** | The largest unmet criterion in the project's own bar, and purely additive: **74 `func Example` functions across all 24 catalog widgets**, in the eight `widgets/*/example_test.go` files, every one rendered through `widgets/widgettest` so its `// Output` comment is the cell grid — and each of the eight widget packages carries a package-level `Example` too. It needed one exception to a written rule: `vocabulary_test.go`'s `exampleFiles` list, because a bordered widget's example must name the box-drawing runes it paints (the same reason `buffer/border_test.go` is excepted). Zero stability risk. |
-| 8 | **Documentation accuracy pass** | README said "Thirty-plus widgets" against a catalogue of 24, "the eight architecture decisions" against nine, and "Not yet released as a module version" beside a `go get` line — the three claims that opened this item. For a project whose product *is* documented honesty, stale headline numbers are a release blocker. **Still open, partly worked.** All three named claims now read correctly: the ADR count reads *ten*, the "not yet released" phrasing is gone and its replacement `go get` pin reads **`@v0.7.0`**, and the widget-count phrasing says **twenty-four** — the last two corrected by PR #21, which landed after this row last recorded them as stale (it then read **v0.5.2 against a `v0.7.0` tag**, with "the widget-count phrasing is untouched"). This pass has corrected the colour-model row, the CI criterion, the README's platform line and — through PR #21 — the README's widget count and install pin, without closing the item: a pass that stops halfway is not a pass, and nothing yet records the full pass as complete. |
+| 8 | **Documentation accuracy pass** | README said "Thirty-plus widgets" against a catalogue of 24, "the eight architecture decisions" against nine, and "Not yet released as a module version" beside a `go get` line — the three claims that opened this item. For a project whose product *is* documented honesty, stale headline numbers are a release blocker. **Still open, partly worked.** All three named claims now read correctly: the ADR count reads *ten*, the "not yet released" phrasing is gone and its replacement `go get` pin reads **`@v1.0.0`** (it read `@v0.7.0` after PR #21 and was corrected again at the v1.0.0 release), and the widget-count phrasing says **twenty-four** — the last two corrected by PR #21, which landed after this row last recorded them as stale (it then read **v0.5.2 against a `v0.7.0` tag**, with "the widget-count phrasing is untouched"). This pass has corrected the colour-model row, the CI criterion, the README's platform line and — through PR #21 — the README's widget count and install pin; the v1.0.0 release pass corrected the README status block and install pin, the sponsoring line, CONTRIBUTING.md's stage and architecture claims, and this document's CI criterion (12 checks → 11 after PR #26), without closing the item: a pass that stops halfway is not a pass, and nothing yet records the full pass as complete. |
 | 9 | **Prose freeze** | Status block, platform matrix, stale gate sections, and the `keymap` apology paragraph — which **has been rewritten** as a shipped-feature statement in v0.6.0, so what remains is the housekeeping around it. |
 
 ### 5 is bigger than the defect it is filed under — **and it is closed**
@@ -1204,6 +1236,10 @@ Neither is in an ADR, and both would freeze by accident.
    whether or not that was intended. Decide it: promote it to a decided surface
    with its own rules, or move it under `internal/` **before** v1.0.0 — before,
    because afterwards it is frozen and cannot move.
+   **Status 2026-10-06:** v1.0.0 shipped without excluding the package, so its
+   promise covers `widgets/widgettest` by default and the window to move it
+   silently has closed. The decision is still open: accept the freeze and give
+   the package decided rules, or break it in a future release with disclosure.
 2. **The variadic constructors are an open-ended signature.** Three of the 25
    widget constructors take `...` — `NewList(items ...ListItem)`,
    `NewTable(cols ...Column)`, `NewTree(nodes ...Node)`. That is the friendliest
@@ -1240,3 +1276,7 @@ by the risk register instead, which is the correct place for it now that the
 surface exists. **Items 6 and 7 are closed** — 6 by the audit and the
 replacement it forced (PRs #18 and #19), 7 by the example sweep (PR #17). What
 is left is 8 and 9, and then the tag.
+
+**Postscript (2026-10-06):** the tag happened — v1.0.0 was released. Items 8
+and 9 remain open; they are tracked in the stage note at the top of this file
+and in gate item 8 above.

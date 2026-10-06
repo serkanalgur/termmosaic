@@ -668,6 +668,10 @@ per second, against a 16 ms frame budget. The zero-allocation bar is about the
 **Binary and source compatibility.** TermMosaic is pre-alpha and the README
 promises only that *"the public API will break without notice until v1.0.0"*,
 plus SemVer-honoured from v0.1 with no behavioural change in a patch release.
+*(Historical framing, written before the release: v1.0.0, tagged 2026-10-06, is
+the first release with a stability promise — the public API is frozen at that
+tag and SemVer applies from it. The rules below were written for the pre-1.0
+period and still describe how this project has treated `Event`.)*
 The rules this ADR sets:
 
 - **Adding a field to `Event` is additive**, source- and behaviour-compatible

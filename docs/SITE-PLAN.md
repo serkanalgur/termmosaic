@@ -125,8 +125,9 @@ that promise:
   second. MkDocs Material takes several seconds per run, which is felt
   constantly.
 - **Versioning.** Hugo has no first-class versioning, and neither does MkDocs
-  without a plugin. For a pre-alpha project released through `v0.7.0` this is
-  a non-issue; the plan's answer is that per-widget docs are generated from the
+  without a plugin. For a project at this plan's stage — written when releases
+  ran through `v0.7.0`, before the v1.0.0 release of 2026-10-06 — this is a
+  non-issue; the plan's answer is that per-widget docs are generated from the
   **current** source, so a version selector would have to render from a
   checkout, not from the site. Deferred. Recorded here so it is a decision
   rather than an oversight.
@@ -269,7 +270,7 @@ site/content/
 │                                      one real screenshot, install, honest status
 ├── getting-started/
 │   ├── _index.md                      three-minute path, first program
-│   ├── install.md                     Go 1.23+, CGO off, pinned at v0.7.0
+│   ├── install.md                     Go 1.23+, CGO off, pinned at v1.0.0
 │   ├── quickstart.md                  hello world, annotated, runnable
 │   └── your-first-app.md              terminal + renderer + input + loop, end to end
 ├── concepts/
@@ -332,11 +333,16 @@ drifts — the exact failure mode §7 exists to prevent. `docs/adr/README.md`'s
 It is linked from the landing page, from every widget page's footer, and from the
 FAQ. Contents, every item traceable to `STATUS.md`:
 
-- **Pre-alpha. The API will break without notice before v1.0.0.** This sentence
-  appears on the landing page, above the fold, and in the site footer.
-- **Not a stable SemVer surface.** Releases exist through `v0.7.0`, but nothing
-  before v1.0.0 is frozen: pin
-  `go get github.com/serkanalgur/termmosaic@v0.7.0`.
+- **v1.0.0 is the first release with a stability promise.** The public API is
+  frozen at that tag (released 2026-10-06) and Semantic Versioning applies
+  from it. This goes on the landing page, above the fold, and in the site
+  footer — this plan originally specified the pre-1.0.0 "the API will break
+  without notice" banner, which v1.0.0 made false.
+- **The surface is frozen, with named gaps.** Pin
+  `go get github.com/serkanalgur/termmosaic@v1.0.0`. What v1.0.0 does not do —
+  Windows console backend, IME/composition, a theme system — is enumerated in
+  `STATUS.md` and the CHANGELOG's Known Limitations sections, and the
+  limitations page carries them forward.
 - **Windows is a stub.** `term/terminal_windows.go` returns a loud error from
   every console operation. CI compiles it; nothing runs on it.
 - **No IME / composition.** Scoped out by ADR 0005 §7. Users composing CJK in a
@@ -423,7 +429,7 @@ Every one of the 24 pages has the same thirteen sections, in this order. The
 | # | Section | Source | Notes |
 |---|---|---|---|
 | 1 | Title + one-line purpose | **auto** | First sentence of the godoc. Already written for all 24. |
-| 2 | Stability banner | **auto** | `PROPOSED`-style badge, pre-alpha, from `STATUS.md` policy. |
+| 2 | Stability banner | **auto** | v1.0.0 stability badge — frozen API, SemVer applies — from `STATUS.md`'s current policy. |
 | 3 | Rendered output | **auto** | Colour capture + plain-text capture, at 3 widths. |
 | 4 | Package context | **auto** | The package doc's relevant section — e.g. `widgets/data`'s "the rules every widget here obeys". Already written. |
 | 5 | Constructing it | **auto** | Constructor signature + every exported field, with its own doc comment as the description. |
@@ -562,8 +568,9 @@ versioning → the 3-width captures → the `NO_COLOR`/ladder demonstrations.
   generated. Hand-written HTML is how a docs site becomes unmaintainable.
 - **No per-widget PNG screenshots.** §2.4 explains the exception and the limit.
 - **No interactive code playground / WASM-editor.** Same reason as the first item.
-- **No analytics, no cookies, no third-party anything.** A pre-alpha Go library
-  does not need a cookie banner, and adding one is a liability.
+- **No analytics, no cookies, no third-party anything.** A Go library that
+  collects no user data does not need a cookie banner, and adding one is a
+  liability.
 - **No "coming soon" pages.** The catalog is 24 widgets and the docs say 24. A
   page listing unbuilt widgets invites the question the project is trying to
   avoid.
@@ -586,7 +593,7 @@ Honest accounting of the existing documentation:
 | **`docs/adr/*.md`** (10 files, ~350 KB) | **Reused verbatim.** Copy, do not rewrite. Add anchors only. |
 | **`docs/adr/README.md`** | **Reused** as the ADR index page, with the "Decisions at a glance" section promoted. |
 | **`examples/hello`, `examples/markets`, `examples/dashboard`, `examples/search`** | **Reused** as the §6 "real program" tier; `hello` also supplies the committed capture corpus below. |
-| **`README.md`** | **Reused; the claims it used to carry are corrected.** As of 2026-10-06 the count reads **24** with `buffer.Buffer` explicitly excluded, Design Pillar 1 reads "Twenty-four widgets", and the install line pins `@v0.7.0` — the three wrong claims this row used to list ("24 widget constructors", the `Buffer`-as-widget row, "Thirty-plus widgets") are gone. What Phase 0 still owns is the *site's* copy of them. |
+| **`README.md`** | **Reused; the claims it used to carry are corrected.** As of 2026-10-06 the count reads **24** with `buffer.Buffer` explicitly excluded, Design Pillar 1 reads "Twenty-four widgets", and the install line pins `@v1.0.0` (it read `@v0.7.0` until the v1.0.0 release pass) — the three wrong claims this row used to list ("24 widget constructors", the `Buffer`-as-widget row, "Thirty-plus widgets") are gone. What Phase 0 still owns is the *site's* copy of them. |
 | **`docs/ARCHITECTURE.md`** | **Reused as-is — rewritten 2026-10-06.** It is now an orientation page (117 lines) whose job is to link `docs/adr/`, `docs/STATUS.md` and `docs/CONTRIBUTING.md`; the drift this row used to describe (decision numbering 1–7 against the ADR set, colour still `OPEN`, reasoning duplicated from the ADRs) is gone, and it counts the ADRs as ten. The site may link it, but the ADRs remain the record and `ARCHITECTURE.md` must not become a second summary. |
 | **`docs/CONTRIBUTING.md`** | **Reused as-is**, plus one added section on adding a docs page. Its promise of a low-friction path is the constraint §1.1 optimizes for. |
 | **`docs/STATUS.md`** | **Reused as the source for `limitations.md` and the stability badges.** It is the best-written document in the repo. Needs one row added for the docs site; its widget count already reads 24 correctly. |
@@ -601,13 +608,15 @@ existent prose into a browsable form and writing the half that does not exist.
 
 ## 11. Open questions for the maintainer
 
-1. **Is the site worth it before v1.0.0?** `STATUS.md`'s "usable library" bar
+1. **Is the site worth it before v1.0.0?** *(Answered by history: the site was
+   built and v1.0.0 shipped on 2026-10-06; this question is retained as the
+   record of the deliberation.)* `STATUS.md`'s "usable library" bar
    requires every widget to have a runnable example and a documented public
-   API, but says nothing about a *site*. A pre-alpha project with 24 widgets and
-   no users may get more from `examples/` plus good godoc on pkg.go.dev. This
-   plan argues the site is worth it *because* the capture tool removes drift —
-   but if the answer is "not yet", the fallback is Phase 0 + Phase 5 alone
-   (5 days) and pkg.go.dev, which already renders this godoc well.
+   API, but says nothing about a *site*. A pre-v1.0.0 project with 24 widgets
+   and no users may get more from `examples/` plus good godoc on pkg.go.dev.
+   This plan argues the site is worth it *because* the capture tool removes
+   drift — but if the answer is "not yet", the fallback is Phase 0 + Phase 5
+   alone (5 days) and pkg.go.dev, which already renders this godoc well.
 2. **Domain.** `serkanalgur.github.io/termmosaic` unless a custom domain is
    wanted.
 3. **Does `examples/dashboard` change often?** If yes, the one committed
