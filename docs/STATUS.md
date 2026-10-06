@@ -35,7 +35,7 @@ break without notice until v1.0.0.**
 | Input decoding (where the parser lives, what it decodes) | **DECIDED** — a pure `Decode` under a resumable `Parser` in a new `input` package | Kitty keyboard **in** (progressive enhancement, `disambiguate` only); paste **in** and always **one `EventPaste` carrying the whole payload**; mouse decoding **in** (SGR 1006 / urxvt 1015 / X10) but **capture off by default**; focus decoding **in**, reporting off by default; **IME scoped out and deferred**, with `EventCompose` reserved. [ADR 0005](adr/0005-input-decoding.md) |
 | Cell access on sub-buffers (`Cells()`, `RowBytes`) | **DECIDED** — `Row(y) []Cell` replaces `Cells()`; `RowBytes` is a `*Buffer` method that panics on a view | The flat slice `Cells()` returns is silently wrong for a sub-buffer. The stride never leaves `buffer`. Closes ADR 0002's v1.0 risk 1b now. [ADR 0006](adr/0006-subbuffer-cell-access.md) |
 | Responsive screen composition | **DECIDED** — a **budget, not a reflow**; no size classes, no framework breakpoints | Framework shares the arithmetic (`geometry.ClampCount`, `geometry.Budget` + `Priority`, optional `termmosaic.Minimizable`); policy stays per widget. **`Widget` is unchanged.** Degenerate sizes are a contract: **no panic ever, clip never blank**; a resize always repaints the whole screen because `buffer.Resize` discards the cells. [ADR 0007](adr/0007-responsive-screens.md) |
-| Color model and degradation ladder | **PROPOSED** | Built and working: `Colour` is truecolor/named-16/256 with a redmean quantiser and a `ColourDepth` rung, plus `NO_COLOR`. **Not yet validated.** Nobody has checked the redmean mapping is perceptually acceptable, so treat the 256 and 16 rungs as provisional. The `buffer.Quantiser` interface is the escape hatch for a Lab-space replacement. |
+| Color model and degradation ladder | **DECIDED — 2026-10-06, on measurement** — Lab-space (CIEDE2000) selection through the existing `buffer.Quantiser` hook | Built and working: `Colour` is truecolor/named-16/256 with a `ColourDepth` rung, plus `NO_COLOR`. **The validation was performed, and it failed** — that is why this row is DECIDED rather than still PROPOSED. PR #18's CIEDE2000 audit (`buffer/colour_quantiser_perceptual_test.go`) found the "redmean" weights inert: `rmean/256` and `(255-rmean)/256` divide to zero in `uint8` arithmetic, so the formula was fixed-weight `2*dr²+4*dg²+2*db²` in gamma-space RGB. Measured selection error: **256 rung max 21.201, 19.35% of the lattice above the JND; 16 rung max 36.821, 37.50% above** — with `markets.down` collapsing to grey and colliding with `markets.flat`. PR #19 **replaced** the quantiser through that hook (`redmean` is deleted; selection is an exhaustive CIEDE2000 search over the rung palettes behind a per-colour memo), and the audit's own numbers now read **selection error 0.000 on both rungs, 0 of 281,216 colour-rungs regressed, frame path 224.8 → 6.6 ns/op at 0 allocs**. Every selection threshold in the audit is pinned at `0`, so a non-zero measurement means the metric, the palettes or the selection wiring changed without a re-audit. **Decided because it was measured, not asserted**: redmean is rejected on recorded numbers rather than on preference, and the record of what was wrong is kept in the audit's header rather than erased. Reopening this after v1.0.0 is a release-defining re-audit, not a tweak — see gate item 6. |
 | Theme and styling system | **DECIDED** — **no theme in v1**; widgets carry `Style` fields, framework defaults are the terminal's own colours plus named attribute styles | One `buffer.Style` value (fg/bg/attr, by value, 12 bytes, 0 allocs) replaces the loose-argument write API; `ansi.Style` becomes an alias of it. Trigger for a theme: the first role two widgets must share. [ADR 0008](adr/0008-style-and-text.md) |
 | Text and span rendering | **DECIDED** — `Span` + `Buffer.SetSpans`, parsed once, wrapped outside `Draw` | A wide glyph's continuation cell takes its **owning span's** style or the row flickers forever. `Wrap`/`Truncate` allocate and are banned from `Draw`. Borders and titles have one vocabulary (`BorderPlain`/`Rounded`/`Double`/`Thick`/`ASCII`, one `Block`). [ADR 0008](adr/0008-style-and-text.md) |
 | Commands and keymap (where the command layer sits, and whether `Widget.Handle` changes) | **DECIDED and SHIPPED** — a new `keymap` package sitting **above** `Widget.Handle`; the `Widget` interface is **unchanged** | A named action and a key that reaches it are different things. One normalised `Chord` (`KeySpace` and `Rune ' '` are one chord) is a comparable 16-byte struct, so resolution is a map lookup at **0 allocs** — a property ADR 0009 specifies and **is pinned today**: `TestDispatchIsZeroAllocation` and `TestChordIsSixteenBytes` exist in `keymap/` and pass. **Shipped in v0.6.0** as `keymap/registry.go`, `command.go`, `chord.go`, `scope.go`, `participation.go` and `describe.go`. Resolution is **focus > screen > global with no numeric priority**, and a user override wins only **within its own scope** — so a dialog's `Esc` cannot be stolen. Widgets join through **optional** `Commandable`/`Clickable` interfaces (the `Focusable` pattern); **v0.6 requires them of zero catalog widgets** and ships with none, which is deliberate. `EventResize` and `EventPaste` never enter a command layer. Help is `Describe` (one row per **chord**, for a palette and a help screen) or `DescribeGrouped` (one row per **command**, for a one-line `KeyHint`), computed from the same tables `Dispatch` walks, so it cannot drift; `examples/hello` is the first consumer, and it renders **both** its pinned hint line and its `?` overlay from the registry. A click is a command because the **widget under the pointer says so** — the registry holds no rectangles. The `Ctrl+K` palette is in scope, built on `Menu`+`Dialog`+`TextInput`, and **is not built**; new behaviour in `Menu`/`Dialog`, so a v1.1.0 minor. `Event` is untouched: a command is resolved *from* an event, never carried inside one, so no payload is added and the `unsafe.Sizeof(Event{})` guard is unaffected. Deferred with triggers: multi-stroke/leader sequences, command-line args, config persistence, release bindings, drag-as-command. [ADR 0009](adr/0009-command-and-keymap.md) |
@@ -55,9 +55,11 @@ sub-buffer cell access, responsive composition, style/theme/text) and 2026-10-05
 (commands and keymap), and are recorded in full, with rejected alternatives, in
 [docs/adr/](adr/README.md).
 
-One of them is DECIDED with nothing built under it. The colour model is
-**PROPOSED**; `keymap` was the other, and it is now **shipped in v0.6.0** —
-`keymap/` exists and its named tests pass. The distinction still matters when
+One of them was DECIDED with nothing built under it: `keymap`, and it is now
+**shipped in v0.6.0** — `keymap/` exists and its named tests pass. The colour
+model was the other — **PROPOSED** when this paragraph was written, and now
+**DECIDED on measurement** (the row above: the audit ran, found a defect, and
+the quantiser was replaced). The distinction still matters when
 reading this table: DECIDED means "will not be reopened", not "shipped".
 
 Decisions 1 and 2 were made **empirically** — a scratch benchmark module was
@@ -455,6 +457,10 @@ covered `term/terminal_windows_test.go`, and it still has never been executed.
   new images for this project. This is the one item at this gate that is both
   unfinished *and* unobservable locally, which is why it is named here rather
   than counted as closed.
+  **True at this gate. Superseded:** the configuration has been run and is
+  green — every `ci` run on `main` since `8211716` (2026-10-05, the commit that
+  introduced it) has passed, and PRs #17, #18 and #19 each merged at **12/12**
+  on the same `ci.yml`, which has not changed since. Gate item 1 is closed.
 - **`term/terminal_windows_test.go` is still compile-only.** Unchanged from
   v0.3.0 and restated because it is the item most easily mistaken for coverage:
   `GOOS=windows go vet` proves it compiles, the Windows backend still runs zero
@@ -560,17 +566,24 @@ left for someone to rediscover.
 - **The documentation site is still not built** — only the capture half is.
   Separate work, separate repository.
 - **The colour quantiser is still unvalidated.** PROPOSED, not DECIDED.
+  **True at the v0.2.0 gate. Superseded 2026-10-06:** the audit ran (PR #18),
+  found a defect, and the quantiser was replaced (PR #19) — now **DECIDED**, see
+  the table row above and gate item 6.
 - **tmux / screen DCS passthrough is still missing.** Deferred with a trigger.
 - **IME / preedit is not implemented**, by ADR 0005's deliberate deferral. The
   cost is documented rather than mitigated.
 - **The cache-poisoning debug mode is still not built.** ADR 0007's expensive
   half, still a convention rather than a check. Not a release gate.
+  **True at this gate. Superseded in v0.5.0:** the cache-audit mode is built and
+  **gates the build** — see the v0.5.0 note above; gate item 3 is closed.
 - **`TextArea` has no rendered selection, and there is no `Form` container, no
   table column selection, no pager selection and no redo stack.** Each would be
   a widget API addition; none is in scope for a release gate.
 - **Every widget still lacks a `func Example`** — see the definition of usable
   library below. Three example *programs* exist; zero runnable per-widget
   examples do.
+  **True at this gate. Superseded 2026-10-06:** PR #17 added **74 `func
+  Example` functions across all 24 catalog widgets** — gate item 7 is closed.
 - **The lint gate is narrower than the checklist above suggests.** It is
   `golangci-lint run ./...` at a pinned v2.14.0 on Linux, with `errcheck`,
   `ineffassign`, `govet`, staticcheck's SA rules and `unused` enabled and the
@@ -628,6 +641,8 @@ overhead on wide glyphs, fixed in v0.2.0.
 
 - **The cache-poisoning debug mode is still not built.** ADR 0007's expensive half,
   still a convention rather than a check. Not a release gate.
+  **Superseded in v0.5.0** (original line kept verbatim): built as
+  `render/cache_audit.go`, gated by `widgets/cacheaudit` — gate item 3 is closed.
 - **The diff's cursor-move overhead on wide glyphs is not fixed.** One line, and
   specified in ADR 0008's amendment, but `internal/diff` is the most load-bearing
   code in the project and this is not the task to change it in.
@@ -635,6 +650,9 @@ overhead on wide glyphs, fixed in v0.2.0.
   is documented rather than mitigated.
 - **tmux / screen DCS passthrough is still missing.** Deferred with a trigger.
 - **The colour quantiser is still unvalidated.** PROPOSED, not DECIDED.
+  **Superseded 2026-10-06** (the original line is left verbatim above): the
+  audit was performed, found a defect, and the quantiser was replaced — the row
+  is now **DECIDED**.
 - **The documentation site is not built.** Separate work, separate repository.
 - **`TextArea` has no rendered selection, and there is no `Form` container, no table
   column selection, no pager selection and no redo stack.** Each would be a widget
@@ -642,7 +660,9 @@ overhead on wide glyphs, fixed in v0.2.0.
 - **`docs/adr/README.md`'s "Still open" list is stale in one entry**: it lists the
   colour model as undecided, where this table records it as PROPOSED. Correcting it
   means editing an ADR, which the v0.1.0 gate forbids except for ADR 0008's risk 5,
-  so it is recorded here instead.
+  so it is recorded here instead. **Resolved 2026-10-06:** that entry was
+  rewritten when the colour model moved to DECIDED on measurement; it is no
+  longer stale and no longer open.
 
 ## Known gaps in comparable frameworks
 
@@ -724,17 +744,24 @@ Answered questions have been removed; the reasoning is preserved in
   with a console. So the runtime half of this risk is exactly as open as it was:
   the tests raise the floor on what a Windows implementation would have to
   satisfy, and nothing more. The remaining risk is entirely the runtime half.
-- **Color model and degradation ladder** — moved from OPEN to **PROPOSED**;
-  see the table row above. Built and working, not yet perceptually validated.
-  The **theme/styling system** is no longer in this list:
+- **Color model and degradation ladder — DECIDED, on measurement.** Moved from
+  OPEN to PROPOSED, and from PROPOSED to DECIDED by the audit and the
+  replacement it forced (PRs #18 and #19); see the table row above for the
+  numbers. The **theme/styling system** is no longer in this list:
   [ADR 0008](adr/0008-style-and-text.md) decides it as "no theme in v1".
-- **A cache-poisoning debug mode — STILL OPEN. The four ADR 0007 §3 tests — now
-  written.** Two separate items, previously recorded as one:
-  - **The cache-poisoning debug mode remains unbuilt.** The catalog surfaced
+- **A cache-poisoning debug mode — CLOSED in v0.5.0. The four ADR 0007 §3 tests
+  — now written.** Two separate items, previously recorded as one:
+  - ~~**The cache-poisoning debug mode remains unbuilt.** The catalog surfaced
     that a rect-keyed cache is only half the contract — see ADR 0007's 2026-10-04
     amendment. The cheap half is a stated convention; the mechanical check is not
     built. A debug mode that corrupts a widget's cache after `Draw` and asserts the
-    next frame is identical would catch that whole class instead of by review.
+    next frame is identical would catch that whole class instead of by review.~~
+    **Built in v0.5.0** — written exactly as the question described it:
+    `render/cache_audit.go` arms `Config.CacheAudit`, which poisons the cache
+    after `Draw` and asserts the next frame is byte-identical, plus a cold-twin
+    check in `widgets/widgettest` for the field-keyed half; `widgets/cacheaudit`'s
+    `TestCatalogCacheAudit` walks the catalog and **gates the build**. It is the
+    mechanical check the cheap half could never be, and it closed gate item 3.
   - **`TestRenderAtZeroSizeWritesNothing`, `TestResizeShrinksAndRepaintsWholeRect`,
     `TestResizeCoalescedToOneRepaintPerTick` and `TestRootBoundsClippedToScreen`
     now exist**, in `render/responsive_contract_test.go`, together with
@@ -780,24 +807,41 @@ The bar this project is measured against:
   Known Limitations sections. **MET** — [CHANGELOG.md](../CHANGELOG.md) is
   written and carries the sections; v0.2.0 adds Fixed, Added, Changed and
   Known Limitations.
-- CI green on Linux, macOS, and Windows across supported architectures.
-  **PARTIALLY MET.** `CGO_ENABLED=0` cross-compiles are verified for `windows`
-  and `linux/arm64`, and the Windows test file compiles. Nothing has ever been
-  *run* on Windows, and the Windows backend is a stub, so a green Windows CI
-  would today be asserting that a loud error is returned correctly.
-  **As of the v0.4.0 gate there is additionally no green CI run for the current
-  workflow configuration at all**: every action is on a Node 24 major and every
-  runner image is pinned, verified statically and not by a run. The last green
-  badge attests to the previous configuration, so this criterion is not merely
-  partial on Windows — it is unevidenced on all three platforms until the first
-  push lands.
-- **Every widget has a runnable example and a documented public API. NOT MET,
-  and not close.** There are four example programs — `hello`, `markets`,
-  `dashboard`, `search` — and **zero `func Example` functions in the codebase**. Each of
-  the 24 widgets has a documented public API in godoc terms, but none has the
-  runnable, godoc-rendered example this criterion asks for, and `Menu` and
-  `Dialog` have no example program either. This is the largest unmet item in
-  this list and it is stated here rather than dropped.
+- CI green on **Linux and macOS** across supported architectures — **amended
+  from "Linux, macOS, and Windows"** by the v1.0.0 platform decision recorded
+  below, so this criterion now states the target instead of contradicting it
+  ([ADR 0001](adr/0001-backend-strategy.md)). **MET on the amended target.**
+  The `ci` workflow runs 12 checks — `test (ubuntu-24.04)`, `test (macos-15)`,
+  `test (windows-2025)`, `gofmt`, `golangci-lint`, `zero-allocation diff`, and
+  six `cross-compile` legs — and it is green **on the current configuration**:
+  every `ci` run on `main` since `8211716` (2026-10-05, the commit that
+  introduced this configuration and which has not changed since) has passed, and
+  PRs #17, #18 and #19 each merged at **12/12**. The v0.4.0 gate's "no green CI
+  run for the current workflow configuration at all" was true when written and
+  is **false now**; that gate records it as history, this line records the
+  truth. Two things stay true and are not claimed away: nothing has ever been
+  *run* on Windows — a green Windows job asserts only that the stub returns its
+  loud error correctly, which is a reason the platform decision narrows the
+  target rather than a gap in the evidence for Linux and macOS — and the
+  decision's consequence that the Windows CI job "either goes or is relabelled
+  **cross-compile-only**" is **not yet applied**; it still runs the full matrix.
+- **Every widget has a runnable example and a documented public API. MET.**
+  There are four example programs — `hello`, `markets`, `dashboard`, `search` —
+  **and 74 `func Example` functions covering all 24 catalog widgets**, in the
+  eight `widgets/*/example_test.go` files added by PR #17 (each of the eight
+  widget packages also carries a package-level `Example`, so the package itself
+  has a runnable example and not only its widgets). Each of the 24 widgets has a
+  documented public API in godoc terms **and** a godoc-rendered example; every
+  one renders through `widgets/widgettest`, so the `// Output` comment **is** the
+  cell grid the renderer produced — the assertion and the documentation are one
+  string, and cannot drift apart. `Menu` and `Dialog`, the two this criterion
+  used to call out as having no example program, are in the sweep. The one thing
+  it needed: `vocabulary_test.go` gained an `exampleFiles` exception list for
+  the box-drawing rune guard, because a widget whose chrome is a border
+  necessarily writes box-drawing runes into its example source — the same reason
+  `buffer/border_test.go` is already excepted — and the list is explicit rather
+  than suffix-matched so that adding an example package is a deliberate act at
+  the place the rule is written down.
 - Known limitations are enumerated in the docs, not discovered by users.
   **MET** — [CHANGELOG.md](../CHANGELOG.md)'s Known Limitations section, plus
   the "Known Limitations" in [docs/adr/](adr/README.md) and the gaps named in
@@ -812,16 +856,22 @@ will not, and what is deliberately later.
 
 ## The verdict
 
-**v1.0.0 is not honest today.** Three things make it so, and they are
-independent — closing any one leaves the other two. **One of the three has since
-closed**; item 2 below is updated and its remaining substance has moved into the
-risk register:
+**v1.0.0 is not honest today.** Three things made it so, and they were
+independent — closing any one left the other two. **Two of the three have closed
+since this was written**; what keeps the verdict standing is item 2 below plus
+the two housekeeping items still open in the table (8 and 9). Each struck-out
+item keeps its original wording, so the reasoning that opened it is not
+rewritten out of the record:
 
-1. **The project's own bar is not met, by the project's own words.** The
-   "Every widget has a runnable example" criterion above reads **NOT MET, and
-   not close**, and calls itself the largest unmet item. Shipping v1.0.0
-   against a bar this document declares unmet is a contradiction in the
-   release, not a judgement call.
+1. ~~**The project's own bar is not met, by the project's own words.**~~
+   **CLOSED.** The criterion read **NOT MET, and not close** and called itself
+   the largest unmet item; shipping v1.0.0 against a bar this document declared
+   unmet would have been a contradiction in the release, not a judgement call.
+   It now reads **MET** — **74 `func Example` functions across all 24 catalog
+   widgets** (PR #17), each rendered through `widgets/widgettest` so the
+   `// Output` comment is the cell grid. What is left of this item is not the
+   bar but the housekeeping around it: table items 8 (documentation accuracy)
+   and 9 (prose freeze).
 2. **The most consequential architectural decision has now been implemented**,
    which it was not when this was first written — it slipped its stated version
    twice before it landed. `keymap` shipped in v0.6.0, and both named tests
@@ -840,8 +890,13 @@ risk register:
    remains is that `Chord`'s folding rules have met no real terminal, and that
    the two-mechanism overlap is avoidable by application discipline but still not
    handled by the framework.
-3. **CI green is unevidenced on all three platforms** — the last green badge
-   attests to the previous workflow configuration.
+3. ~~**CI green is unevidenced on all three platforms** — the last green badge
+   attests to the previous workflow configuration.~~ **CLOSED.** The current
+   configuration has been run and is green: every `ci` run on `main` since
+   `8211716` (2026-10-05, which introduced it and has not changed since) has
+   passed, and PRs #17, #18 and #19 each merged at **12/12**. "All three
+   platforms" was also the wrong target: the platform decision below narrows
+   v1.0.0 to Linux and macOS.
 
 What is genuinely ready: the *signatures*. This codebase has done the hard part
 of stability design already, and done it deliberately.
@@ -893,14 +948,14 @@ promise requires a platform that has not been built.
 
 | # | Work | Why it gates |
 |---|---|---|
-| 1 | **Green CI evidence** on the current configuration | Minutes. Every other claim rests on it. |
-| 2 | **Behaviour audit of all 24 widgets** | Three of five releases so far exist because of this defect class. Every find after v1.0.0 is a v1.1.0. |
-| 3 | **Cache-poisoning debug mode** (ADR 0007's expensive half) | What makes #2 mechanical rather than a matter of review. Highest leverage per hour here. |
+| 1 | ~~**Green CI evidence** on the current configuration~~ **CLOSED (v0.5.x)** | Minutes, and every other claim rested on it. Evidence: `ci.yml` last changed in `8211716` (2026-10-05) and **every `ci` run on `main` since has passed**; PRs #17, #18 and #19 each merged at **12/12** — `test (ubuntu-24.04)`, `test (macos-15)`, `test (windows-2025)`, `gofmt`, `golangci-lint`, `zero-allocation diff` and six `cross-compile` legs — against that unchanged configuration. |
+| 2 | ~~**Behaviour audit of all 24 widgets**~~ **CLOSED (v0.5.1)** | Three of five releases so far exist because of this defect class, and every find after v1.0.0 would be a v1.1.0. The audit found **seven** instances of the style-application class (two of them making a focused row unreadable) and **no remaining instance** of it across all 24 widgets; #3 is what keeps it that way. |
+| 3 | ~~**Cache-poisoning debug mode** (ADR 0007's expensive half)~~ **CLOSED (v0.5.0)** | What makes #2 mechanical rather than a matter of review, and the highest leverage per hour here. Built as `render/cache_audit.go` — `Config.CacheAudit` arms `poisonLocked`, which corrupts the rect-keyed cache after `Draw` and asserts the next frame is byte-identical — and it **gates the build**. |
 | 4 | ~~**`keymap`** (ADR 0009), with the two named tests~~ **CLOSED** | Shipped in v0.6.0 as `keymap/`, above `Widget.Handle` and with `Widget` unchanged. `TestDispatchIsZeroAllocation`, `TestChordIsSixteenBytes` and `TestParseChordRoundTrips` all pass. `KeyHint`'s help surface is no longer empty: `Describe` computes it from the same tables `Dispatch` walks. **Exercised in v0.6.1** — `examples/hello` dispatches through a registry and `DescribeGrouped` was added for its hint lines. The package still ships with no catalog widget implementing `Commandable` and no palette — both tracked as open, neither blocking. |
 | 5 | ~~**Mouse routing decision + the three wheel defects**~~ **CLOSED** | Decided by [ADR 0010](adr/0010-mouse-routing.md) — widgets hit-test themselves, `Widget` unchanged — and the three wheel defects are fixed and pinned. See below. |
-| 6 | **Colour model: decide it** | A PROPOSED row cannot survive the freeze: if the quantiser is later replaced, every program's 256/16-colour output changes, and that is a v1.1.0 in the first release. |
-| 7 | **`func Example` per widget** | The largest unmet criterion in the project's own bar. Purely additive; zero stability risk. |
-| 8 | **Documentation accuracy pass** | README says "Thirty-plus widgets" against a catalogue of 24, "the eight architecture decisions" against nine, and "Not yet released as a module version" beside a `go get` line. For a project whose product *is* documented honesty, stale headline numbers are a release blocker. |
+| 6 | ~~**Colour model: decide it**~~ **CLOSED (2026-10-06, PR #19)** | The reason it gated was exactly right: a PROPOSED row cannot survive the freeze, because replacing the quantiser later changes every program's 256/16-colour output — a v1.1.0 in the first release. It was decided the only way this row could be decided, by measurement. PR #18's CIEDE2000 audit found the redmean weights inert (`uint8` division made both weights 2) and measured selection error **256: max 21.201, 19.35% above the JND; 16: max 36.821, 37.50%**, with `markets.down` collapsing to grey and colliding with `markets.flat`. PR #19 replaced the quantiser through the existing `buffer.Quantiser` hook: **selection error 0.000 on both rungs, 0 of 281,216 colour-rungs regressed, frame path 224.8 → 6.6 ns/op at 0 allocs**, and every audit threshold pinned at 0 so a silent re-drift fails the test. The alternative — keeping redmean and calling it validated — is rejected on recorded numbers. See the table row above. |
+| 7 | ~~**`func Example` per widget**~~ **CLOSED (PR #17)** | The largest unmet criterion in the project's own bar, and purely additive: **74 `func Example` functions across all 24 catalog widgets**, in the eight `widgets/*/example_test.go` files, every one rendered through `widgets/widgettest` so its `// Output` comment is the cell grid — and each of the eight widget packages carries a package-level `Example` too. It needed one exception to a written rule: `vocabulary_test.go`'s `exampleFiles` list, because a bordered widget's example must name the box-drawing runes it paints (the same reason `buffer/border_test.go` is excepted). Zero stability risk. |
+| 8 | **Documentation accuracy pass** | README says "Thirty-plus widgets" against a catalogue of 24, "the eight architecture decisions" against nine, and "Not yet released as a module version" beside a `go get` line. For a project whose product *is* documented honesty, stale headline numbers are a release blocker. **Still open, partly worked.** Two of those three named claims are corrected elsewhere: the ADR count reads *ten*, and the "not yet released" phrasing is gone — although the `go get` pin it was replaced with still reads **v0.5.2 against a `v0.7.0` tag**, so that half is stale in a new way. The widget-count phrasing is untouched. This pass has corrected the colour-model row, the CI criterion and the README's platform line without closing the item: a pass that stops halfway is not a pass. |
 | 9 | **Prose freeze** | Status block, platform matrix, stale gate sections, and the `keymap` apology paragraph — which **has been rewritten** as a shipped-feature statement in v0.6.0, so what remains is the housekeeping around it. |
 
 ### 5 is bigger than the defect it is filed under — **and it is closed**
@@ -1067,8 +1122,16 @@ late.
 3. **`Chord` normalisation disagreeing with a real terminal.** Nothing in its
    folding rules has met a real tty, and the ADR asks for a byte-stream matrix
    that has not been run. A normalisation fix is a behaviour change.
-4. **The colour quantiser being wrong in a way nobody looked for** — the direct
-   cost of freezing a PROPOSED row.
+4. ~~**The colour quantiser being wrong in a way nobody looked for** — the
+   direct cost of freezing a PROPOSED row.~~ **THIS HAPPENED, AND IS CLOSED —
+   2026-10-06, before any freeze.** It is the one risk on the list that
+   actually materialised: PR #18's audit found the redmean weighting inert and
+   the selection error unacceptable, and PR #19 replaced the quantiser through
+   the existing hook — selection error **0.000 on both rungs**, **0 of 281,216
+   colour-rungs regressed**, every audit threshold pinned at 0. Retired by
+   measurement rather than by luck, and the surviving form of the risk is a
+   rule: a quantiser replacement after v1.0.0 is a release-defining re-audit,
+   which is what gate item 6's thresholds now enforce.
 5. **Windows being discovered by a user after v1.0.0.** Mitigated entirely by
    saying "Linux and macOS" in the first screen.
 6. ~~**Process risk: `keymap` slips a third time.**~~ **RETIRED 2026-10-05.**
@@ -1126,21 +1189,26 @@ Neither is in an ADR, and both would freeze by accident.
 
 ```
 1  green CI evidence          ─┐
-3  cache-poisoning mode       ─┤
+3  cache-poisoning mode       ─┤ CLOSED (v0.5.x)
 2  behaviour audit of 24      ─┴─► mechanical, then human review of what it finds
 
-6  colour model decided       ─┐
-5  mouse routing + 3 wheels   ─┤ CLOSED (v0.5.x)
-4  keymap                     ─┘ CLOSED (v0.6.0) ──► after 2 and 5 landed
+6  colour model decided       ── CLOSED (2026-10-06): audit #18, replacement #19
+5  mouse routing + 3 wheels   ── CLOSED (v0.5.x)
+4  keymap                     ── CLOSED (v0.6.0) ──► after 2 and 5 landed
 
-7  func Example sweep         ──► 24, parallelisable
+7  func Example sweep         ── CLOSED (PR #17) ──► 74 examples, all 24
 8  documentation accuracy     ─┐
 9  prose freeze               ─┴─► then the tag
 ```
 
-Items 1–3 depend on nothing and can start immediately. Items 2 and 3 are the
-long pole in effort. **Item 4 is closed** — it waited on 2 and 5, both of which
+Items 1–3 depended on nothing and started immediately; **all three are closed**
+— the cache-audit mode in v0.5.0, the 24-widget behaviour audit in v0.5.1, and
+green CI evidence from `8211716` onward, re-verified at **12/12** by PRs #17,
+#18 and #19. Items 2 and 3 were the long pole in effort and are done. **Item 4
+is closed** — it waited on 2 and 5, both of which
 landed, and shipped in v0.6.0 with `Widget` unchanged. Everything downstream of
 the documentation freeze no longer waits on it; what item 4 left open is carried
 by the risk register instead, which is the correct place for it now that the
-surface exists.
+surface exists. **Items 6 and 7 are closed** — 6 by the audit and the
+replacement it forced (PRs #18 and #19), 7 by the example sweep (PR #17). What
+is left is 8 and 9, and then the tag.

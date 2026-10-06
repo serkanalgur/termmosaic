@@ -275,7 +275,8 @@ site/content/
 │   ├── input.md                       Decode/Parser/Source, the event model
 │   ├── styling.md                     Style, Span, the authoring rule, the footgun
 │   ├── colour.md                      the ladder, NO_COLOR, the quantiser,
-│   │                                  and that the 256/16 rungs are provisional
+│   │                                  and the audit that validated the 256/16
+│   │                                  rungs (they are no longer "provisional")
 │   ├── text.md                        wrapping, truncation, wide glyphs
 │   ├── responsiveness.md              ClampCount, Budget, Priority; the two rules
 │   ├── borders.md                     the one vocabulary, one Block
@@ -335,9 +336,14 @@ FAQ. Contents, every item traceable to `STATUS.md`:
   present it as a feature gap being closed.
 - **tmux / screen DCS passthrough is a real gap.** Under tmux on a modern
   terminal, key and mouse reporting can be lost.
-- **The 256 and 16 colour rungs are not perceptually validated.** The redmean
-  quantiser has never been checked by a human eye. `buffer.Quantiser` is the
-  escape hatch.
+- **~~The 256 and 16 colour rungs are not perceptually validated.~~ Retired
+  2026-10-06 — no longer a limitation.** The audit this line said had never
+  happened was performed (PR #18): it found the redmean weighting inert and the
+  selection error unacceptable, and PR #19 replaced the quantiser with Lab-space
+  (CIEDE2000) selection through `buffer.Quantiser` — selection error 0.000 on
+  both rungs, every threshold pinned at 0. If `limitations.md` is written after
+  that date, this item must be dropped or told as history; publishing it as
+  current would be false.
 - **Wide characters and grapheme clusters are unbenchmarked.** The semantics are
   implemented (`flagContinuation`); no benchmark exercises them.
 - **Four ADR 0007 §3 tests are still unwritten**, named in the ADR. A

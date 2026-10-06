@@ -271,10 +271,19 @@ checked that assumption instead of inheriting it.
 
 These are tracked in [STATUS.md](../STATUS.md) and are **not** decided:
 
-- Colour model and degradation ladder — **built and working, but PROPOSED rather
-  than decided**: the redmean quantiser to 256 and 16 rungs has never been
-  checked for perceptual acceptability. `buffer.Quantiser` is the drop-in hook.
 - Kitty **graphics** in v1 (the kitty *keyboard* protocol is decided by ADR 0005)
+
+The **colour model and degradation ladder** used to be the first entry in that
+list. It is no longer open — **DECIDED 2026-10-06, on measurement**: PR #18's
+CIEDE2000 audit found the redmean weighting inert (a `uint8` division made both
+rmean weights 2, so the formula was the fixed `2*dr²+4*dg²+2*db²` in gamma-space
+RGB) and measured selection error of **21.201 at 256 and 36.821 at 16**, with
+`markets.down` collapsing to grey at the 16 rung. PR #19 replaced the quantiser
+through the `buffer.Quantiser` hook that was always the intended seam, so
+selection error is now **0.000 at both rungs** with every audit threshold pinned
+at 0. The redmean alternative and the numbers that rejected it are kept in
+`buffer/colour_quantiser_perceptual_test.go` and in the STATUS.md table row, not
+deleted.
 
 The headless backend's "v1 vs v0.5" question is **closed** — ADR 0001 settled it
 in favour of v1, and `headless.MemorySink` exposes the cell buffer rather than
