@@ -13,9 +13,16 @@ actions without changing a single widget signature.
 
 > **Status: pre-alpha.** The renderer, input layer and the full widget catalog
 > are built and tested — 25 packages, 966 tests, zero-allocation frame path —
-> but the API is **not stable** and may break before v1.0. See
-> [docs/STATUS.md](docs/STATUS.md) for what is decided, proposed and open, and
-> [docs/adr/](docs/adr/) for the reasoning behind each decision.
+> but the API is **not stable** and may break before v1.0.
+>
+> **Supported platforms: Linux and macOS.** Windows is a deliberate loud-error
+> stub — every console operation fails loudly instead of half-working — and a
+> Windows console backend is out of scope for v1.0.0
+> ([ADR 0001](docs/adr/0001-backend-strategy.md); decision recorded in
+> [docs/STATUS.md](docs/STATUS.md)).
+>
+> See [docs/STATUS.md](docs/STATUS.md) for what is decided, proposed and open,
+> and [docs/adr/](docs/adr/) for the reasoning behind each decision.
 
 ## Why this exists
 

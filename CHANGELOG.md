@@ -30,6 +30,71 @@ reversed before v1.0.0.
 
 ---
 
+## [Unreleased]
+
+Not yet released, and no version constant has been moved — naming the version is
+a separate release task. Under the release policy above, the colour-quantiser
+fix in this section is a **behaviour change**, so this section can only land in
+a minor.
+
+### Added
+
+- **A runnable `func Example` for every one of the 24 catalog widgets — 74
+  examples**, in the eight `widgets/*/example_test.go` files. **Test-only, no
+  behaviour change**: `go test` compiles and runs them and nothing else reads
+  them. Each of the eight widget packages also carries a package-level
+  `Example`, and every example renders through `widgets/widgettest`, so its
+  `// Output` comment **is** the cell grid the renderer produced — the
+  documentation and the assertion are one string and cannot drift apart. It
+  required one exception in `vocabulary_test.go`: an explicit `exampleFiles`
+  list exempting those files from the box-drawing rune guard, because a widget
+  whose chrome is a border necessarily names the runes it paints (the same reason
+  `buffer/border_test.go` is excepted).
+
+### Fixed
+
+- **The 256/16-colour quantiser selected by fixed-weight RGB rather than
+  perceptual redmean; it now selects in Lab space (CIEDE2000).** **This is a
+  behaviour change — it changes the bytes a program emits at the 256 and 16
+  colour rungs**, so under the policy above it belongs in a **minor** and must
+  not ship in a patch. The audit in `buffer/colour_quantiser_perceptual_test.go`
+  found why the old code was wrong: `rmean/256` and `(255-rmean)/256` divide to
+  zero in `uint8` arithmetic, so both weights were identically 2 and "redmean"
+  was in practice the fixed `2*dr²+4*dg²+2*db²` in gamma-space RGB, flipping the
+  hue of plausible UI colours. Measured before → after, on the audit's own
+  CIEDE2000 metric and its step-5 lattice (140,608 colours × 2 rungs):
+
+  | | redmean (before) | Lab CIEDE2000 (after) |
+  |---|---|---|
+  | Selection error, 256 rung | mean 1.323, refined max **21.201**, 19.35% above the JND | **0.000** everywhere |
+  | Selection error, 16 rung | mean 3.800, refined max **36.821**, 37.50% above the JND | **0.000** everywhere |
+  | Total error, 256 rung (lattice mean) | 6.338 | 5.015 |
+  | Total error, 16 rung (lattice mean) | 17.657 | 13.857 |
+  | Colour-rungs that got worse | — | **0 of 281,216** |
+  | `Nearest256` steady-state frame path | 224.8 ns/op | **6.611 ns/op, 0 allocs** |
+  | `Nearest16` steady-state frame path | 16.02 ns/op | **7.126 ns/op, 0 allocs** |
+
+  Visible consequences: `markets.down` (`#d86a62`) no longer collapses to grey
+  at the 16 rung and collides with `markets.flat` — the up/flat/down trichotomy
+  is green/grey/red — and `#9b3228` brick red lands on a red rather than on
+  olive. Two goldens move, `examples/hello/testdata/hello_256.sgr` and
+  `hello_16.sgr`, the title accent only, each verified better by the audit's own
+  metric; no other golden or test expectation moves. Selection goes through the
+  existing `buffer.Quantiser` hook, so the diff and the encoder are untouched,
+  and steady state is a memo lookup at 0 allocations — only the first use of a
+  colour pays for an exhaustive CIEDE2000 search.
+
+### Known Limitations
+
+- **Retired: "the colour quantiser is unvalidated".** The entries in the 0.1.0
+  and 0.2.0 sections below — the redmean mapping "has never been checked for
+  perceptual acceptability, treat the 256 and 16 rungs as provisional" — are
+  **no longer true**: the check was performed, it failed, and the quantiser was
+  replaced (see Fixed above). Those entries stay where they were written, as
+  history; this is the entry that says so.
+
+---
+
 ## [0.7.0] — 2026-10-06
 
 A minor bump, and the reason is a fourth example: **`examples/search`** — the
@@ -1135,6 +1200,7 @@ Two performance claims that this release turns from assertion into measurement:
   **60 cursor moves and 19,443 bytes, 3.12× the narrow frame** rather than 11×.
   The ASCII path is unchanged. See ADR 0008's amendment, finding 4.
 
+[Unreleased]: https://github.com/serkanalgur/termmosaic/compare/v0.7.0...HEAD
 [0.7.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.7.0
 [0.6.1]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.6.1
 [0.6.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.6.0
