@@ -5,12 +5,12 @@ made. If something here is stale, that is a bug — please open an issue.
 
 **Project stage: v1.0.0, released 2026-10-06 — the first release with a
 stability promise.** The public API is frozen at that tag and Semantic
-Versioning applies from it. The release did not settle everything; what is
-still open:
+Versioning applies from it, **with one documented exception:
+`widgets/widgettest` is explicitly excluded from that promise** — decided
+2026-10-06, see "Two stability hazards" below. It was listed here as an open
+question at release time; that question is now closed. The release did not
+settle everything else; what is still open:
 
-- `widgets/widgettest` is public and therefore frozen at v1.0. Whether to
-  accept that freeze or exclude the package is undecided — see "Two stability
-  hazards" below.
 - The macOS test leg still runs; a further reduction was discussed and not
   done. The Windows test leg was dropped by PR #26 (2026-10-06), so the
   required checks are now 11 — see the CI criterion under "Definition of
@@ -1231,15 +1231,28 @@ because both claims turned out to hold, and it was not obvious that they would.
 
 Neither is in an ADR, and both would freeze by accident.
 
-1. **`widgets/widgettest` is public and therefore frozen by accident.** It
-   appears in no ADR's stability discussion. User test suites will depend on it
-   whether or not that was intended. Decide it: promote it to a decided surface
-   with its own rules, or move it under `internal/` **before** v1.0.0 — before,
-   because afterwards it is frozen and cannot move.
-   **Status 2026-10-06:** v1.0.0 shipped without excluding the package, so its
-   promise covers `widgets/widgettest` by default and the window to move it
-   silently has closed. The decision is still open: accept the freeze and give
-   the package decided rules, or break it in a future release with disclosure.
+1. ~~**`widgets/widgettest` is public and therefore frozen by accident.**~~
+   **DECIDED and CLOSED — 2026-10-06: `widgets/widgettest` is explicitly
+   excluded from the v1.0.0 compatibility promise.** It appears in no ADR's
+   stability discussion, and user test suites would depend on it whether or
+   not that was intended — all 74 `func Example` functions in
+   `widgets/*/example_test.go` import it, so it is public in fact as well as
+   in name. This hazard was kept open at release time with two options on the
+   table (promote it to a decided surface, or move it under `internal/`
+   **before** v1.0.0); v1.0.0 shipped without picking either, which made the
+   promise cover the package by default and closed the window to relocate it
+   silently. **Decision: exclude the package from the promise, explicitly, in
+   the documentation.** It is a test harness whose value depends on evolving
+   alongside the framework — freezing it would either prevent useful helpers
+   from being added or force a major version bump every time one is, and
+   serves nobody either way. The honest resolution at this point is to
+   document the exclusion rather than pretend the freeze is workable. The
+   package is not moved, not renamed, and unchanged in code; the hazard is
+   retired because the promise no longer lands on the package. Recorded in
+   `CHANGELOG.md`'s `[Unreleased]` section; the `## [1.0.0]` "Open at this
+   release" entry naming the package stays as written, because released
+   sections are history. The macOS test leg, `deleteBranchOnMerge` and ADR
+   0003's reference review are separate open items and are unaffected.
 2. **The variadic constructors are an open-ended signature.** Three of the 25
    widget constructors take `...` — `NewList(items ...ListItem)`,
    `NewTable(cols ...Column)`, `NewTree(nodes ...Node)`. That is the friendliest

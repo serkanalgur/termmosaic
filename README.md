@@ -15,7 +15,10 @@ actions without changing a single widget signature.
 > full widget catalog are built and tested — 28 packages, 1,186 tests,
 > zero-allocation frame path. v1.0.0 is the first release that makes a
 > stability promise: the public API is frozen at that tag, and Semantic
-> Versioning applies from it. Known limitations are enumerated in
+> Versioning applies from it — with one documented exception: the test harness
+> `widgets/widgettest` is excluded from that promise, because it must evolve
+> with the framework
+> ([docs/STATUS.md](docs/STATUS.md)). Known limitations are enumerated in
 > [docs/STATUS.md](docs/STATUS.md) and in the Known Limitations sections of
 > [CHANGELOG.md](CHANGELOG.md) — written down, not left for users to discover.
 >
