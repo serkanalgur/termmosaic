@@ -12,7 +12,7 @@ ready-to-use widgets, and a command/keymap layer that binds keys to named
 actions without changing a single widget signature.
 
 > **Status: pre-alpha.** The renderer, input layer and the full widget catalog
-> are built and tested — 25 packages, 966 tests, zero-allocation frame path —
+> are built and tested — 28 packages, 1,186 tests, zero-allocation frame path —
 > but the API is **not stable** and may break before v1.0.
 >
 > **Supported platforms: Linux and macOS.** Windows is a deliberate loud-error
@@ -20,6 +20,9 @@ actions without changing a single widget signature.
 > Windows console backend is out of scope for v1.0.0
 > ([ADR 0001](docs/adr/0001-backend-strategy.md); decision recorded in
 > [docs/STATUS.md](docs/STATUS.md)).
+>
+> **IME composition is out of scope for v1.0.0.** `EventCompose` is reserved;
+> nothing decodes it yet ([ADR 0005](docs/adr/0005-input-decoding.md)).
 >
 > See [docs/STATUS.md](docs/STATUS.md) for what is decided, proposed and open,
 > and [docs/adr/](docs/adr/) for the reasoning behind each decision.
@@ -45,7 +48,7 @@ elegant its renderer is.
 
 ## Design pillars
 
-1. **A complete widget catalog.** Thirty-plus widgets covering layout, forms,
+1. **A complete widget catalog.** Twenty-four widgets covering layout, forms,
    data, and visualization — the things real tools need.
 2. **Data virtualization from day one.** List, Table, and Tree render 100k+
    rows at interactive speed. Not a future roadmap item.
@@ -66,10 +69,10 @@ elegant its renderer is.
 
 ## Installation
 
-Tagged and released through **v0.5.2**. Pin the version:
+Tagged and released through **v0.7.0**. Pin the version:
 
 ```
-go get github.com/serkanalgur/termmosaic@v0.5.2
+go get github.com/serkanalgur/termmosaic@v0.7.0
 ```
 
 ## What's in the box
