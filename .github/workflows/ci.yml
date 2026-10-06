@@ -25,17 +25,19 @@ jobs:
   # visible edit here. Bump these deliberately, in a commit that says why.
   #
   # Pin the matrix legs too: they are the same `-latest` aliases, so leaving
-  # them unpinned would leave three of the five gates exposed to a silent
+  # them unpinned would leave two of the five gates exposed to a silent
   # migration while the others were safe.
 
-  # Primary gate: build, vet, fmt, and race tests across all target platforms.
+  # Primary gate: build, vet, fmt, and race tests across the supported
+  # platforms (Linux and macOS — ADR 0001). Windows is a deliberate
+  # loud-error stub, so its coverage here is the cross-compile legs only.
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        os: [ubuntu-24.04, macos-15]
     steps:
       - uses: actions/checkout@v7
 
@@ -57,9 +59,8 @@ jobs:
         run: go vet ./...
 
       - name: Check formatting
-        # The windows runner defaults to PowerShell, which cannot parse a bash
-        # `if [ -n ... ]` block — it fails with a ParserError before gofmt even
-        # runs. Pin the shell so every matrix leg runs the same commands.
+        # Pin the shell so every matrix leg runs the same commands, whatever
+        # the runner image's default shell is.
         shell: bash
         run: |
           unformatted=$(gofmt -l .)
@@ -73,7 +74,7 @@ jobs:
         # -count=1 bypasses the test-result cache, which is live by default.
         # Without it a manual re-run can serve a cached PASS instead of
         # re-executing tests — a green that did not actually run, which is the
-        # worst possible outcome under a "12/12 green before merge" rule.
+        # worst possible outcome under an "11/11 green before merge" rule.
         run: go test ./... -race -count=1
 
   # Dedicated gofmt gate, separate from the matrix job above so the README can
