@@ -798,11 +798,39 @@ Answered questions have been removed; the reasoning is preserved in
 The bar this project is measured against:
 
 - SemVer honored from v0.1; **no behavioral change in a patch release**.
-  **MET** — every bump so far is minor, v0.1.0 → v0.4.0, and no patch release
-  exists to have violated it. The behavioural changes behind the minors: v0.2.0's
-  `Post` waking the pacer, v0.3.0's `List` and `Table` style fixes, and v0.4.0's
-  `Tree` style fix. Each is listed in
-  [CHANGELOG.md](../CHANGELOG.md) with what changes for a program.
+  **PARTIALLY MET — this line previously claimed a flat MET on a falsehood,
+  and the correction is recorded here rather than quietly substituted.** What
+  it read: "**MET** — every bump so far is minor, v0.1.0 → v0.4.0, and no
+  patch release exists to have violated it." That is false as it stands:
+  releases ran on to v0.7.0, patch releases exist, and **three patch numbers
+  shipped behaviour changes while each called itself "a minor bump" in its own
+  release notes** — a known labelling defect in the release record. The
+  versions are not relabelled and [CHANGELOG.md](../CHANGELOG.md)'s history is
+  not rewritten; this line is where the defect is on record:
+
+  - **v0.5.1** (patch, 2026-10-05) — seven style-application fixes:
+    `Dialog`'s `ChoiceFocusStyle` and `Button`'s focus/disabled styles never
+    reached the label (a focused choice rendered unreadable under default
+    styles), `Table`'s `SelectedStyle`/`ItemStyle` and `HeaderStyle` filled
+    the row but not the cell text, `Menu`'s check glyph and submenu arrow,
+    `Radio`'s focus gutter, and `BarChart`'s axis-label overrun. What several
+    widgets draw changed.
+  - **v0.5.2** (patch, 2026-10-05) — the ADR 0010 wheel hit-test fixes:
+    `form.Tabs`, `form.Select` and `form.Radio` consumed a wheel notch from
+    anywhere on screen; they now consume it only inside `Bounds()`, and that
+    changes `examples/markets` behaviour with them.
+  - **v0.6.1** (patch, 2026-10-05) — `Registry.DescribeGrouped` is new
+    exported API, and `examples/hello`'s pinned hint line and `?` overlay now
+    render from the registry, so rendered text changed for every reader of the
+    screenshot and the golden corpus (**17 golden files moved**).
+
+  The policy is honoured where it matters to a consumer: every behavioural
+  change above is disclosed in [CHANGELOG.md](../CHANGELOG.md) with what
+  changes for a program, and every behavioural change from v0.2.0 to v0.4.0
+  took a minor — v0.2.0's `Post` waking the pacer, v0.3.0's `List` and
+  `Table` style fixes, and v0.4.0's `Tree` style fix. **v0.4.1 is the one
+  clean patch**: a `golang.org/x/term` pin only, no code change and no
+  behaviour change.
 - A hand-maintained `CHANGELOG.md` with Breaking / Added / Fixed /
   Known Limitations sections. **MET** — [CHANGELOG.md](../CHANGELOG.md) is
   written and carries the sections; v0.2.0 adds Fixed, Added, Changed and
@@ -955,7 +983,7 @@ promise requires a platform that has not been built.
 | 5 | ~~**Mouse routing decision + the three wheel defects**~~ **CLOSED** | Decided by [ADR 0010](adr/0010-mouse-routing.md) — widgets hit-test themselves, `Widget` unchanged — and the three wheel defects are fixed and pinned. See below. |
 | 6 | ~~**Colour model: decide it**~~ **CLOSED (2026-10-06, PR #19)** | The reason it gated was exactly right: a PROPOSED row cannot survive the freeze, because replacing the quantiser later changes every program's 256/16-colour output — a v1.1.0 in the first release. It was decided the only way this row could be decided, by measurement. PR #18's CIEDE2000 audit found the redmean weights inert (`uint8` division made both weights 2) and measured selection error **256: max 21.201, 19.35% above the JND; 16: max 36.821, 37.50%**, with `markets.down` collapsing to grey and colliding with `markets.flat`. PR #19 replaced the quantiser through the existing `buffer.Quantiser` hook: **selection error 0.000 on both rungs, 0 of 281,216 colour-rungs regressed, frame path 224.8 → 6.6 ns/op at 0 allocs**, and every audit threshold pinned at 0 so a silent re-drift fails the test. The alternative — keeping redmean and calling it validated — is rejected on recorded numbers. See the table row above. |
 | 7 | ~~**`func Example` per widget**~~ **CLOSED (PR #17)** | The largest unmet criterion in the project's own bar, and purely additive: **74 `func Example` functions across all 24 catalog widgets**, in the eight `widgets/*/example_test.go` files, every one rendered through `widgets/widgettest` so its `// Output` comment is the cell grid — and each of the eight widget packages carries a package-level `Example` too. It needed one exception to a written rule: `vocabulary_test.go`'s `exampleFiles` list, because a bordered widget's example must name the box-drawing runes it paints (the same reason `buffer/border_test.go` is excepted). Zero stability risk. |
-| 8 | **Documentation accuracy pass** | README says "Thirty-plus widgets" against a catalogue of 24, "the eight architecture decisions" against nine, and "Not yet released as a module version" beside a `go get` line. For a project whose product *is* documented honesty, stale headline numbers are a release blocker. **Still open, partly worked.** Two of those three named claims are corrected elsewhere: the ADR count reads *ten*, and the "not yet released" phrasing is gone — although the `go get` pin it was replaced with still reads **v0.5.2 against a `v0.7.0` tag**, so that half is stale in a new way. The widget-count phrasing is untouched. This pass has corrected the colour-model row, the CI criterion and the README's platform line without closing the item: a pass that stops halfway is not a pass. |
+| 8 | **Documentation accuracy pass** | README said "Thirty-plus widgets" against a catalogue of 24, "the eight architecture decisions" against nine, and "Not yet released as a module version" beside a `go get` line — the three claims that opened this item. For a project whose product *is* documented honesty, stale headline numbers are a release blocker. **Still open, partly worked.** All three named claims now read correctly: the ADR count reads *ten*, the "not yet released" phrasing is gone and its replacement `go get` pin reads **`@v0.7.0`**, and the widget-count phrasing says **twenty-four** — the last two corrected by PR #21, which landed after this row last recorded them as stale (it then read **v0.5.2 against a `v0.7.0` tag**, with "the widget-count phrasing is untouched"). This pass has corrected the colour-model row, the CI criterion, the README's platform line and — through PR #21 — the README's widget count and install pin, without closing the item: a pass that stops halfway is not a pass, and nothing yet records the full pass as complete. |
 | 9 | **Prose freeze** | Status block, platform matrix, stale gate sections, and the `keymap` apology paragraph — which **has been rewritten** as a shipped-feature statement in v0.6.0, so what remains is the housekeeping around it. |
 
 ### 5 is bigger than the defect it is filed under — **and it is closed**
