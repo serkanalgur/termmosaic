@@ -57,6 +57,23 @@ reversed before v1.0.0.
 
 ### Changed
 
+- **Refactor (2026-10-07): the three `widgets/data` scrollbar painters are now
+  one unexported function.** `List`, `Table` and `Tree` each carried a
+  byte-identical private `drawScrollbar`; they now call a single
+  `paintScrollbarThumb` in `widgets/data/data.go`, beside the package's other
+  shared helpers. Rendered output is unchanged — thumb arithmetic, the one-cell
+  width, the caller-resolved thumb rune (`█`, or `#` on the ASCII rung via
+  `block.Block.Ascii`) and each widget's track rectangle are exactly what they
+  were, pinned by the existing cell assertions in `widgets/data`'s tests. The
+  track rectangle stays a caller-supplied parameter deliberately: `List` and
+  `Tree` paint over the block interior, while `Table` paints over the body rows
+  below its header, and a shared track would slide the thumb under the Table
+  header. Nothing exported moves and no behaviour changes, so there is no
+  compatibility note. This closes the PROPOSED "standalone reusable
+  `Scrollbar` widget" item in ROADMAP.md: the design review rejected a widget
+  type, and this shared painter is the deduplication that proposal was after.
+  The `data.Pager` proportional-scrollbar and `form.TextArea` wheel-to-scroll
+  PROPOSED items are untouched.
 - **Decision (2026-10-06): `widgets/widgettest` is excluded from the v1.0.0
   stability promise.** The package is public — all 74 `func Example`
   functions in `widgets/*/example_test.go` import it — so v1.0.0's promise
@@ -604,8 +621,18 @@ now private.** Programs that assign them directly will not compile.
   remain — `Select.Marker`, `Gauge.ShowValue`, `BarChart.ShowValue`/`Vertical`/
   `Data`, `Sparkline.Values`/`Braille`, `TextInput.Placeholder`,
   `Checkbox.TriState`, and the `Scrollbar`/`Header` fields on `List`/`Table`/
-  `Tree`. None produced a finding, so none is a confirmed defect, and they are the
-  same shape. The gate does not cover them because no transition names them.
+  `Tree`. None produced a finding, so none is a confirmed defect. For the fields
+  other than `Scrollbar`/`Header`, the reason is still that no transition names
+  them. For `Scrollbar`/`Header` that reason is stale — transitions do name
+  them, at `widgets/cacheaudit/catalog_test.go:151`, `:166`, `:167` and `:195`
+  — but the `Scrollbar` transitions are vacuous, so the gate cannot detect a
+  stale `barW`: `List` and `Tree` default `Scrollbar` to false
+  (`widgets/data/list.go:141`, `widgets/data/tree.go:134`; neither constructor
+  assigns it), so setting the field to false is a no-op; and `Table`'s audit
+  subject has zero rows when its `Scrollbar` transition applies
+  (`widgets/cacheaudit/catalog_test.go:156-166`; `SetRows` comes later at
+  `:168`), so `MaxOffset() <= 0` and the thumb never paints
+  (`widgets/data/data.go:199-201`).
 - `term/terminal_windows_test.go` is still **compile-only** verified
   (`GOOS=windows go vet`) and has never been executed; the Windows backend still
   runs zero tests at runtime.

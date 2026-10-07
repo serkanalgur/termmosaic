@@ -173,3 +173,46 @@ func firstRune(s string) rune {
 	}
 	return 0
 }
+
+// paintScrollbarThumb draws the vertical position thumb of a scrollable view.
+//
+// The thumb's POSITION is the signal; its colour is not. It is a run of one-cell
+// glyphs at track's right edge, and the track is left as the background the
+// host's block already painted, so the position is legible with no colour at
+// all. A collection that fits (maxOffset <= 0) writes nothing, which is itself
+// the "everything is shown" signal.
+//
+// The track rectangle is the CALLER's, and deliberately so: List and Tree paint
+// over the block interior, while Table paints over the body rows alone — below
+// the header, at height rowH, origin t.body.Y. A painter that unified the two
+// would slide the thumb under the Table header, which is why the track is a
+// parameter and not a derived quantity. Only the thumb is drawn; track painting
+// would be new behaviour. The thumb rune and the one-cell width are caller-supplied
+// too — the ASCII decision lives in each widget's adapt, per ADR 0007 §1 rule 5.
+//
+// The arithmetic is the three widgets' own, computed per call and cached nowhere:
+// the thumb is the visible fraction of the collection clamped to [1, h], placed
+// by the offset within the track's slack, all in integers so no float reaches a
+// cell. It allocates nothing — ints and a rect in, SetCell writes out — because
+// it is on the frame path.
+func paintScrollbarThumb(buf *buffer.Buffer, track buffer.Rect, offset, maxOffset, visible, count int, st buffer.Style, thumb rune) {
+	if maxOffset <= 0 || track.H < 1 {
+		return
+	}
+	h := track.H
+	thumbH := h * visible / count
+	if thumbH < 1 {
+		thumbH = 1
+	}
+	if thumbH > h {
+		thumbH = h
+	}
+	start := 0
+	if slack := h - thumbH; slack > 0 {
+		start = slack * offset / maxOffset
+	}
+	c := st.Resolved().Cell(thumb)
+	for y := 0; y < thumbH; y++ {
+		buf.SetCell(track.Right()-1, track.Y+start+y, c)
+	}
+}

@@ -629,7 +629,7 @@ func (t *Tree) Draw(buf *buffer.Buffer) {
 	tree := t
 	t.vm.ForEach(t.body, buf, tree.drawRow)
 	if t.barW > 0 {
-		t.drawScrollbar(buf, in)
+		paintScrollbarThumb(buf, in, t.vm.Offset(), t.vm.MaxOffset(), t.vm.Visible(), t.vm.Count(), t.ScrollbarStyle, t.thumbRune)
 	}
 }
 
@@ -692,30 +692,6 @@ func (t *Tree) drawRow(dst *buffer.Buffer, row buffer.Rect, i int) {
 	// takes the next line as unconditional is wrong in exactly that way.
 	label := buffer.Rect{X: x + expanderW, Y: row.Y, W: row.Right() - x - expanderW, H: 1}
 	paintRow(dst, label, t.labels[node], 0, t.mark, bg, st)
-}
-
-// drawScrollbar paints the vertical position thumb, as in List and Table.
-func (t *Tree) drawScrollbar(buf *buffer.Buffer, in buffer.Rect) {
-	if t.vm.MaxOffset() <= 0 || in.H <= 0 {
-		return
-	}
-	h := in.H
-	x := in.Right() - 1
-	thumbH := h * t.vm.Visible() / t.vm.Count()
-	if thumbH < 1 {
-		thumbH = 1
-	}
-	if thumbH > h {
-		thumbH = h
-	}
-	start := 0
-	if slack := h - thumbH; slack > 0 {
-		start = slack * t.vm.Offset() / t.vm.MaxOffset()
-	}
-	c := t.ScrollbarStyle.Resolved().Cell(t.thumbRune)
-	for y := 0; y < thumbH; y++ {
-		buf.SetCell(x, in.Y+start+y, c)
-	}
 }
 
 // adapt recomputes everything derived from the interior: the rect-keyed cache of

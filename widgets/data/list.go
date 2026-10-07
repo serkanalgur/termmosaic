@@ -130,8 +130,9 @@ type List struct {
 	// text. It should carry an attribute as well as a colour, because the marker
 	// is the colour-independent signal and the style is only reinforcement.
 	SelectedStyle buffer.Style
-	// ScrollbarStyle is the rendition of the scrollbar thumb. The thumb's
-	// POSITION is the signal; its colour is not.
+	// ScrollbarStyle is the rendition of the scrollbar thumb; what the thumb's
+	// position signals rather than its colour is documented once, on the shared
+	// painter in data.go.
 	ScrollbarStyle buffer.Style
 
 	// Scrollbar draws the vertical position indicator. It is a field rather than
@@ -417,7 +418,7 @@ func (l *List) Draw(buf *buffer.Buffer) {
 	l.vm.ForEach(view, buf, list.drawRow)
 
 	if l.barW > 0 {
-		l.drawScrollbar(buf, in)
+		paintScrollbarThumb(buf, in, l.vm.Offset(), l.vm.MaxOffset(), l.vm.Visible(), l.vm.Count(), l.ScrollbarStyle, l.thumbRune)
 	}
 }
 
@@ -488,42 +489,6 @@ func (l *List) drawRow(dst *buffer.Buffer, row buffer.Rect, i int) {
 			mst = l.SelectedStyle
 		}
 		dst.SetCell(row.X, row.Y, mst.Resolved().Cell(l.markerRune))
-	}
-}
-
-// drawScrollbar paints the vertical position thumb on the rightmost column of
-// the interior.
-//
-// The thumb is a run of full-block glyphs and the track is left as the background
-// the block painted, so the position is legible with no colour at all. The thumb
-// is sized by the visible fraction of the collection and placed by the offset,
-// both computed here with integer arithmetic so no float ever reaches a cell.
-// A collection that fits has no thumb, which is itself the "everything is
-// shown" signal.
-func (l *List) drawScrollbar(buf *buffer.Buffer, in buffer.Rect) {
-	if l.vm.MaxOffset() <= 0 {
-		return
-	}
-	h := in.H
-	if h < 1 {
-		return
-	}
-	x := in.Right() - 1
-
-	thumbH := h * l.vm.Visible() / l.vm.Count()
-	if thumbH < 1 {
-		thumbH = 1
-	}
-	if thumbH > h {
-		thumbH = h
-	}
-	start := 0
-	if slack := h - thumbH; slack > 0 {
-		start = slack * l.vm.Offset() / l.vm.MaxOffset()
-	}
-	c := l.ScrollbarStyle.Resolved().Cell(l.thumbRune)
-	for y := 0; y < thumbH; y++ {
-		buf.SetCell(x, in.Y+start+y, c)
 	}
 }
 
