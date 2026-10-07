@@ -37,6 +37,12 @@ reversed before v1.0.0.
 
 ## [Unreleased]
 
+Nothing yet.
+
+---
+
+## [1.1.0] — 2026-10-07
+
 ### Fixed
 
 - **Documentation corrections for the v1.0.0 release** (docs only — no code, no
@@ -1346,7 +1352,8 @@ Two performance claims that this release turns from assertion into measurement:
   **60 cursor moves and 19,443 bytes, 3.12× the narrow frame** rather than 11×.
   The ASCII path is unchanged. See ADR 0008's amendment, finding 4.
 
-[Unreleased]: https://github.com/serkanalgur/termmosaic/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/serkanalgur/termmosaic/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v1.1.0
 [1.0.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v1.0.0
 [0.7.0]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.7.0
 [0.6.1]: https://github.com/serkanalgur/termmosaic/releases/tag/v0.6.1
