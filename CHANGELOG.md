@@ -43,7 +43,15 @@ Nothing yet.
 
 ## [1.1.0] — 2026-10-07
 
-### Fixed
+**A minor bump, and the reason is the `widgets/widgettest` decision below:
+`widgets/widgettest` is excluded from the v1.0.0 stability promise.** That
+exclusion narrows what v1.0.0 promised — the package is public, so v1.0.0's
+promise would have covered it by default — and a change to the stability
+contract cannot ride under a patch number. The refactor and the documentation
+corrections ride with it; none of the three adds, changes or removes an
+exported symbol.
+
+### Changed
 
 - **Documentation corrections for the v1.0.0 release** (docs only — no code, no
   version constant, no workflow change). The README status block and install
@@ -59,9 +67,7 @@ Nothing yet.
   recorded in `docs/STATUS.md`'s stage note: `deleteBranchOnMerge`, the macOS
   test leg, and ADR 0003's third-party reference review. (The
   `widgets/widgettest` freeze decision listed here at the time has since been
-  decided — 2026-10-06, see the Changed entry below.)
-
-### Changed
+  decided — 2026-10-06, see the entry below.)
 
 - **Refactor (2026-10-07): the three `widgets/data` scrollbar painters are now
   one unexported function.** `List`, `Table` and `Tree` each carried a
