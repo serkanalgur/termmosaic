@@ -191,8 +191,10 @@ type Table struct {
 	ItemStyle     buffer.Style
 	SelectedStyle buffer.Style
 
-	// Scrollbar draws the vertical thumb on the rightmost interior column, and
-	// ScrollbarStyle is its rendition. The thumb's POSITION is the signal.
+	// Scrollbar draws the vertical thumb on the rightmost interior column, over
+	// the body rows below the header; ScrollbarStyle is its rendition. What the
+	// thumb's position signals rather than its colour is documented once, on the
+	// shared painter in data.go.
 	Scrollbar      bool
 	ScrollbarStyle buffer.Style
 
@@ -596,7 +598,12 @@ func (t *Table) Draw(buf *buffer.Buffer) {
 		t.vm.ForEach(view, buf, table.drawRow)
 	}
 	if t.barW > 0 {
-		t.drawScrollbar(buf, in)
+		// The track is the body-height strip at the interior's right edge: the
+		// thumb must stay below the header, so its origin is body.Y and its
+		// height is rowH, while its column is the interior's rightmost one —
+		// exactly where drawScrollbar used to write.
+		track := buffer.Rect{X: in.Right() - scrollbarW, Y: t.body.Y, W: scrollbarW, H: t.rowH}
+		paintScrollbarThumb(buf, track, t.vm.Offset(), t.vm.MaxOffset(), t.vm.Visible(), t.vm.Count(), t.ScrollbarStyle, t.thumbRune)
 	}
 }
 
@@ -735,31 +742,6 @@ func (t *Table) drawCell(buf *buffer.Buffer, row buffer.Rect, c int, spans []buf
 	}
 	x := start + t.cols[c].Align.Offset(visW, content)
 	buf.SetSpansWindowIn(x, end, row.Y, spans, skip, t.mark)
-}
-
-// drawScrollbar paints the vertical position thumb over the body rows, as in
-// List.
-func (t *Table) drawScrollbar(buf *buffer.Buffer, in buffer.Rect) {
-	if t.vm.MaxOffset() <= 0 || t.rowH <= 0 {
-		return
-	}
-	h := t.rowH
-	x := in.Right() - 1
-	thumbH := h * t.vm.Visible() / t.vm.Count()
-	if thumbH < 1 {
-		thumbH = 1
-	}
-	if thumbH > h {
-		thumbH = h
-	}
-	start := 0
-	if slack := h - thumbH; slack > 0 {
-		start = slack * t.vm.Offset() / t.vm.MaxOffset()
-	}
-	c := t.ScrollbarStyle.Resolved().Cell(t.thumbRune)
-	for y := 0; y < thumbH; y++ {
-		buf.SetCell(x, t.body.Y+start+y, c)
-	}
 }
 
 // adapt recomputes everything derived from the interior.
